@@ -1,0 +1,23 @@
+# Dependencias e builds
+node_modules/
+dist/
+build/
+.wrangler/
+.cache/
+
+# Ambiente local e segredos
+.env
+.env.*
+*.local
+
+# Sistema operacional
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
