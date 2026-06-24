@@ -1922,7 +1922,10 @@ function renderSidebarMenu(){
       ['extrajudiciais','handshake','Todos os Extrajudiciais'],['cartorio','bell','Notificações'],['cartorio','chat','Negociações'],['contratos','handshake','Acordos'],['documentos','folder','Documentos']
     ])}
     ${grupoMenu('djen','bell','DJEN','djen',[
-      ['djen','file','Publicações Novas'],['djen','clock','Pendentes'],['djen','check','Lidas'],['djen','link','Vinculadas']
+      ['djen','file','Publicações Novas',"ir('djen');setTimeout(()=>pDjen&&pDjen('nova'),300)"],
+      ['djen','clock','Pendentes',"ir('djen');setTimeout(()=>pDjen&&pDjen('pendente'),300)"],
+      ['djen','check','Lidas',"ir('djen');setTimeout(()=>pDjen&&pDjen('lida'),300)"],
+      ['djen','link','Vinculadas',"ir('djen');setTimeout(()=>pDjen&&pDjen('vinculada'),300)"]
     ])}
     ${grupoMenu('alvaras','alvara','Alvarás','alvaras',[
       ['novo-alvara','plus','Novos Alvarás',"ir('alvaras');setTimeout(()=>novoAlvara&&novoAlvara(),250)"],['alvaras','clock','Aguardando Saque'],['alvaras','bank','Sacados'],['alvaras','money','Repassados'],['alvaras','check','Finalizados']
@@ -1931,10 +1934,18 @@ function renderSidebarMenu(){
       ['financeiro','briefcase','Honorários'],['cartorio','pin','Cobranças'],['financeiro','check','Recebimentos'],['nfe','receipt','NF-e'],['relatorios','chart','Relatórios']
     ])}
     ${grupoMenu('atendimento','atendimento','Atendimento','atendimento',[
-      ['atendimento','plus','Novo Atendimento'],['atendimento','clock','Histórico'],['documentos','mic','Áudios'],['relatorios','chart','Relatórios'],['documentacao','file','Gerar Documentos']
+      ['atendimento','plus','Novo Atendimento',"ir('atendimento');setTimeout(()=>novoAtendimentoGlobal&&novoAtendimentoGlobal(),300)"],
+      ['atendimento','clock','Histórico'],
+      ['atendimento-audios','mic','Áudios',"ir('atendimento');setTimeout(()=>pAtendimentoAudios&&pAtendimentoAudios(),300)"],
+      ['atendimento-rel','chart','Relatórios',"ir('atendimento');setTimeout(()=>pAtendimentoRelatorios&&pAtendimentoRelatorios(),300)"],
+      ['atendimento-docs','file','Gerar Documentos',"ir('atendimento');setTimeout(()=>pAtendimentoDocumentos&&pAtendimentoDocumentos(),300)"]
     ])}
     ${grupoMenu('becker-ia','brain','Becker IA','becker-ia',[
-      ['becker-ia','mic','Transcrição de Áudio'],['becker-ia','file','Resumo de Atendimento'],['becker-ia','judicial','Resumo Processual'],['becker-ia','search','Jurisprudência'],['becker-ia','file','Geração de Documentos']
+      ['becker-ia','mic','Transcrição de Áudio',"ir('becker-ia');setTimeout(()=>pBeckerIA&&pBeckerIA('transcricao'),300)"],
+      ['becker-ia','file','Resumo de Atendimento',"ir('becker-ia');setTimeout(()=>pBeckerIA&&pBeckerIA('resumo-atend'),300)"],
+      ['becker-ia','judicial','Resumo Processual',"ir('becker-ia');setTimeout(()=>pBeckerIA&&pBeckerIA('resumo-proc'),300)"],
+      ['becker-ia','search','Jurisprudência',"ir('becker-ia');setTimeout(()=>pBeckerIA&&pBeckerIA('jurisprudencia'),300)"],
+      ['becker-ia','file','Geração de Documentos',"ir('becker-ia');setTimeout(()=>pBeckerIA&&pBeckerIA('documentos'),300)"]
     ])}
     ${grupoMenu('tarefas','tarefas','Tarefas','tarefas',[
       ['tarefas','tarefas','Minhas Tarefas'],['tarefas','clientes','Equipe'],['tarefas','check','Concluídas']
@@ -2183,7 +2194,7 @@ function ir(pagina){
     movimentacoes:pMovimentacoes,prazos:pPrazos,audiencias:pAudiencias,
     financeiro:pFinanceiro,documentos:pDocumentos,datajud:pDatajud,
     config:pConfig,contratos:pModuloSimples,cartorio:pModuloSimples,
-    nfe:pModuloSimples,documentacao:pModuloSimples,extrajudiciais:pModuloSimples,djen:pModuloSimples,atendimento:pAtendimento,tarefas:pTarefas,alvaras:pAlvaras,
+    nfe:pModuloSimples,documentacao:pModuloSimples,extrajudiciais:pModuloSimples,djen:pDjen,atendimento:pAtendimento,tarefas:pTarefas,alvaras:pAlvaras,
     estatisticas:pDesempenho,desempenho:pDesempenho,cibele:pCibele,usuarios:pUsuarios,
     relatorios:pRelatorios,'becker-ia':pBeckerIA
   };
@@ -4239,28 +4250,334 @@ async function carregarRelatorios(){
   }
 }
 
-// ---- BECKER IA ----
-function pBeckerIA(){
+
+// ---- DJEN ----
+async function pDjen(statusFiltro){
+  const status=statusFiltro||'nova';
+  const labels={nova:'Publicações Novas',pendente:'Pendentes',lida:'Lidas',vinculada:'Vinculadas'};
+  const cores={nova:'var(--gold)',pendente:'var(--amarelo)',lida:'var(--verde)',vinculada:'#60a5fa'};
+  const TIPOS_DJEN=['DataJud','TJSC/eproc','Tribunal','Diário Oficial','JusBrasil','Manual','Projuris'];
+  const c=document.getElementById('conteudo');
+  c.innerHTML='<div style="text-align:center;padding:60px;color:rgba(255,255,255,.2)">Carregando publicações...</div>';
+
+  const tabs=Object.entries(labels).map(([k,v])=>`
+    <button class="btn-tab ${k===status?'ativo':''}" onclick="pDjen('${k}')" style="font-size:12px;padding:6px 14px">${v}</button>
+  `).join('');
+
+  const res=await fetch(`${SUPA_URL}/rest/v1/movimentacoes?djen_status=eq.${status}&tipo=in.(${TIPOS_DJEN.map(t=>`"${t}"`).join(',')})&select=*,processos(numero,clientes(nome))&order=data.desc&limit=100`,{
+    headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`}
+  });
+  const rows=res.ok?await res.json():[];
+
+  c.innerHTML=`<div style="max-width:1000px;margin:0 auto;padding:24px 16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+      <h2 style="margin:0;font-size:20px;font-weight:700">🔔 DJEN</h2>
+      ${status==='nova'?`<button class="btn btn-sm" onclick="djenMarcarTodasLidas()" style="font-size:12px">✓ Marcar todas como lidas</button>`:''}
+    </div>
+    <div class="tabs" style="margin-bottom:20px;display:flex;gap:6px;flex-wrap:wrap">${tabs}</div>
+    <div class="card"><div class="card-body" style="padding:0">
+      ${!rows.length?`<div class="empty-state" style="padding:40px"><div class="icon">🔔</div><p>Nenhuma publicação ${labels[status]?.toLowerCase()||''}.</p></div>`:`
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="border-bottom:1px solid rgba(255,255,255,.08)">
+          <th style="padding:12px 16px;text-align:left;font-size:11px;color:rgba(255,255,255,.4);font-weight:600;text-transform:uppercase">Data</th>
+          <th style="padding:12px 16px;text-align:left;font-size:11px;color:rgba(255,255,255,.4);font-weight:600;text-transform:uppercase">Processo</th>
+          <th style="padding:12px 16px;text-align:left;font-size:11px;color:rgba(255,255,255,.4);font-weight:600;text-transform:uppercase">Cliente</th>
+          <th style="padding:12px 16px;text-align:left;font-size:11px;color:rgba(255,255,255,.4);font-weight:600;text-transform:uppercase">Tipo</th>
+          <th style="padding:12px 16px;text-align:left;font-size:11px;color:rgba(255,255,255,.4);font-weight:600;text-transform:uppercase">Publicação</th>
+          <th style="padding:12px 4px;text-align:right;font-size:11px;color:rgba(255,255,255,.4);font-weight:600;text-transform:uppercase">Ações</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(m=>`<tr id="djen-row-${m.id}" style="border-bottom:1px solid rgba(255,255,255,.04);transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background=''">
+            <td style="padding:12px 16px;font-size:12px;white-space:nowrap;color:rgba(255,255,255,.6)">${m.data?new Date(m.data+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}):'-'}</td>
+            <td style="padding:12px 16px;font-size:12px;font-weight:600">${m.processos?.numero||'-'}</td>
+            <td style="padding:12px 16px;font-size:12px;color:rgba(255,255,255,.7)">${m.processos?.clientes?.nome||'-'}</td>
+            <td style="padding:12px 16px"><span style="background:rgba(255,255,255,.07);padding:2px 8px;border-radius:20px;font-size:11px">${m.tipo||'-'}</span></td>
+            <td style="padding:12px 16px;font-size:12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgba(255,255,255,.75)" title="${(m.descricao||'').replace(/"/g,'&quot;')}">${m.descricao||'-'}</td>
+            <td style="padding:12px 8px;text-align:right;white-space:nowrap">
+              ${status!=='lida'?`<button class="btn-icon" title="Marcar como lida" onclick="djenAtualizarStatus(${m.id},'lida','${status}')">✓</button>`:''}
+              ${status==='nova'?`<button class="btn-icon" title="Marcar como pendente" onclick="djenAtualizarStatus(${m.id},'pendente','${status}')">⏳</button>`:''}
+              ${status!=='vinculada'?`<button class="btn-icon" title="Vincular a processo" onclick="djenAtualizarStatus(${m.id},'vinculada','${status}')">🔗</button>`:''}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`}
+    </div></div>
+  </div>`;
+}
+
+async function djenAtualizarStatus(id,novoStatus,statusAtual){
+  const r=await fetch(`${SUPA_URL}/rest/v1/movimentacoes?id=eq.${id}`,{
+    method:'PATCH',
+    headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal'},
+    body:JSON.stringify({djen_status:novoStatus})
+  });
+  if(r.ok){
+    const row=document.getElementById(`djen-row-${id}`);
+    if(row)row.style.opacity='0.3';
+    toast(`Marcado como ${novoStatus}.`,'ok');
+    setTimeout(()=>pDjen(statusAtual),600);
+  }else{toast('Erro ao atualizar.','erro');}
+}
+
+async function djenMarcarTodasLidas(){
+  if(!confirm('Marcar todas as publicações novas como lidas?'))return;
+  const TIPOS_DJEN=['DataJud','TJSC/eproc','Tribunal','Diário Oficial','JusBrasil','Manual','Projuris'];
+  const r=await fetch(`${SUPA_URL}/rest/v1/movimentacoes?djen_status=eq.nova&tipo=in.(${TIPOS_DJEN.map(t=>`"${t}"`).join(',')})`,{
+    method:'PATCH',
+    headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal'},
+    body:JSON.stringify({djen_status:'lida'})
+  });
+  if(r.ok){toast('Todas marcadas como lidas.','ok');pDjen('nova');}
+  else{toast('Erro ao atualizar.','erro');}
+}
+
+// ---- ATENDIMENTO ÁUDIOS ----
+function pAtendimentoAudios(){
   document.getElementById('conteudo').innerHTML=`
-  <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
-  <div class="card" style="max-width:600px;margin:0 auto">
-    <div class="card-body" style="padding:40px 32px;text-align:center">
-      <div style="font-size:48px;margin-bottom:16px">🤖</div>
-      <h3 style="color:var(--azul3);margin-bottom:10px;font-size:20px">Becker IA</h3>
-      <p style="color:#A1A1AA;font-size:13px;line-height:1.8;margin-bottom:24px">
-        Integração com IA jurídica em desenvolvimento.<br>
-        Funcionalidades previstas:
+  <div style="max-width:800px;margin:0 auto;padding:24px 16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+      <h2 style="margin:0;font-size:20px;font-weight:700">🎙️ Áudios de Atendimento</h2>
+    </div>
+    <div class="card"><div class="card-body" style="text-align:center;padding:48px 32px">
+      <div style="font-size:56px;margin-bottom:16px">🎙️</div>
+      <h3 style="color:var(--azul3);margin-bottom:12px;font-size:18px">Gravação e Transcrição de Áudios</h3>
+      <p style="color:rgba(255,255,255,.5);font-size:13px;line-height:1.8;margin-bottom:24px;max-width:420px;margin-left:auto;margin-right:auto">
+        Grave áudios diretamente no sistema ou faça upload para vincular a um atendimento e gerar transcrição automática.
       </p>
-      <div style="text-align:left;background:rgba(13,27,42,0.8);border-radius:10px;padding:16px 20px">
-        ${['📄 Resumo automático de processos','📋 Leitura e resumo de PDFs','🔍 Pesquisa no banco de dados por linguagem natural','👤 Consulta rápida de clientes e processos','📊 Relatórios inteligentes','⏰ Análise de prazos e riscos','✍️ Sugestão de peças processuais'].map(f=>`
-        <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#D4D4D8">${f}</div>`).join('')}
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="toast('Gravação via microfone em configuração.','info')">🎤 Gravar Áudio</button>
+        <button class="btn" onclick="toast('Upload de áudio em configuração.','info')" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)">📁 Upload de Arquivo</button>
       </div>
-      <div style="margin-top:20px;font-size:11px;color:#52525B">
-        IA sugere → Usuário revisa → Usuário confirma → Sistema salva<br>
-        Nenhuma ação automática sem confirmação humana.
+      <p style="font-size:11px;color:rgba(255,255,255,.25);margin-top:20px">Integração com transcrição automática em configuração.</p>
+    </div></div>
+  </div>`;
+}
+
+// ---- ATENDIMENTO RELATÓRIOS ----
+async function pAtendimentoRelatorios(){
+  const c=document.getElementById('conteudo');
+  c.innerHTML='<div style="text-align:center;padding:60px;color:rgba(255,255,255,.2)">Carregando relatórios...</div>';
+  const res=await fetch(`${SUPA_URL}/rest/v1/atendimentos?select=tipo,data_atendimento,clientes(nome)&order=data_atendimento.desc&limit=500`,{
+    headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`}
+  });
+  const rows=res.ok?await res.json():[];
+  const totalPorTipo={};
+  const totalPorMes={};
+  for(const r of rows){
+    totalPorTipo[r.tipo||'Outro']=(totalPorTipo[r.tipo||'Outro']||0)+1;
+    const mes=r.data_atendimento?r.data_atendimento.substring(0,7):'';
+    if(mes)totalPorMes[mes]=(totalPorMes[mes]||0)+1;
+  }
+  const meses=Object.entries(totalPorMes).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,6);
+  const tipos=Object.entries(totalPorTipo).sort((a,b)=>b[1]-a[1]);
+  const maxTipo=Math.max(...tipos.map(t=>t[1]),1);
+  c.innerHTML=`<div style="max-width:900px;margin:0 auto;padding:24px 16px">
+    <h2 style="margin:0 0 24px;font-size:20px;font-weight:700">📊 Relatórios de Atendimento</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="card"><div class="card-header"><h3>Por Tipo</h3></div>
+        <div class="card-body">
+          ${tipos.map(([tipo,qtd])=>`
+          <div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+              <span>${tipo}</span><span style="font-weight:600">${qtd}</span>
+            </div>
+            <div style="background:rgba(255,255,255,.06);border-radius:4px;height:6px">
+              <div style="background:var(--gold);border-radius:4px;height:6px;width:${Math.round(qtd/maxTipo*100)}%;transition:.3s"></div>
+            </div>
+          </div>`).join('')}
+          ${!tipos.length?'<p style="color:rgba(255,255,255,.3);font-size:13px">Sem dados.</p>':''}
+        </div>
+      </div>
+      <div class="card"><div class="card-header"><h3>Por Mês</h3></div>
+        <div class="card-body">
+          ${meses.map(([mes,qtd])=>{
+            const [ano,m]=mes.split('-');
+            const nomeMes=new Date(parseInt(ano),parseInt(m)-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px">
+              <span style="text-transform:capitalize">${nomeMes}</span>
+              <span style="font-weight:700;color:var(--gold)">${qtd}</span>
+            </div>`;
+          }).join('')}
+          ${!meses.length?'<p style="color:rgba(255,255,255,.3);font-size:13px">Sem dados.</p>':''}
+          <div style="padding-top:12px;font-size:12px;color:rgba(255,255,255,.4)">Total: <strong style="color:var(--texto)">${rows.length}</strong> atendimentos</div>
+        </div>
       </div>
     </div>
   </div>`;
+}
+
+// ---- ATENDIMENTO GERAR DOCUMENTOS ----
+function pAtendimentoDocumentos(){
+  document.getElementById('conteudo').innerHTML=`
+  <div style="max-width:800px;margin:0 auto;padding:24px 16px">
+    <h2 style="margin:0 0 24px;font-size:20px;font-weight:700">📄 Gerar Documentos</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">
+      ${[
+        ['✉️','Notificação Extrajudicial','Notificação padrão ao banco/credor'],
+        ['📄','Carta de Representação','Autorização para o escritório'],
+        ['📋','Declaração de Hipossuficiência','Para fins de gratuidade'],
+        ['🔄','Pedido de Renegociação','Proposta de acordo/parcelamento'],
+        ['⚖️','Petição de Urgência','Tutela de urgência/liminar'],
+        ['📊','Planilha de Débito','Cálculo de valores contestados']
+      ].map(([ico,nome,desc])=>`
+      <div class="card" style="cursor:pointer;transition:.2s" onmouseover="this.style.background='rgba(201,165,92,.08)'" onmouseout="this.style.background=''" onclick="toast('Template \"${nome}\" em configuração.','info')">
+        <div class="card-body" style="padding:20px;text-align:center">
+          <div style="font-size:32px;margin-bottom:8px">${ico}</div>
+          <div style="font-size:12px;font-weight:600;color:rgba(255,255,255,.85);margin-bottom:4px">${nome}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.35);line-height:1.4">${desc}</div>
+        </div>
+      </div>`).join('')}
+    </div>
+    <p style="font-size:11px;color:rgba(255,255,255,.25);margin-top:16px;text-align:center">Templates com preenchimento automático via dados do cliente/processo em configuração.</p>
+  </div>`;
+}
+
+// ---- BECKER IA ----
+const BECKER_IA_URL='https://bpzuktssvdosxlxbaeyl.supabase.co/functions/v1/becker-juris';
+const BECKER_IA_METHODOLOGY='8cb89546-297d-4734-9386-73960ccfa9ef';
+
+function pBeckerIA(modo){
+  const modos={
+    'transcricao':'Transcrição de Áudio',
+    'resumo-atend':'Resumo de Atendimento',
+    'resumo-proc':'Resumo Processual',
+    'jurisprudencia':'Jurisprudência',
+    'documentos':'Geração de Documentos'
+  };
+  const modoAtivo=modo||'jurisprudencia';
+  const c=document.getElementById('conteudo');
+
+  const tabs=Object.entries(modos).map(([k,v])=>`
+    <button class="btn-tab ${k===modoAtivo?'ativo':''}" onclick="pBeckerIA('${k}')" style="font-size:12px;padding:6px 14px">${v}</button>
+  `).join('');
+
+  let corpo='';
+  if(modoAtivo==='jurisprudencia'){
+    corpo=`
+    <div style="max-width:700px;margin:0 auto">
+      <p style="color:rgba(255,255,255,.5);font-size:13px;margin-bottom:20px">Pesquise jurisprudência verificada do TJSC e STJ na base Becker.</p>
+      <div class="card"><div class="card-body">
+        <div class="form-field" style="margin-bottom:16px">
+          <label style="font-size:11px;font-weight:600;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Tema ou tese jurídica *</label>
+          <textarea id="ia-query" rows="3" style="width:100%;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:14px;resize:vertical" placeholder="Ex: RMC — reserva de margem consignável sem autorização, cobrança indevida de seguro prestamista..."></textarea>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <select id="ia-tribunal" style="background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 12px;color:var(--texto);font-family:inherit;font-size:13px">
+            <option value="">Todos os tribunais</option>
+            <option value="TJSC">TJSC</option>
+            <option value="STJ">STJ</option>
+            <option value="STF">STF</option>
+          </select>
+          <button class="btn btn-primary" onclick="beckerIABuscar()" style="flex:1;min-width:160px">🔍 Pesquisar Jurisprudência</button>
+        </div>
+      </div></div>
+      <div id="ia-resultado" style="margin-top:20px"></div>
+    </div>`;
+  } else if(modoAtivo==='transcricao'){
+    corpo=`<div style="max-width:600px;margin:0 auto"><div class="card"><div class="card-body" style="text-align:center;padding:40px">
+      <div style="font-size:48px;margin-bottom:16px">🎙️</div>
+      <h3 style="color:var(--azul3);margin-bottom:12px">Transcrição de Áudio</h3>
+      <p style="color:rgba(255,255,255,.5);font-size:13px;line-height:1.8;margin-bottom:20px">Faça upload de um arquivo de áudio para transcrição automática.</p>
+      <input type="file" id="ia-audio-file" accept="audio/*" style="display:none" onchange="beckerIATranscricao(this)">
+      <button class="btn btn-primary" onclick="document.getElementById('ia-audio-file').click()">📁 Selecionar Áudio</button>
+      <p style="font-size:11px;color:rgba(255,255,255,.3);margin-top:12px">Formatos: MP3, MP4, M4A, WAV, OGG — Máx. 25MB<br>Integração com Whisper / Google Speech em configuração.</p>
+    </div></div></div>`;
+  } else if(modoAtivo==='resumo-atend'){
+    corpo=`<div style="max-width:600px;margin:0 auto"><div class="card"><div class="card-body" style="text-align:center;padding:40px">
+      <div style="font-size:48px;margin-bottom:16px">📋</div>
+      <h3 style="color:var(--azul3);margin-bottom:12px">Resumo de Atendimento</h3>
+      <p style="color:rgba(255,255,255,.5);font-size:13px;line-height:1.8;margin-bottom:20px">Cole o texto de um atendimento para gerar um resumo estruturado.</p>
+      <div class="form-field" style="text-align:left;margin-bottom:16px">
+        <textarea id="ia-texto-atend" rows="6" style="width:100%;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:13px;resize:vertical" placeholder="Cole aqui o texto do atendimento..."></textarea>
+      </div>
+      <button class="btn btn-primary">✨ Gerar Resumo</button>
+      <p style="font-size:11px;color:rgba(255,255,255,.3);margin-top:12px">Integração com Claude / GPT em configuração.</p>
+    </div></div></div>`;
+  } else if(modoAtivo==='resumo-proc'){
+    corpo=`<div style="max-width:600px;margin:0 auto"><div class="card"><div class="card-body" style="text-align:center;padding:40px">
+      <div style="font-size:48px;margin-bottom:16px">⚖️</div>
+      <h3 style="color:var(--azul3);margin-bottom:12px">Resumo Processual</h3>
+      <p style="color:rgba(255,255,255,.5);font-size:13px;line-height:1.8;margin-bottom:20px">Gere um resumo estruturado de um processo a partir do número ou das movimentações.</p>
+      <div class="form-field" style="text-align:left;margin-bottom:16px">
+        <input id="ia-num-proc" style="width:100%;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:13px" placeholder="Número do processo (CNJ)">
+      </div>
+      <button class="btn btn-primary">✨ Gerar Resumo</button>
+      <p style="font-size:11px;color:rgba(255,255,255,.3);margin-top:12px">Integração com Claude / GPT em configuração.</p>
+    </div></div></div>`;
+  } else if(modoAtivo==='documentos'){
+    corpo=`<div style="max-width:700px;margin:0 auto">
+      <p style="color:rgba(255,255,255,.5);font-size:13px;margin-bottom:20px">Selecione um modelo para gerar um documento jurídico.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+        ${[['✉️','Notificação Extrajudicial'],['📄','Petição Inicial'],['🔄','Réplica'],['📝','Recurso Inominado'],['⚖️','Apelação Cível'],['📊','Planilha de Cálculo']].map(([ico,nome])=>`
+        <div class="card" style="cursor:pointer;transition:.2s" onmouseover="this.style.background='rgba(201,165,92,.08)'" onmouseout="this.style.background=''" onclick="toast('Modelo ${nome} em configuração.','info')">
+          <div class="card-body" style="padding:20px;text-align:center">
+            <div style="font-size:32px;margin-bottom:8px">${ico}</div>
+            <div style="font-size:12px;font-weight:600;color:rgba(255,255,255,.8)">${nome}</div>
+          </div>
+        </div>`).join('')}
+      </div>
+      <p style="font-size:11px;color:rgba(255,255,255,.3);margin-top:16px;text-align:center">Integração com templates e Claude em configuração.</p>
+    </div>`;
+  }
+
+  c.innerHTML=`<div style="max-width:900px;margin:0 auto;padding:24px 16px">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;flex-wrap:wrap">
+      <h2 style="margin:0;font-size:20px;font-weight:700">🤖 Becker IA</h2>
+    </div>
+    <div class="tabs" style="margin-bottom:24px;display:flex;gap:6px;flex-wrap:wrap">${tabs}</div>
+    ${corpo}
+  </div>`;
+}
+
+async function beckerIABuscar(){
+  const query=(document.getElementById('ia-query')?.value||'').trim();
+  const tribunal=document.getElementById('ia-tribunal')?.value||'';
+  if(!query){toast('Digite um tema para pesquisar.','erro');return;}
+  const res=document.getElementById('ia-resultado');
+  res.innerHTML='<div style="text-align:center;padding:30px;color:rgba(255,255,255,.4)">🔍 Pesquisando na base Becker...</div>';
+  try{
+    const r=await fetch(`${BECKER_IA_URL}/research/theme`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-API-Key':SUPA_KEY},
+      body:JSON.stringify({query,methodology_id:BECKER_IA_METHODOLOGY,jurisdiction:'SC',min_documents:1,...(tribunal?{jurisdiction:tribunal==='STJ'||tribunal==='STF'?tribunal:'SC'}:{})})
+    });
+    if(!r.ok){
+      const e=await r.json().catch(()=>({}));
+      res.innerHTML=`<div class="card"><div class="card-body" style="text-align:center;padding:30px"><div style="font-size:32px;margin-bottom:12px">⚠️</div><p style="color:rgba(255,255,255,.5);font-size:13px">${e.detail||'Nenhum resultado encontrado para este tema.'}</p></div></div>`;
+      return;
+    }
+    const d=await r.json();
+    const tese=d.main_thesis||d.petition_grounding||'';
+    const cits=d.jurisprudence_for_citation||[];
+    const units=d.citation_units||[];
+    res.innerHTML=`
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h3>📌 Tese Principal</h3></div>
+      <div class="card-body">
+        <p style="font-size:13px;line-height:1.8;color:rgba(255,255,255,.85)">${tese||'—'}</p>
+        ${d.ratio_decidendi?.length?`<div style="margin-top:12px;padding:12px;background:rgba(201,165,92,.06);border-radius:8px;border-left:3px solid var(--gold)">
+          <div style="font-size:11px;font-weight:600;color:var(--gold);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Razão de Decidir</div>
+          ${d.ratio_decidendi.map(r=>`<p style="font-size:13px;color:rgba(255,255,255,.75);margin:4px 0">${r}</p>`).join('')}
+        </div>`:''}
+      </div>
+    </div>
+    ${cits.length?`<div class="card">
+      <div class="card-header"><h3>📚 Jurisprudência Verificada (${cits.length})</h3></div>
+      <div class="card-body" style="padding:0">
+        ${units.map((u,i)=>`
+        <div style="padding:16px;border-bottom:1px solid rgba(255,255,255,.05)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px">
+            <span style="font-size:12px;font-weight:600;color:var(--gold)">${u.tribunal||''} — ${u.process||''}</span>
+            <button class="btn btn-sm" onclick="navigator.clipboard.writeText(${JSON.stringify(cits[i]||'')}).then(()=>toast('Copiado!','ok'))" style="font-size:11px;padding:3px 10px;flex-shrink:0">Copiar</button>
+          </div>
+          <p style="font-size:12px;color:rgba(255,255,255,.6);line-height:1.7;margin:0">${(u.original_text||'').substring(0,400)}${(u.original_text||'').length>400?'...':''}</p>
+          ${u.rapporteur?`<div style="font-size:11px;color:rgba(255,255,255,.35);margin-top:6px">Rel. ${u.rapporteur} · ${u.judgment_date?new Date(u.judgment_date+'T12:00:00').toLocaleDateString('pt-BR'):''}</div>`:''}
+        </div>`).join('')}
+      </div>
+    </div>`:''}`;
+  }catch(e){
+    res.innerHTML=`<div class="card"><div class="card-body" style="text-align:center;padding:30px"><p style="color:rgba(255,255,255,.5)">Erro ao conectar com a base Becker IA.</p></div></div>`;
+  }
 }
 
 
