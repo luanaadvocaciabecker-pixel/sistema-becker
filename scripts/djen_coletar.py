@@ -49,14 +49,41 @@ def buscar_publicacoes(data: str) -> list:
 
 
 def extrair_campos(pub: dict) -> dict:
-    numero  = pub.get("numeroProcesso") or pub.get("nrProcesso") or ""
-    tribunal = pub.get("siglaTribunal") or pub.get("nomeTribunal") or pub.get("tribunal") or ""
-    conteudo = pub.get("conteudo") or pub.get("texto") or ""
+    # Tenta todos os possíveis nomes de campo para número do processo
+    numero = (
+        pub.get("numeroProcesso")
+        or pub.get("nrProcesso")
+        or pub.get("numero")
+        or pub.get("numProcesso")
+        or pub.get("processo")
+        or pub.get("id", "")
+    )
+    tribunal = (
+        pub.get("siglaTribunal")
+        or pub.get("nomeTribunal")
+        or pub.get("tribunal")
+        or pub.get("siglaOrgao")
+        or pub.get("orgaoJulgador")
+        or ""
+    )
+    conteudo = (
+        pub.get("conteudo")
+        or pub.get("texto")
+        or pub.get("teor")
+        or pub.get("comunicacao")
+        or pub.get("descricao")
+        or ""
+    )
     return {
-        "numero_processo": numero,
-        "tribunal": tribunal,
-        "conteudo": conteudo,
-        "cliente": pub.get("nomeParteAtiva") or pub.get("parte") or "Não identificado",
+        "numero_processo": str(numero),
+        "tribunal": str(tribunal),
+        "conteudo": str(conteudo),
+        "cliente": (
+            pub.get("nomeParteAtiva")
+            or pub.get("parte")
+            or pub.get("nomeParte")
+            or "Não identificado"
+        ),
         "prioridade": "MEDIA",
         "prazo_tipo": "Verificar manualmente",
         "prazo_dias_uteis": None,
@@ -91,7 +118,14 @@ if __name__ == "__main__":
         print("Nenhuma publicação. Encerrando.")
         exit(0)
 
-    publicacoes = [extrair_campos(p) for p in raw if p.get("numeroProcesso") or p.get("nrProcesso")]
+    # Log dos campos reais retornados pelo PJe (debug)
+    if raw:
+        print(f"Campos disponíveis na 1ª publicação: {list(raw[0].keys())}")
+
+    # Aceita todas as publicações — não filtra por campo específico
+    publicacoes = [extrair_campos(p) for p in raw]
+    # Remove publicações completamente vazias (sem número e sem conteúdo)
+    publicacoes = [p for p in publicacoes if p["numero_processo"] or p["conteudo"]]
     print(f"Publicações válidas: {len(publicacoes)}")
 
     resultado = enviar_para_supabase(DATA_ALVO, publicacoes)
