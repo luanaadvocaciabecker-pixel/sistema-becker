@@ -1,11 +1,8 @@
 """Coleta publicações do DJEN via PJe API e envia para o Becker Monitor."""
 import os
-import json
-import hashlib
+import re
 import requests
-from datetime import date, timedelta
-
-# ── config ────────────────────────────────────────────────────────────────────
+from datetime import date
 
 SUPABASE_URL   = os.environ.get("SUPABASE_URL", "https://bpzuktssvdosxlxbaeyl.supabase.co")
 MONITOR_SECRET = os.environ.get("MONITOR_SECRET", "")
@@ -14,10 +11,8 @@ DATA_ALVO      = os.environ.get("DATA_ALVO") or date.today().isoformat()
 IMPORTAR_URL = f"{SUPABASE_URL}/functions/v1/becker-monitor/djen/importar"
 
 PJE_URLS = [
-    # Tentativa 1 — parâmetros novos
     "https://comunicaapi.pje.jus.br/api/v1/comunicacao?meio=D&numeroOab=40082&ufOab=SC"
     "&dataDisponibilizacaoInicio={data}&dataDisponibilizacaoFim={data}&size=100",
-    # Tentativa 2 — parâmetros legados
     "https://comunicaapi.pje.jus.br/api/v1/comunicacao?numeroOAB=40082&siglaOAB=SC"
     "&dataDisponibilizacaoInicio={data}&dataDisponibilizacaoFim={data}&size=100",
 ]
@@ -27,7 +22,9 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; BeckerMonitor/1.0)",
 }
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# Padrão CNJ: 0000000-00.0000.0.00.0000
+CNJ_RE = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
+
 
 def buscar_publicacoes(data: str) -> list:
     for url_template in PJE_URLS:
@@ -48,22 +45,20 @@ def buscar_publicacoes(data: str) -> list:
     return []
 
 
+def extrair_numero_cnj(texto: str) -> str:
+    """Tenta extrair o primeiro número CNJ encontrado no texto."""
+    m = CNJ_RE.search(texto or "")
+    return m.group(0) if m else ""
+
+
 def extrair_campos(pub: dict) -> dict:
-    # Tenta todos os possíveis nomes de campo para número do processo
-    numero = (
+    # Campos diretos do PJe
+    numero_campo = (
         pub.get("numeroProcesso")
         or pub.get("nrProcesso")
         or pub.get("numero")
         or pub.get("numProcesso")
         or pub.get("processo")
-        or pub.get("id", "")
-    )
-    tribunal = (
-        pub.get("siglaTribunal")
-        or pub.get("nomeTribunal")
-        or pub.get("tribunal")
-        or pub.get("siglaOrgao")
-        or pub.get("orgaoJulgador")
         or ""
     )
     conteudo = (
@@ -74,8 +69,23 @@ def extrair_campos(pub: dict) -> dict:
         or pub.get("descricao")
         or ""
     )
+    tribunal = (
+        pub.get("siglaTribunal")
+        or pub.get("nomeTribunal")
+        or pub.get("tribunal")
+        or pub.get("siglaOrgao")
+        or pub.get("orgaoJulgador")
+        or ""
+    )
+
+    # Se o campo já tem formato CNJ usa direto; caso contrário extrai do conteúdo
+    if CNJ_RE.match(str(numero_campo)):
+        numero = str(numero_campo)
+    else:
+        numero = extrair_numero_cnj(conteudo) or str(numero_campo or pub.get("id", ""))
+
     return {
-        "numero_processo": str(numero),
+        "numero_processo": numero,
         "tribunal": str(tribunal),
         "conteudo": str(conteudo),
         "cliente": (
@@ -98,7 +108,6 @@ def enviar_para_supabase(data: str, publicacoes: list) -> dict:
     headers = {"Content-Type": "application/json"}
     if MONITOR_SECRET:
         headers["x-monitor-secret"] = MONITOR_SECRET
-
     payload = {"data_publicacao": data, "publicacoes": publicacoes}
     r = requests.post(IMPORTAR_URL, headers=headers, json=payload, timeout=30)
     print(f"Supabase status: {r.status_code}")
@@ -106,11 +115,8 @@ def enviar_para_supabase(data: str, publicacoes: list) -> dict:
     return r.json() if r.ok else {"error": r.text}
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
     print(f"Data alvo: {DATA_ALVO}")
-
     raw = buscar_publicacoes(DATA_ALVO)
     print(f"Publicações encontradas: {len(raw)}")
 
@@ -118,13 +124,10 @@ if __name__ == "__main__":
         print("Nenhuma publicação. Encerrando.")
         exit(0)
 
-    # Log dos campos reais retornados pelo PJe (debug)
     if raw:
         print(f"Campos disponíveis na 1ª publicação: {list(raw[0].keys())}")
 
-    # Aceita todas as publicações — não filtra por campo específico
     publicacoes = [extrair_campos(p) for p in raw]
-    # Remove publicações completamente vazias (sem número e sem conteúdo)
     publicacoes = [p for p in publicacoes if p["numero_processo"] or p["conteudo"]]
     print(f"Publicações válidas: {len(publicacoes)}")
 
