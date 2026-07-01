@@ -1,37 +1,52 @@
-# Sistema Becker Advogados
+# Sistema Becker — Site público da Becker Advogados
 
-Sistema juridico interno do escritorio Becker Advogados.
+> ⚠️ ATENÇÃO — LEIA ANTES DE MEXER EM QUALQUER COISA
+>
+> Este repositório contém APENAS o site público da Becker Advogados.
+> Publicado em: https://advocacia-becker.pages.dev
+>
+> GPTs, DJEN, pipeline, edge functions e banco de dados NÃO estão aqui.
+> Para isso, vá em: https://github.com/luanaadvocaciabecker-pixel/GPTs-becker
+
+---
+
+## O que é este repositório
+
+Contém exclusivamente o código do site institucional publicado no Cloudflare Pages:
+
+**https://advocacia-becker.pages.dev**
+
+---
 
 ## Estrutura
 
-```text
+```
 site/
-  index.html
+  index.html                  ← página principal do site
   becker-logo-completo.png
   becker-simbolo.png
   becker-logo-horizontal.png
   identidade visual becker.png
 
-cloudflare/
-  _worker.js
-  functions/
-
 pages-deploy/
   pacote pronto para publicar no Cloudflare Pages
-
-docs/
 ```
 
-## Publicacao
+---
 
-O site atual esta publicado no Cloudflare Pages:
+## O que NÃO pertence aqui
 
-```text
-https://advocacia-becker.pages.dev
-```
+| O que é | Onde fica |
+|---|---|
+| GPT Bancário/Consumidor | `gpts-becker` |
+| Becker Monitor | `gpts-becker` |
+| Becker Juris Intelligence | `gpts-becker` |
+| DJEN pipeline | `gpts-becker` |
+| Edge Functions | Supabase — projeto `Becker Juris Intelligence` |
+| Banco de dados | Supabase — projeto `Becker Juris Intelligence` |
 
-## Observacao de seguranca
+---
 
-Antes de subir no GitHub, nao incluir chaves secretas, tokens privados, service role do Supabase, token da Cloudflare ou credenciais de WhatsApp/API.
+## Segurança
 
-Chave anon/publica do Supabase pode existir no frontend quando as politicas de seguranca do banco estiverem corretas, mas segredos nunca devem ficar no repositorio.
+Nunca incluir neste repositório: chaves de API, tokens, service role do Supabase, credenciais de WhatsApp ou qualquer secret.
