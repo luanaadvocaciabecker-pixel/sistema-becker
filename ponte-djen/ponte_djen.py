@@ -53,15 +53,37 @@ def buscar_djen(data: str):
     return itens
 
 
+def _campo(it: dict, *chaves):
+    """Retorna o primeiro valor nao vazio dentre varios nomes possiveis de
+    campo (a API do DJEN varia a nomenclatura entre versoes/tribunais)."""
+    for chave in chaves:
+        v = it.get(chave)
+        if v not in (None, ""):
+            return v
+    return None
+
+
 def enviar_sistema(data: str, itens) -> dict:
-    """Envia as publicacoes para o importador do sistema."""
+    """Envia as publicacoes para o importador do sistema, com o maximo de
+    informacao disponivel na resposta do DJEN (nao so o texto da publicacao)."""
     pubs = []
     for it in itens:
         conteudo = str(it.get("texto") or it.get("conteudo") or "")
-        numero = str(it.get("numeroprocessocommascara") or it.get("numeroProcesso")
-                     or it.get("numero_processo") or "")
-        tribunal = str(it.get("siglaTribunal") or it.get("tribunal") or "")
-        pubs.append({"numero_processo": numero, "tribunal": tribunal, "conteudo": conteudo[:8000]})
+        numero = str(_campo(it, "numeroprocessocommascara", "numeroProcesso", "numero_processo") or "")
+        tribunal = str(_campo(it, "siglaTribunal", "tribunal") or "")
+        data_disp = _campo(it, "data_disponibilizacao", "dataDisponibilizacao")
+        forma = _campo(it, "meiocompleto", "meioCompleto", "tipoComunicacao", "meio")
+        comarca = _campo(it, "comarca", "nomeComarca")
+        orgao = _campo(it, "nomeOrgao", "orgaoJulgador", "nomeOrgaoJulgador")
+        pubs.append({
+            "numero_processo": numero,
+            "tribunal": tribunal,
+            "conteudo": conteudo[:8000],
+            "data_disponibilizacao": str(data_disp) if data_disp else None,
+            "forma_intimacao": str(forma) if forma else None,
+            "comarca": str(comarca) if comarca else None,
+            "orgao_julgador": str(orgao) if orgao else None,
+        })
     r = requests.post(f"{SISTEMA}/becker-monitor/djen/importar", timeout=120,
                       headers=HEAD_SISTEMA,
                       data=json.dumps({"data_publicacao": data, "publicacoes": pubs}))
