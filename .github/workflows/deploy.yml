@@ -26,5 +26,5 @@ jobs:
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: 0ee385df43ca39dd0102c7041580b5ed
           command: pages deploy pages-deploy --project-name=advocacia-becker --branch=main
