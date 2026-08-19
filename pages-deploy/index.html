@@ -1635,6 +1635,47 @@ tbody tr:hover td{
 <script>
 const SUPA_URL='https://fnuzhypsqvyolqqafrba.supabase.co';
 let SUPA_KEY='sb_publishable_QVrl-Cxs9FNjC7Pf9aHazQ_aGEk0PiO';
+// ── SESSÃO / TOKEN ────────────────────────────────────────────────────────
+// As chamadas de dados usam o token do usuário logado (papel authenticated),
+// não a chave pública. Sem isso o banco (RLS) recusa tudo.
+function _sessao(){try{return JSON.parse(localStorage.getItem('becker_session')||'null')}catch(_){return null}}
+function _tokenDados(){const s=_sessao();return (s&&s.access_token)?s.access_token:SUPA_KEY;}
+let _refreshTimer=null;
+async function refrescarSessao(){
+  const s=_sessao();
+  if(!s||!s.refresh_token)return null;
+  try{
+    const r=await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`,{
+      method:'POST',headers:{apikey:SUPA_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({refresh_token:s.refresh_token})
+    });
+    if(!r.ok)return null;
+    const d=await r.json();
+    if(!d.access_token)return null;
+    const ns={user:d.user||s.user,access_token:d.access_token,refresh_token:d.refresh_token||s.refresh_token,expires_at:d.expires_at};
+    localStorage.setItem('becker_session',JSON.stringify(ns));
+    return ns;
+  }catch(_){return null;}
+}
+function _agendarRefresh(){
+  if(_refreshTimer)clearInterval(_refreshTimer);
+  _refreshTimer=setInterval(async()=>{
+    const s=_sessao();if(!s||!s.expires_at)return;
+    if(s.expires_at-Date.now()/1000<300)await refrescarSessao();
+  },120000);
+}
+async function fetchAuth(url,opts){
+  opts=opts||{};
+  let res=await fetch(url,opts);
+  if(res.status===401){
+    const ns=await refrescarSessao();
+    if(ns){
+      if(opts.headers)opts.headers['Authorization']=`Bearer ${ns.access_token}`;
+      res=await fetch(url,opts);
+    }
+  }
+  return res;
+}
 let usuarioAtual=null,modalAcao=null,clientesCache=[];
 let processosFiltro={busca:'',situacao:'',cliente:'',meus:false};
 let clientesFiltro={busca:'',resp:'',status:''};
@@ -1651,7 +1692,7 @@ function somenteProcessosPrincipais(q){
 const supa=(()=>{
   function QB(table){
     const q={table,cols:'*',filters:[],orders:[],lim:null,off:null,single:false,count:null,op:'select',insData:null,updData:null};
-    const h=(x={})=>({apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,...x});
+    const h=(x={})=>({apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,...x});
     function buildURL(){
       const p=[`select=${encodeURIComponent(q.cols)}`,...q.filters,...q.orders.map(o=>`order=${o}`)];
       if(q.lim!==null)p.push(`limit=${q.lim}`);
@@ -1661,7 +1702,7 @@ const supa=(()=>{
     async function exec(){
       try{
         if(q.op==='select'){
-          const res=await fetch(buildURL(),{headers:h(q.count?{Prefer:`count=${q.count}`}:{})});
+          const res=await fetchAuth(buildURL(),{headers:h(q.count?{Prefer:`count=${q.count}`}:{})});
           if(!res.ok)return{data:null,error:{message:`HTTP ${res.status}`},count:0};
           const data=await res.json();
           const cr=res.headers.get('content-range');
@@ -1671,19 +1712,19 @@ const supa=(()=>{
         if(q.op==='insert'){
           const body=q.insData;
           const pref=q.single?'return=representation':'return=minimal';
-          const res=await fetch(`${SUPA_URL}/rest/v1/${q.table}`,{method:'POST',headers:h({'Content-Type':'application/json',Prefer:pref}),body:JSON.stringify(body)});
+          const res=await fetchAuth(`${SUPA_URL}/rest/v1/${q.table}`,{method:'POST',headers:h({'Content-Type':'application/json',Prefer:pref}),body:JSON.stringify(body)});
           if(!res.ok)return{data:null,error:{message:await res.text()}};
           if(q.single){const d=await res.json();return{data:Array.isArray(d)?d[0]??null:d,error:null};}
           return{data:null,error:null};
         }
         if(q.op==='update'){
           const fp=q.filters.length?'?'+q.filters.join('&'):'';
-          const res=await fetch(`${SUPA_URL}/rest/v1/${q.table}${fp}`,{method:'PATCH',headers:h({'Content-Type':'application/json',Prefer:'return=minimal'}),body:JSON.stringify(q.updData)});
+          const res=await fetchAuth(`${SUPA_URL}/rest/v1/${q.table}${fp}`,{method:'PATCH',headers:h({'Content-Type':'application/json',Prefer:'return=minimal'}),body:JSON.stringify(q.updData)});
           return res.ok?{data:null,error:null}:{data:null,error:{message:await res.text()}};
         }
         if(q.op==='delete'){
           const fp=q.filters.length?'?'+q.filters.join('&'):'';
-          const res=await fetch(`${SUPA_URL}/rest/v1/${q.table}${fp}`,{method:'DELETE',headers:h()});
+          const res=await fetchAuth(`${SUPA_URL}/rest/v1/${q.table}${fp}`,{method:'DELETE',headers:h()});
           return res.ok?{data:null,error:null}:{data:null,error:{message:await res.text()}};
         }
       }catch(e){return{data:null,error:{message:e.message},count:0};}
@@ -1726,8 +1767,9 @@ const supa=(()=>{
 
 async function init(){
   document.getElementById('tela-setup').style.display='none';
-  const sess=JSON.parse(localStorage.getItem('becker_session')||'null');
-  if(sess&&sess.expires_at&&sess.expires_at>Date.now()/1000){usuarioAtual=sess.user;mostrarApp();ir('dashboard');setTimeout(atualizarBadgeNotificacoes,1500);}
+  let sess=_sessao();
+  if(sess&&(!sess.expires_at||sess.expires_at<=Date.now()/1000)&&sess.refresh_token){sess=await refrescarSessao();}
+  if(sess&&sess.access_token&&sess.expires_at&&sess.expires_at>Date.now()/1000){usuarioAtual=sess.user;mostrarApp();ir('dashboard');setTimeout(atualizarBadgeNotificacoes,1500);_agendarRefresh();}
   else mostrarLogin();
 }
 function iniciarSupa(){}
@@ -1839,7 +1881,7 @@ async function salvarConfig(){
   const btn=document.querySelector('#tela-setup .btn');if(btn){btn.textContent='Verificando...';btn.disabled=true;}
   const testRes=await fetch(`${SUPA_URL}/rest/v1/clientes?limit=1`,{headers:{apikey:k,'Authorization':`Bearer ${k}`}});
   if(btn){btn.textContent='Salvar e Continuar';btn.disabled=false;}
-  if(!testRes.ok){document.getElementById('setup-erro').textContent='Chave inválida ou sem acesso ao banco.';return;}
+  if(!testRes.ok&&testRes.status!==401&&testRes.status!==403){document.getElementById('setup-erro').textContent='Chave inválida ou sem acesso ao banco.';return;}
   localStorage.setItem('becker_key',k);SUPA_KEY=k;
   document.getElementById('tela-setup').style.display='none';mostrarLogin();
 }
@@ -1858,8 +1900,8 @@ async function entrar(){
   btn.textContent='Entrar no Sistema';btn.disabled=false;
   if(!res.ok||!data.access_token){document.getElementById('login-erro').textContent='E-mail ou senha incorretos.';return;}
   usuarioAtual=data.user;
-  localStorage.setItem('becker_session',JSON.stringify({user:data.user,access_token:data.access_token,expires_at:data.expires_at}));
-  mostrarApp();ir('dashboard');setTimeout(atualizarBadgeNotificacoes,1500);
+  localStorage.setItem('becker_session',JSON.stringify({user:data.user,access_token:data.access_token,refresh_token:data.refresh_token,expires_at:data.expires_at}));
+  mostrarApp();ir('dashboard');setTimeout(atualizarBadgeNotificacoes,1500);_agendarRefresh();
 }
 async function sair(){
   const sess=JSON.parse(localStorage.getItem('becker_session')||'null');
@@ -2329,8 +2371,8 @@ async function pDashboard(){
   ]=await Promise.all([
     safe(supa.from('clientes').select('id',{count:'exact'})),
     safe(somenteProcessosPrincipais(supa.from('processos').select('id,situacao',{count:'exact'}))),
-    safe(supa.from('processos_administrativos').select('id',{count:'exact'})),
-    safe(supa.from('extrajudiciais').select('id',{count:'exact'})),
+    safe(supa.from('processos_adm').select('id',{count:'exact'})),
+    Promise.resolve({data:[],count:0}),
     safe(supa.from('prazos').select('id,data,cumprido',{count:'exact'}).eq('cumprido',false).lte('data',hojeIso)),
     safe(supa.from('prazos').select('id,data,descricao,tipo,cumprido,processo_id,processos(numero,clientes(nome),advogado_responsavel)',{count:'exact'}).eq('cumprido',false).gte('data',hojeIso).lte('data',em7dIso).order('data').limit(5)),
     safe(supa.from('prazos').select('id,data,descricao,tipo,cumprido,processo_id,processos(numero,clientes(nome),advogado_responsavel)',{count:'exact'}).eq('cumprido',false).eq('tipo','Audiência').eq('data',hojeIso)),
@@ -2603,7 +2645,7 @@ function filtrarProcessosCliente(id){ir('processos');setTimeout(()=>{processosFi
 async function abrirCliente(id){
   const c=document.getElementById('conteudo');
   c.innerHTML='<p style="text-align:center;padding:40px;color:#94a3b8">Carregando...</p>';
-  const res=await fetch(`${SUPA_URL}/rest/v1/clientes?id=eq.${id}&select=*`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`}});
+  const res=await fetch(`${SUPA_URL}/rest/v1/clientes?id=eq.${id}&select=*`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
   const rows=res.ok?await res.json():[];
   const cl=rows[0];
   if(!cl){toast('Erro ao carregar cliente.','erro');return;}
@@ -2771,7 +2813,7 @@ async function carregarTimelineCliente(clienteId){
 // ---- DOCUMENTOS POR CLIENTE ----
 async function carregarDocsCliente(clienteId){
   const el=document.getElementById('docs-cl');if(!el)return;
-  const res=await fetch(`${SUPA_URL}/rest/v1/documentos?cliente_id=eq.${clienteId}&select=*,processos(numero)&order=criado_em.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`}});
+  const res=await fetch(`${SUPA_URL}/rest/v1/documentos?cliente_id=eq.${clienteId}&select=*,processos(numero)&order=criado_em.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
   const docs=res.ok?await res.json():[];
   el.innerHTML=`
   <div class="card">
@@ -2819,7 +2861,7 @@ function uploadDocCliente(clienteId){
     const path=`${clienteId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
     const upRes=await fetch(`${SUPA_URL}/storage/v1/object/documentos-clientes/${path}`,{
       method:'POST',
-      headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+      headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
       body:file
     });
     if(!upRes.ok){
@@ -2830,7 +2872,7 @@ function uploadDocCliente(clienteId){
     const url=`${SUPA_URL}/storage/v1/object/public/documentos-clientes/${path}`;
     const saveRes=await fetch(`${SUPA_URL}/rest/v1/documentos`,{
       method:'POST',
-      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal'},
+      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Prefer':'return=minimal'},
       body:JSON.stringify({nome:file.name,tipo:file.type,url,cliente_id:clienteId})
     });
     if(saveRes.ok){toast('✅ Arquivo enviado!','ok');carregarDocsCliente(clienteId);}
@@ -2849,7 +2891,7 @@ function novoDocLink(clienteId){
     if(!d.nome||!d.url){toast('Preencha nome e link.','erro');return false;}
     const res=await fetch(`${SUPA_URL}/rest/v1/documentos`,{
       method:'POST',
-      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal'},
+      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Prefer':'return=minimal'},
       body:JSON.stringify({...d,cliente_id:clienteId})
     });
     if(!res.ok){toast('Erro ao salvar.','erro');return false;}
@@ -2861,7 +2903,7 @@ async function excluirDocCliente(id,clienteId){
   if(!confirm('Excluir este documento?'))return;
   await fetch(`${SUPA_URL}/rest/v1/documentos?id=eq.${id}`,{
     method:'DELETE',
-    headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`}
+    headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}
   });
   toast('Removido.','ok');carregarDocsCliente(clienteId);
 }
@@ -2869,7 +2911,7 @@ async function excluirDocCliente(id,clienteId){
 // ---- ATENDIMENTOS ----
 async function carregarAtendimentos(clienteId){
   const el=document.getElementById('atend-cl');if(!el)return;
-  const res=await fetch(`${SUPA_URL}/rest/v1/atendimentos?cliente_id=eq.${clienteId}&select=*&order=data_atendimento.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`}});
+  const res=await fetch(`${SUPA_URL}/rest/v1/atendimentos?cliente_id=eq.${clienteId}&select=*&order=data_atendimento.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
   const ats=res.ok?await res.json():[];
   el.innerHTML=`
   <div class="card">
@@ -2923,7 +2965,7 @@ function novoAtendimento(clienteId){
     d.usuario=usuarioAtual?.email||'';
     const res=await fetch(`${SUPA_URL}/rest/v1/atendimentos`,{
       method:'POST',
-      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal'},
+      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Prefer':'return=minimal'},
       body:JSON.stringify(d)
     });
     if(!res.ok){const e=await res.json().catch(()=>({}));toast('Erro: '+(e.message||res.status),'erro');return false;}
@@ -2932,7 +2974,7 @@ function novoAtendimento(clienteId){
 }
 
 async function editarAtendimento(id,clienteId){
-  const res=await fetch(`${SUPA_URL}/rest/v1/atendimentos?id=eq.${id}&select=*`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`}});
+  const res=await fetch(`${SUPA_URL}/rest/v1/atendimentos?id=eq.${id}&select=*`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
   const rows=res.ok?await res.json():[];
   const a=rows[0];if(!a)return;
   abrirModal('Editar Atendimento',`<form id="form-atend">
@@ -2952,7 +2994,7 @@ async function editarAtendimento(id,clienteId){
     if(!d.data_atendimento||!d.descricao){toast('Preencha data e descrição.','erro');return false;}
     const res2=await fetch(`${SUPA_URL}/rest/v1/atendimentos?id=eq.${id}`,{
       method:'PATCH',
-      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal'},
+      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Prefer':'return=minimal'},
       body:JSON.stringify(d)
     });
     if(!res2.ok){toast('Erro ao atualizar.','erro');return false;}
@@ -2964,7 +3006,7 @@ async function excluirAtendimento(id,clienteId){
   if(!confirm('Excluir este atendimento?'))return;
   await fetch(`${SUPA_URL}/rest/v1/atendimentos?id=eq.${id}`,{
     method:'DELETE',
-    headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`}
+    headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}
   });
   toast('Removido.','ok');carregarAtendimentos(clienteId);
 }
@@ -4238,7 +4280,7 @@ async function pDesempenho(){
 
 // ---- MÓDULOS ADMINISTRATIVOS (placeholder) ----
 function pModuloSimples(pagina){
-  const nomes={contratos:'Contratos',cartorio:'Cartório',nfe:'NF-e',documentacao:'Documentação'};
+  const nomes={contratos:'Contratos',cartorio:'Cartório',nfe:'NF-e',documentacao:'Documentação',atendimento:'Atendimento',djen:'DJEN',extrajudiciais:'Extrajudiciais'};
   const nome=nomes[pagina]||pagina;
   document.getElementById('conteudo').innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
