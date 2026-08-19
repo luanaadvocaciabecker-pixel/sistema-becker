@@ -1,0 +1,30 @@
+name: Deploy Cloudflare Pages
+
+# Publica o site automaticamente no Cloudflare Pages a cada push na main.
+# Também pode ser disparado manualmente (aba Actions -> Run workflow).
+#
+# Requer 2 secrets no repositório (Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN   -> token com permissão "Cloudflare Pages: Edit"
+#   CLOUDFLARE_ACCOUNT_ID  -> ID da conta Cloudflare
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pages-deploy/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy para o Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy pages-deploy --project-name=advocacia-becker --branch=main
