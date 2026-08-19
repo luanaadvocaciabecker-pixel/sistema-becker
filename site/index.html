@@ -1677,8 +1677,12 @@ async function fetchAuth(url,opts){
   return res;
 }
 let usuarioAtual=null,modalAcao=null,clientesCache=[];
-let processosFiltro={busca:'',situacao:'',cliente:'',meus:false};
+let processosFiltro={busca:'',situacao:'',cliente:'',resp:'',meus:false};
 let clientesFiltro={busca:'',resp:'',status:''};
+// WhatsApp/telefone clicável: monta link wa.me a partir de um número livre.
+function soDigitos(s){return String(s==null?'':s).replace(/\D/g,'');}
+function waLink(num){let d=soDigitos(num);if(!d)return '';if(d.length<=11)d='55'+d;return 'https://wa.me/'+d;}
+function waHtml(num,rotulo){const l=waLink(num);if(!l)return escHtml(num||'—');return `<a href="${l}" target="_blank" rel="noopener" style="color:#25D366;font-weight:600;text-decoration:none">💬 ${escHtml(num)}</a>`;}
 let movsFiltroProcesso='';
 const TIPOS_MOVIMENTACAO_PROCESSUAL=['DataJud','TJSC/eproc','Tribunal','Diário Oficial','JusBrasil','Manual'];
 const MODULOS_PROTEGIDOS={'financeiro':'becker2026','cibele':'becker2026'};
@@ -2581,8 +2585,8 @@ async function abrirCliente(id){
     <div class="card-body">
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;font-size:13px">
         ${cl.cpf_cnpj?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">CPF/CNPJ</span><div style="margin-top:2px">${cl.cpf_cnpj}</div></div>`:''}
-        ${cl.telefone?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Telefone</span><div style="margin-top:2px">${cl.telefone}</div></div>`:''}
-        ${cl.whatsapp?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">WhatsApp</span><div style="margin-top:2px">${cl.whatsapp}</div></div>`:''}
+        ${cl.telefone?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Telefone</span><div style="margin-top:2px">${waHtml(cl.telefone)}</div></div>`:''}
+        ${cl.whatsapp?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">WhatsApp</span><div style="margin-top:2px">${waHtml(cl.whatsapp)}</div></div>`:''}
         ${cl.email?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">E-mail</span><div style="margin-top:2px">${cl.email}</div></div>`:''}
         ${cl.responsavel?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Responsável</span><div style="margin-top:2px">${cl.responsavel}</div></div>`:''}
         ${cl.cidade?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Cidade</span><div style="margin-top:2px">${cl.cidade}${cl.estado?'/'+cl.estado:''}</div></div>`:''}
@@ -2612,8 +2616,8 @@ async function abrirCliente(id){
       ${cl.cpf_cnpj?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">CPF/CNPJ</span><div style="margin-top:3px;font-weight:500">${cl.cpf_cnpj}</div></div>`:''}
       ${cl.rg?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">RG</span><div style="margin-top:3px">${cl.rg}</div></div>`:''}
       ${cl.data_nascimento?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Nascimento</span><div style="margin-top:3px">${new Date(cl.data_nascimento+'T12:00:00').toLocaleDateString('pt-BR')}</div></div>`:''}
-      ${cl.telefone?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Telefone</span><div style="margin-top:3px">${cl.telefone}</div></div>`:''}
-      ${cl.whatsapp?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">WhatsApp</span><div style="margin-top:3px">${cl.whatsapp}</div></div>`:''}
+      ${cl.telefone?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Telefone</span><div style="margin-top:3px">${waHtml(cl.telefone)}</div></div>`:''}
+      ${cl.whatsapp?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">WhatsApp</span><div style="margin-top:3px">${waHtml(cl.whatsapp)}</div></div>`:''}
       ${cl.email?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">E-mail</span><div style="margin-top:3px">${cl.email}</div></div>`:''}
       ${cl.profissao?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Profissão</span><div style="margin-top:3px">${cl.profissao}</div></div>`:''}
       ${cl.estado_civil?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Estado Civil</span><div style="margin-top:3px">${cl.estado_civil}</div></div>`:''}
@@ -2987,6 +2991,9 @@ async function pJudiciais(){
     <select class="filtro" onchange="processosFiltro.situacao=this.value;buscarProcessos()">
       <option value="">Todos os processos</option><option>Ativo</option><option>Em andamento</option><option>Suspenso</option><option>Arquivado</option>
     </select>
+    <select class="filtro" onchange="processosFiltro.resp=this.value;buscarProcessos()">
+      <option value="">Todos os responsáveis</option><option>Alana</option><option>Andressa</option><option>Luana</option><option>Samaira</option><option>Cibele</option>
+    </select>
     <button id="btn-meus-proc" class="btn btn-secondary" onclick="toggleMeusProc()" style="white-space:nowrap">👤 Meus processos</button>
     <button class="btn btn-primary" onclick="novoProcesso()">+ Novo Processo</button>
   </div>
@@ -3001,6 +3008,7 @@ async function buscarProcessos(){
   let q=somenteProcessosPrincipais(supa.from('processos').select('*,clientes(nome)',{count:'exact'})).order('created_at',{ascending:false});
   if(processosFiltro.busca)q=q.or(`numero.ilike.%${processosFiltro.busca}%,assunto.ilike.%${processosFiltro.busca}%,parte_contraria.ilike.%${processosFiltro.busca}%`);
   if(processosFiltro.situacao)q=q.eq('situacao',processosFiltro.situacao);
+  if(processosFiltro.resp)q=q.ilike('advogado_responsavel','%'+processosFiltro.resp+'%');
   if(processosFiltro.cliente)q=q.eq('cliente_id',processosFiltro.cliente);
   if(processosFiltro.meus){const e=(usuarioAtual?.email||'').split('@')[0];if(e)q=q.ilike('advogado_responsavel','%'+e+'%');}
   const{data,count,error}=await q.limit(50);
