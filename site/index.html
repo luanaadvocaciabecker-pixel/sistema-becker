@@ -1677,7 +1677,8 @@ async function fetchAuth(url,opts){
   return res;
 }
 let usuarioAtual=null,modalAcao=null,clientesCache=[];
-let processosFiltro={busca:'',situacao:'',cliente:'',resp:'',meus:false};
+let processosFiltro={busca:'',situacao:'',cliente:'',resp:'',meus:false,off:0};
+function pagProc(dir){const total=window._prCount||0;let off=(processosFiltro.off||0)+dir*50;if(off<0)off=0;if(off>=total)return;processosFiltro.off=off;buscarProcessos(true);window.scrollTo({top:0,behavior:'smooth'});}
 let clientesFiltro={busca:'',resp:'',status:''};
 // WhatsApp/telefone clicável: monta link wa.me a partir de um número livre.
 function soDigitos(s){return String(s==null?'':s).replace(/\D/g,'');}
@@ -3004,14 +3005,16 @@ async function pJudiciais(){
   <div id="pr-pag" style="text-align:center;padding:8px;color:#94a3b8;font-size:12px"></div>`;
   buscarProcessos();
 }
-async function buscarProcessos(){
+async function buscarProcessos(keepPage){
+  if(!keepPage)processosFiltro.off=0;
+  const _off=processosFiltro.off||0;
   let q=somenteProcessosPrincipais(supa.from('processos').select('*,clientes(nome)',{count:'exact'})).order('created_at',{ascending:false});
   if(processosFiltro.busca)q=q.or(`numero.ilike.%${processosFiltro.busca}%,assunto.ilike.%${processosFiltro.busca}%,parte_contraria.ilike.%${processosFiltro.busca}%`);
   if(processosFiltro.situacao)q=q.eq('situacao',processosFiltro.situacao);
   if(processosFiltro.resp)q=q.ilike('advogado_responsavel','%'+processosFiltro.resp+'%');
   if(processosFiltro.cliente)q=q.eq('cliente_id',processosFiltro.cliente);
   if(processosFiltro.meus){const e=(usuarioAtual?.email||'').split('@')[0];if(e)q=q.ilike('advogado_responsavel','%'+e+'%');}
-  const{data,count,error}=await q.limit(50);
+  const{data,count,error}=await q.range(_off,_off+49);
   const tb=document.getElementById('pr-tbody');if(!tb)return;
   if(error||!data?.length){tb.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">${error?'Erro.':'Nenhum processo.'}</td></tr>`;document.getElementById('pr-pag').textContent='';return;}
   tb.innerHTML=data.map(p=>{
@@ -3032,7 +3035,12 @@ async function buscarProcessos(){
       <button class="btn-icon" title="Editar" onclick="editarProcesso('${p.id}')">✏️</button>
       <button class="btn-icon" title="Excluir" onclick="excluirProcesso('${p.id}','${escHtml(String(p.numero||p.id))}')">🗑️</button>
     </td></tr>`}).join('');
-  document.getElementById('pr-pag').textContent=`${data.length} de ${count||0} processos`;
+  const total=count||0; window._prCount=total;
+  const ini=total?_off+1:0, fim=_off+data.length;
+  document.getElementById('pr-pag').innerHTML=`
+    <button class="btn btn-secondary btn-sm" ${_off<=0?'disabled':''} onclick="pagProc(-1)">← Anterior</button>
+    <span style="margin:0 14px;font-weight:500">${ini}–${fim} de ${total} processos</span>
+    <button class="btn btn-secondary btn-sm" ${fim>=total?'disabled':''} onclick="pagProc(1)">Próxima →</button>`;
 }
 function novoProcesso(){
   abrirModal('Novo Processo',formProcesso({}),async()=>{
