@@ -1,0 +1,36 @@
+PONTE DJEN - Advocacia Becker
+==============================
+
+PARA QUE SERVE
+--------------
+O CNJ as vezes bloqueia consultas ao DJEN vindas de servidores de nuvem.
+Este script roda no computador do escritorio (IP comum, nunca bloqueado),
+busca as publicacoes da OAB 40.082/SC e envia para o sistema Becker na nuvem.
+
+INSTALACAO (uma unica vez)
+--------------------------
+1. Instalar Python: https://www.python.org/downloads/
+   -> na instalacao, MARCAR a opcao "Add python.exe to PATH"
+2. Abrir o Prompt de Comando e digitar:
+   pip install requests
+
+COMO USAR
+---------
+- Duplo clique em rodar_ponte.bat
+- Ele busca as publicacoes de hoje E dos ultimos 30 dias que faltarem,
+  envia ao sistema e ja dispara a analise (cliente, prioridade, prazo).
+- Pode rodar quantas vezes quiser: nada duplica.
+
+AGENDAR PARA RODAR SOZINHO (opcional, recomendado)
+--------------------------------------------------
+1. Abrir "Agendador de Tarefas" do Windows
+2. Criar Tarefa Basica -> nome: Ponte DJEN
+3. Disparador: Diariamente, 09:00 (criar uma segunda tarefa para 14:00)
+4. Acao: Iniciar um programa -> apontar para rodar_ponte.bat
+5. Concluir. Pronto: o DJEN entra no sistema todo dia sem ninguem fazer nada.
+
+SEGURANCA
+---------
+- Nao usa senha de ninguem: consulta apenas a API PUBLICA do DJEN (CNJ)
+- A chave dentro do script e a chave publica do sistema (so permite
+  enviar publicacoes e consultar; nao da acesso administrativo)
