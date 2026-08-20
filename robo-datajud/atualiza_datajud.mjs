@@ -67,6 +67,14 @@ async function sbInsert(table, rows) {
 }
 
 // ---- DataJud ----
+async function sbPatch(table, filtro, body) {
+  const r = await fetch(`${SB}/rest/v1/${table}?${filtro}`, {
+    method: 'PATCH',
+    headers: { ...sbHeaders, Prefer: 'return=minimal' },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error(`PATCH ${table} -> ${r.status} ${await r.text()}`);
+}
 async function consultarDataJud(alias, dg) {
   const r = await fetch(`https://api-publica.datajud.cnj.jus.br/api_publica_${alias}/_search`, {
     method: 'POST',
@@ -75,16 +83,29 @@ async function consultarDataJud(alias, dg) {
   });
   if (!r.ok) throw new Error(`DataJud ${alias} -> ${r.status}`);
   const j = await r.json();
-  const src = j?.hits?.hits?.[0]?._source;
-  return src?.movimentos || [];
+  return j?.hits?.hits?.[0]?._source || null; // devolve o _source inteiro
+}
+// monta um update só com os campos do processo que estão VAZIOS hoje
+function enriquecer(p, src) {
+  const vazio = v => v === null || v === undefined || String(v).trim() === '';
+  const up = {};
+  const classe = src.classe?.nome;
+  const assunto = (src.assuntos || []).map(a => a.nome).filter(Boolean).join('; ');
+  const orgao = src.orgaoJulgador?.nome;
+  const trib = src.tribunal;
+  if (classe && vazio(p.classe_processual)) up.classe_processual = classe;
+  if (assunto && vazio(p.assunto)) up.assunto = assunto;
+  if (orgao && vazio(p.vara)) up.vara = orgao;
+  if (trib && vazio(p.tribunal)) up.tribunal = trib;
+  return up;
 }
 
 async function main() {
   console.log(`[${new Date().toISOString()}] Robô DataJud iniciado`);
-  const processos = await sbGet('processos?select=id,numero&processo_pai_id=is.null&limit=5000');
+  const processos = await sbGet('processos?select=id,numero,classe_processual,assunto,vara,tribunal&processo_pai_id=is.null&limit=5000');
   console.log(`Processos a verificar: ${processos.length}`);
 
-  let novos = 0, ok = 0, semNumero = 0, semAlias = 0, erros = 0;
+  let novos = 0, ok = 0, semNumero = 0, semAlias = 0, erros = 0, enriquecidos = 0;
 
   for (const p of processos) {
     const dg = String(p.numero || '').replace(/\D/g, '');
@@ -93,24 +114,30 @@ async function main() {
     if (!alias) { semAlias++; continue; }
 
     try {
-      const movs = await consultarDataJud(alias, dg);
-      if (!movs.length) { ok++; await sleep(300); continue; }
+      const src = await consultarDataJud(alias, dg);
+      if (!src) { ok++; await sleep(300); continue; }
 
-      // movimentações já gravadas (dedupe por data+descrição)
-      const existentes = await sbGet(`movimentacoes?processo_id=eq.${p.id}&select=data,descricao`);
-      const vistos = new Set(existentes.map(m => `${m.data}|${(m.descricao || '').slice(0, 120)}`));
+      // 1) preencher campos vazios do processo
+      const up = enriquecer(p, src);
+      if (Object.keys(up).length) { await sbPatch('processos', `id=eq.${p.id}`, up); enriquecidos++; }
 
-      const inserir = [];
-      for (const m of movs) {
-        const data = (m.dataHora || '').slice(0, 10) || null;
-        const desc = m.nome || (m.complementosTabelados?.map(c => c.nome).join('; ')) || 'Movimentação';
-        const chave = `${data}|${desc.slice(0, 120)}`;
-        if (data && !vistos.has(chave)) {
-          vistos.add(chave);
-          inserir.push({ processo_id: p.id, data, tipo: 'DataJud', descricao: desc, usuario: 'Robô DataJud' });
+      // 2) importar movimentações novas (dedupe por data+descrição)
+      const movs = src.movimentos || [];
+      if (movs.length) {
+        const existentes = await sbGet(`movimentacoes?processo_id=eq.${p.id}&select=data,descricao`);
+        const vistos = new Set(existentes.map(m => `${m.data}|${(m.descricao || '').slice(0, 120)}`));
+        const inserir = [];
+        for (const m of movs) {
+          const data = (m.dataHora || '').slice(0, 10) || null;
+          const desc = m.nome || (m.complementosTabelados?.map(c => c.nome).join('; ')) || 'Movimentação';
+          const chave = `${data}|${desc.slice(0, 120)}`;
+          if (data && !vistos.has(chave)) {
+            vistos.add(chave);
+            inserir.push({ processo_id: p.id, data, tipo: 'DataJud', descricao: desc, usuario: 'Robô DataJud' });
+          }
         }
+        if (inserir.length) { await sbInsert('movimentacoes', inserir); novos += inserir.length; }
       }
-      if (inserir.length) { await sbInsert('movimentacoes', inserir); novos += inserir.length; }
       ok++;
     } catch (e) {
       erros++;
@@ -119,7 +146,7 @@ async function main() {
     await sleep(300); // ~3 req/s, dentro do limite do DataJud
   }
 
-  console.log(`[${new Date().toISOString()}] Fim. consultados=${ok} novos_andamentos=${novos} sem_numero=${semNumero} sem_alias=${semAlias} erros=${erros}`);
+  console.log(`[${new Date().toISOString()}] Fim. consultados=${ok} novos_andamentos=${novos} processos_enriquecidos=${enriquecidos} sem_numero=${semNumero} sem_alias=${semAlias} erros=${erros}`);
 }
 
 main().catch(e => { console.error('FALHA GERAL:', e); process.exit(1); });
