@@ -3469,7 +3469,7 @@ async function excluirMov(id){
 // Buckets que se organizam sozinhos por data — nada fica "amontoado":
 //   hoje = vence hoje e não cumprido | vencido = data passou e não cumprido (decorrido)
 //   aberto = futuro e não cumprido   | cumprido = marcado como cumprido
-let prazosCache=[]; let prazoBucket='ativos';
+let prazosCache=[]; let prazoBucket='ativos'; let prazoVerCumpridos=false;
 function _classPrazo(p){
   if(p.cumprido)return'cumprido';
   const hoje=new Date();hoje.setHours(0,0,0,0);
@@ -3518,8 +3518,18 @@ function renderPrazos(){
   else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
   else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.cumprido];
   else lista=[...g.hoje,...g.vencido,...g.aberto]; // 'ativos' (padrão): tudo que ainda exige ação
-  el.innerHTML=lista.length?`<div class="card"><div class="card-body">${renderPrazosLista(lista,true)}</div></div>`
+  let html = lista.length?`<div class="card"><div class="card-body">${renderPrazosLista(lista,true)}</div></div>`
     :`<div class="empty-state"><div class="icon">✅</div><p>${vazio}</p></div>`;
+  // Na visão padrão (ativos), as cumpridas ficam numa seção recolhida (fechada) no fim
+  if(prazoBucket==='ativos' && g.cumprido.length){
+    html += `<div style="margin-top:16px">
+      <button onclick="prazoVerCumpridos=!prazoVerCumpridos;renderPrazos()" style="width:100%;text-align:left;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.15);border-radius:10px;padding:10px 14px;cursor:pointer;color:#4ade80;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px">
+        <span>${prazoVerCumpridos?'▾':'▸'}</span> ✅ Cumpridos (${g.cumprido.length}) — ${prazoVerCumpridos?'ocultar':'clique para ver'}
+      </button>
+      ${prazoVerCumpridos?`<div class="card" style="margin-top:8px"><div class="card-body">${renderPrazosLista(g.cumprido,true)}</div></div>`:''}
+    </div>`;
+  }
+  el.innerHTML=html;
 }
 function renderPrazosLista(lista,comAcoes=false){
   if(!lista?.length)return'<div class="empty-state"><div class="icon">✅</div><p>Nenhum prazo.</p></div>';
