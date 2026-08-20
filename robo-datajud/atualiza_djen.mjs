@@ -53,13 +53,25 @@ async function sbUpsert(rows) {
   return rows.length;
 }
 
-async function consultarDJEN(params) {
-  const qs = new URLSearchParams({ ...params, pagina: '1', itensPorPagina: '100' });
+async function consultarDJENpagina(params, pagina) {
+  const qs = new URLSearchParams({ ...params, pagina: String(pagina), itensPorPagina: '100' });
   const r = await fetch(`${API}?${qs}`, { headers: { Accept: 'application/json' } });
   if (r.status === 403) throw new Error('403 (bloqueio de país — rode de um IP do Brasil / Oracle SP)');
   if (!r.ok) throw new Error(`DJEN -> ${r.status}`);
   const j = await r.json();
   return j?.items || j?.data || [];
+}
+// pega TODAS as páginas (para de buscar quando a página vem incompleta)
+async function consultarDJEN(params) {
+  let todos = [], pagina = 1;
+  for (;;) {
+    const lote = await consultarDJENpagina(params, pagina);
+    todos = todos.concat(lote);
+    if (lote.length < 100 || pagina >= 50) break; // fim ou trava de segurança
+    pagina++;
+    await sleep(300);
+  }
+  return todos;
 }
 
 function normaliza(item, mapaProc) {
