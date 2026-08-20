@@ -2099,15 +2099,19 @@ async function pAtendimento() {
     const r = await fetch(SUPA_URL + '/rest/v1/atendimentos?select=*,clientes(nome)&order=data_atendimento.desc', {
       headers: h()
     });
-    const atendimentos = await r.json();
+    const atendJson = await r.json();
+    const atendimentos = Array.isArray(atendJson) ? atendJson : [];
+    if (!Array.isArray(atendJson)) { console.error('Atendimentos:', atendJson); }
     const rc = await fetch(SUPA_URL + '/rest/v1/clientes?select=id,nome&order=nome.asc', {
       headers: h()
     });
-    const clientes = await rc.json();
+    const clientesJson = await rc.json();
+    const clientes = Array.isArray(clientesJson) ? clientesJson : [];
     const clientesOpts = clientes.map(c => `<option value="${c.id}">${c.nome}</option>`).join('');
+    const fmtData = v => { if(!v) return ''; const d=new Date(v); return isNaN(d)?v:d.toLocaleDateString('pt-BR'); };
     let rows = atendimentos.map(a => `
       <tr>
-        <td>${a.data_atendimento || ''}</td>
+        <td>${fmtData(a.data_atendimento)}</td>
         <td>${a.tipo || ''}</td>
         <td>${a.clientes ? a.clientes.nome : ''}</td>
         <td>${a.descricao || ''}</td>
@@ -4770,6 +4774,7 @@ async function editarTarefa(id){
     <div class="form-field"><label>Processo Vinculado</label>
       <select name="processo_id"><option value="">—</option>${(procs||[]).map(p=>`<option value="${p.id}" ${t.processo_id===p.id?'selected':''}>${p.numero||'Sem nº'}</option>`).join('')}</select>
     </div>
+    <div class="form-field"><label>Observação</label><textarea name="observacao">${escHtml(t.observacao||'')}</textarea></div>
   </form>`,async()=>{
     const d=coletarForm('form-tarefa');
     if(!d.titulo||!d.responsavel){toast('Preencha título e responsável.','erro');return false;}
