@@ -51,6 +51,27 @@ crontab -e
 Os andamentos novos aparecem sozinhos na tela do processo (seção "Últimas movimentações")
 e no site, sem ninguém digitar.
 
+## Robô DJEN (publicações/intimações) — roda SÓ no Oracle (Brasil)
+
+O arquivo `atualiza_djen.mjs` busca as **publicações/intimações oficiais** (DJEN/Comunica)
+e grava na tabela `publicacoes`.
+
+⚠️ **A API do DJEN é bloqueada por país** — só responde de **IP do Brasil**. Por isso ela
+**não roda no GitHub** (IP fora do Brasil); roda no **Oracle em região Brasil (São Paulo)**.
+
+Variáveis de ambiente extras:
+- `DJEN_OABS` (opcional): OABs do escritório, ex.: `12345/SC,67890/SC`. Se preenchido, busca
+  por OAB (pega até intimações de processos ainda não cadastrados). Se vazio, busca pelos CNJs já cadastrados.
+- `DJEN_DIAS` (opcional): janela de dias para trás (padrão 15).
+
+```bash
+# no Oracle (São Paulo), dentro de /opt/robo-datajud:
+set -a; source .env; set +a
+node atualiza_djen.mjs
+# agendar 1x/dia (07:00):
+# 0 7 * * * cd /opt/robo-datajud && set -a && . ./.env && set +a && /usr/bin/node atualiza_djen.mjs >> djen.log 2>&1
+```
+
 ## Segurança
 
 - O `.env` (com as chaves) **não** deve ir para o GitHub. Já está no `.gitignore`.
