@@ -3355,43 +3355,76 @@ async function excluirMov(id){
 }
 
 // ---- PRAZOS ----
-async function pPrazos(filtroInicial='pendentes'){
+// Buckets que se organizam sozinhos por data — nada fica "amontoado":
+//   hoje = vence hoje e não cumprido | vencido = data passou e não cumprido (decorrido)
+//   aberto = futuro e não cumprido   | cumprido = marcado como cumprido
+let prazosCache=[]; let prazoBucket='ativos';
+function _classPrazo(p){
+  if(p.cumprido)return'cumprido';
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  const dt=new Date((p.data||'')+'T12:00:00');dt.setHours(0,0,0,0);
+  if(isNaN(dt))return'aberto';
+  if(dt.getTime()===hoje.getTime())return'hoje';
+  if(dt<hoje)return'vencido';
+  return'aberto';
+}
+async function pPrazos(filtroInicial='ativos'){
+  const mapa={pendentes:'ativos',todos:'todos',cumpridos:'cumprido',audiencias:'audiencias'};
+  prazoBucket=mapa[filtroInicial]||filtroInicial||'ativos';
   document.getElementById('conteudo').innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
-  <div class="toolbar">
-    <select class="filtro" id="prazo-filtro" onchange="filtrarPrazos(this.value)">
-      <option value="pendentes">Pendentes</option><option value="todos">Todos</option><option value="cumpridos">Cumpridos</option><option value="audiencias">Audiências</option>
-    </select>
+  <div id="prazos-stats" class="stat-cards-row" style="grid-template-columns:repeat(4,1fr)"></div>
+  <div class="toolbar" style="justify-content:flex-end">
     <button class="btn btn-primary" onclick="novoPrazo()">+ Novo Prazo</button>
   </div>
   <div id="prazos-lista">Carregando...</div>`;
-  const sel=document.getElementById('prazo-filtro');if(sel)sel.value=filtroInicial;
-  filtrarPrazos(filtroInicial);
+  await carregarPrazos();
 }
-async function filtrarPrazos(f){
-  let q=supa.from('prazos').select('*,processos(numero)').order('data');
-  if(f==='pendentes')q=q.eq('cumprido',false);
-  if(f==='cumpridos')q=q.eq('cumprido',true);
-  if(f==='audiencias')q=q.eq('tipo','Audiência');
-  const{data,error}=await q.limit(100);
+async function carregarPrazos(){
+  const{data,error}=await supa.from('prazos').select('*,processos(numero)').order('data').limit(500);
+  prazosCache=(error||!data)?[]:data;
+  renderPrazos();
+}
+// filtrarPrazos mantido para compatibilidade (novoPrazo/cumprir/excluirPrazo chamam ele)
+function filtrarPrazos(f){ if(f){const m={pendentes:'ativos',todos:'todos',cumpridos:'cumprido',audiencias:'audiencias'};prazoBucket=m[f]||f;} carregarPrazos(); }
+function renderPrazos(){
+  const g={hoje:[],vencido:[],aberto:[],cumprido:[]};
+  prazosCache.forEach(p=>g[_classPrazo(p)].push(p));
+  const stats=document.getElementById('prazos-stats');
+  if(stats)stats.innerHTML=[
+    ['hoje','Vencendo HOJE',g.hoje.length,'#f87171'],
+    ['vencido','Decorridos',g.vencido.length,'#fbbf24'],
+    ['aberto','Em aberto',g.aberto.length,'#60a5fa'],
+    ['cumprido','Cumpridos',g.cumprido.length,'#4ade80']
+  ].map(([k,lbl,n,cor])=>`<div class="stat-card" style="cursor:pointer;${prazoBucket===k?'outline:2px solid '+cor+';outline-offset:-1px':''}" onclick="prazoBucket='${k}';renderPrazos()">
+    <div class="stat-val" style="color:${cor}">${n}</div><div class="stat-label">${lbl}</div></div>`).join('');
   const el=document.getElementById('prazos-lista');if(!el)return;
-  if(error||!data?.length){el.innerHTML='<div class="empty-state"><div class="icon">📅</div><p>Nenhum prazo encontrado.</p></div>';return;}
-  el.innerHTML=`<div class="card"><div class="card-body">${renderPrazosLista(data,true)}</div></div>`;
+  let lista, vazio='Nenhum prazo nesta categoria.';
+  if(prazoBucket==='hoje'){lista=g.hoje;vazio='Nenhum prazo vencendo hoje. 👍';}
+  else if(prazoBucket==='vencido'){lista=g.vencido;vazio='Nenhum prazo decorrido em aberto. ✅';}
+  else if(prazoBucket==='aberto')lista=g.aberto;
+  else if(prazoBucket==='cumprido')lista=g.cumprido;
+  else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
+  else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.cumprido];
+  else lista=[...g.hoje,...g.vencido,...g.aberto]; // 'ativos' (padrão): tudo que ainda exige ação
+  el.innerHTML=lista.length?`<div class="card"><div class="card-body">${renderPrazosLista(lista,true)}</div></div>`
+    :`<div class="empty-state"><div class="icon">✅</div><p>${vazio}</p></div>`;
 }
 function renderPrazosLista(lista,comAcoes=false){
   if(!lista?.length)return'<div class="empty-state"><div class="icon">✅</div><p>Nenhum prazo.</p></div>';
-  const hoje=new Date();hoje.setHours(0,0,0,0);
+  const badge={hoje:['HOJE','#f87171'],vencido:['DECORRIDO','#fbbf24'],aberto:['EM ABERTO','#60a5fa'],cumprido:['CUMPRIDO','#4ade80']};
+  const boxCls={hoje:'urgente',vencido:'urgente',aberto:'proximo',cumprido:'ok'};
   return lista.map(p=>{
-    const dt=new Date(p.data+'T12:00:00');
-    const urgente=dt<=new Date(hoje.getTime()+3*86400000)&&!p.cumprido;
+    const dt=new Date((p.data||'')+'T12:00:00');
+    const cls=_classPrazo(p);const[bl,bc]=badge[cls];
     return`<div class="prazo-item">
-      <div class="prazo-data-box ${urgente?'urgente':''}">
-        <div class="dia">${dt.getDate().toString().padStart(2,'0')}</div>
-        <div class="mes">${dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
+      <div class="prazo-data-box ${boxCls[cls]}">
+        <div class="dia">${isNaN(dt)?'--':dt.getDate().toString().padStart(2,'0')}</div>
+        <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
-        <h4>${p.descricao||'Prazo'}</h4>
-        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''} ${p.tipo||''}</p>
+        <h4>${p.descricao||'Prazo'} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span></h4>
+        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${p.tipo||''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}</p>
       </div>
       ${comAcoes?`<div style="display:flex;gap:6px;align-items:center">
         ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d" onclick="cumprir('${p.id}')">✓ Cumprir</button>`:'<span style="color:#15803d;font-size:12px">✅ Cumprido</span>'}
@@ -3418,17 +3451,17 @@ async function novoPrazo(){
     d.cumprido=false;if(!d.processo_id)delete d.processo_id;
     const{error}=await supa.from('prazos').insert([d]);
     if(error){toast('Erro: '+error.message,'erro');return false;}
-    toast('Prazo cadastrado!','ok');filtrarPrazos(document.getElementById('prazo-filtro')?.value||'pendentes');
+    toast('Prazo cadastrado!','ok');carregarPrazos();
   });
 }
 async function cumprir(id){
   await supa.from('prazos').update({cumprido:true}).eq('id',id);
-  toast('Prazo cumprido!','ok');filtrarPrazos(document.getElementById('prazo-filtro')?.value||'pendentes');
+  toast('Prazo cumprido!','ok');carregarPrazos();
 }
 async function excluirPrazo(id){
   if(!confirm('Excluir prazo?'))return;
   await supa.from('prazos').delete().eq('id',id);
-  toast('Removido.','ok');filtrarPrazos(document.getElementById('prazo-filtro')?.value||'pendentes');
+  toast('Removido.','ok');carregarPrazos();
 }
 
 // ---- FINANCEIRO ----
