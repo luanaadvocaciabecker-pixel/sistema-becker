@@ -3074,6 +3074,117 @@ async function excluirProcesso(id,num){
     if(error){toast('Erro.','erro');return false;}toast('Removido.','ok');buscarProcessos();},'Excluir',true);
 }
 function abrirMovs(pid){ir('movimentacoes');setTimeout(()=>{movsFiltroProcesso=pid;const s=document.getElementById('movs-select');if(s)s.value=pid;carregarMovs();},150);}
+
+// ---- DETALHE DO PROCESSO (acesso ao processo todo) ----
+async function abrirProcesso(id){
+  const c=document.getElementById('conteudo');
+  c.innerHTML='<p style="text-align:center;padding:40px;color:#94a3b8">Carregando processo...</p>';
+  const res=await fetch(`${SUPA_URL}/rest/v1/processos?id=eq.${id}&select=*,clientes(id,nome,telefone,whatsapp)`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+  const rows=res.ok?await res.json():[];
+  const p=Array.isArray(rows)?rows[0]:null;
+  if(!p){toast('Erro ao carregar processo.','erro');ir('judiciais');return;}
+  const campo=(lbl,val,cor)=>val?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${lbl}</span><div style="margin-top:3px${cor?';color:'+cor:''}">${val}</div></div>`:'';
+  const atualizado=p.updated_at?new Date(p.updated_at).toLocaleDateString('pt-BR'):'';
+  c.innerHTML=`
+  <div style="margin-bottom:16px"><button class="btn btn-secondary" onclick="ir('judiciais')">← Voltar</button></div>
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-header">
+      <h3 style="font-family:monospace;font-size:16px">⚖️ ${p.numero||'Sem nº CNJ'}</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="tag ${tagSituacaoProcesso(p.situacao)}">${rotuloSituacaoProcesso(p.situacao)}</span>
+        <button class="btn btn-secondary btn-sm" onclick="editarProcesso('${p.id}')">✏️ Editar</button>
+        <button class="btn btn-secondary btn-sm" onclick="abrirMovs('${p.id}')">🔄 Movimentações</button>
+        <button class="btn btn-primary btn-sm" onclick="uploadDocProcesso('${p.id}')">📎 Anexar íntegra/documento</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;font-size:13px">
+        ${campo('Cliente',p.clientes?.nome?`<a href="#" onclick="abrirCliente('${p.clientes.id}');return false" style="color:var(--azul3)">${p.clientes.nome}</a>`:'—')}
+        ${campo('Advogado responsável',p.advogado_responsavel,'var(--azul3)')}
+        ${campo('Tribunal',p.tribunal)}
+        ${campo('Comarca',p.comarca)}
+        ${campo('Vara',p.vara)}
+        ${campo('Classe',p.classe_processual)}
+        ${campo('Assunto',p.assunto)}
+        ${campo('Área',p.area)}
+        ${campo('Parte contrária',p.parte_contraria)}
+        ${campo('Valor da causa',p.valor_causa!=null?fmtMoeda(p.valor_causa):'')}
+        ${campo('Atualizado em',atualizado)}
+      </div>
+      ${p.observacoes?`<div style="margin-top:14px;padding:12px;background:rgba(13,27,42,0.8);border-radius:8px;font-size:13px;color:#A1A1AA;line-height:1.6;border-left:3px solid var(--azul3)">${p.observacoes}</div>`:''}
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start" id="proc-cols">
+    <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🔄 Últimas movimentações</h4><div id="proc-movs">Carregando...</div></div>
+    <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">⏰ Prazos</h4><div id="proc-prazos">Carregando...</div></div>
+  </div>
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">📄 Documentos & íntegra</h4><div id="proc-docs">Carregando...</div></div>`;
+  carregarMovsProcesso(id);
+  carregarPrazosProcesso(id);
+  carregarDocsProcesso(id);
+}
+async function carregarMovsProcesso(id){
+  const el=document.getElementById('proc-movs');if(!el)return;
+  const{data}=await supa.from('movimentacoes').select('data,descricao,tipo').eq('processo_id',id).order('data',{ascending:false}).limit(15);
+  if(!data?.length){el.innerHTML='<div class="empty-state" style="padding:20px"><p style="font-size:13px">Sem movimentações. A atualização automática (DataJud) vai preencher aqui.</p></div>';return;}
+  el.innerHTML=`<div class="card"><div class="card-body" style="max-height:340px;overflow:auto">${data.map(m=>`
+    <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+      <div style="font-size:11px;color:#64748b">${m.data?new Date(m.data+'T12:00:00').toLocaleDateString('pt-BR'):''} ${m.tipo?'· '+m.tipo:''}</div>
+      <div style="font-size:13px;margin-top:2px">${m.descricao||''}</div>
+    </div>`).join('')}</div></div>`;
+}
+async function carregarPrazosProcesso(id){
+  const el=document.getElementById('proc-prazos');if(!el)return;
+  const{data}=await supa.from('prazos').select('*,processos(numero)').eq('processo_id',id).order('data').limit(30);
+  el.innerHTML=`<div class="card"><div class="card-body">${renderPrazosLista(data||[],true)}</div></div>`;
+}
+async function carregarDocsProcesso(id){
+  const el=document.getElementById('proc-docs');if(!el)return;
+  const res=await fetch(`${SUPA_URL}/rest/v1/documentos?processo_id=eq.${id}&select=*&order=created_at.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+  const docs=res.ok?await res.json():[];
+  const lista=Array.isArray(docs)?docs:[];
+  el.innerHTML=`<div class="card"><div class="card-body">
+    <div style="margin-bottom:10px"><button class="btn btn-primary btn-sm" onclick="uploadDocProcesso('${id}')">📎 Anexar íntegra/documento</button></div>
+    ${!lista.length?'<div class="empty-state" style="padding:16px"><p style="font-size:13px">Nenhum documento anexado a este processo.</p></div>':
+      lista.map(d=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+        <span style="font-size:18px">📄</span>
+        <div style="flex:1;min-width:0">
+          <a href="${d.url}" target="_blank" rel="noopener" style="color:var(--azul3);font-size:13px;word-break:break-all">${d.nome||'documento'}</a>
+          <div style="font-size:11px;color:#64748b">${d.created_at?new Date(d.created_at).toLocaleDateString('pt-BR'):''}${d.tamanho?' · '+(d.tamanho/1024/1024).toFixed(1)+' MB':''}</div>
+        </div>
+        <button class="btn-icon" onclick="excluirDocProcesso('${d.id}','${id}')">🗑️</button>
+      </div>`).join('')}
+  </div></div>`;
+}
+function uploadDocProcesso(processoId){
+  const inp=document.createElement('input');
+  inp.type='file';inp.accept='.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt,.zip';
+  inp.onchange=async()=>{
+    const file=inp.files[0];if(!file)return;
+    toast('Enviando arquivo...','');
+    const path=`proc/${processoId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+    const upRes=await fetch(`${SUPA_URL}/storage/v1/object/documentos-clientes/${path}`,{
+      method:'POST',
+      headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+      body:file
+    });
+    if(!upRes.ok){const err=await upRes.json().catch(()=>({}));toast('Erro no upload: '+(err.message||err.error||upRes.status),'erro');return;}
+    const url=`${SUPA_URL}/storage/v1/object/public/documentos-clientes/${path}`;
+    const saveRes=await fetch(`${SUPA_URL}/rest/v1/documentos`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Prefer':'return=minimal'},
+      body:JSON.stringify({nome:file.name,tipo:file.type,url,tamanho:file.size,processo_id:processoId})
+    });
+    if(saveRes.ok){toast('✅ Documento anexado ao processo!','ok');carregarDocsProcesso(processoId);}
+    else toast('Arquivo enviado mas erro ao salvar registro.','erro');
+  };
+  inp.click();
+}
+async function excluirDocProcesso(docId,processoId){
+  if(!confirm('Excluir este documento?'))return;
+  await fetch(`${SUPA_URL}/rest/v1/documentos?id=eq.${docId}`,{method:'DELETE',headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+  toast('Removido.','ok');carregarDocsProcesso(processoId);
+}
 function rotuloSituacaoProcesso(s){
   if(!s)return'Em andamento';
   if(['Ativo','Em andamento','Suspenso','Arquivado'].includes(s))return s;
