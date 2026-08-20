@@ -39,3 +39,10 @@ O robô agora responde em 2 níveis:
   número do processo. Retorna dados (classe, assunto, vara, comarca, tribunal) + últimos
   12 andamentos + prazos em aberto. Funções SQL: `processos_do_cliente`, `montar_detalhe_processo`.
 - Trava LGPD mantida: só abre processo do próprio cliente identificado.
+
+## Atualização — camada de IA que "conversa" (v4)
+A Edge Function agora tem uma camada opcional de IA (Claude Haiku) que reescreve o
+dossiê cru em linguagem simples e acolhedora ("Oi Fulano, seu processo teve X e agora Y").
+- Liga com a env `ANTHROPIC_API_KEY` (e opcional `ANTHROPIC_MODEL`, padrão claude-haiku-4-5).
+- Regras no system prompt: usar SOMENTE os dados fornecidos (não inventa), traduzir juridiquês,
+  sem conselho jurídico, curto. Qualquer erro/sem chave → cai no texto "lista" (grátis).
