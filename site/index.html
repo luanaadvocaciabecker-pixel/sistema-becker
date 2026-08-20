@@ -1561,6 +1561,7 @@ tbody tr:hover td{
       <div class="nav-item" onclick="ir('movimentacoes')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg> Movimentações</div>
       <div class="nav-item" onclick="ir('datajud')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg> DataJud / CNJ</div>
       <div class="nav-item" onclick="ir('prazos')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Prazos e Agenda</div>
+      <div class="nav-item" onclick="ir('publicacoes')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg> Publicações (DJEN)</div>
       <div class="nav-item" onclick="ir('documentos')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8m8 4H8m2-8H8"/></svg> Documentos</div>
 
       <div class="nav-section">Administrativo</div>
@@ -2218,6 +2219,7 @@ function ir(pagina){
     administrativos:['Administrativos','Processos extrajudiciais — INSS, órgãos, prefeituras'],
     judiciais:['Judiciais','Gestão processual judicial — processos com CNJ'],
     prazos:['Prazos','Controle de datas e vencimentos'],
+    publicacoes:['Publicações (DJEN)','Intimações e publicações oficiais — gere prazos a partir delas'],
     audiencias:['Prazos e Agenda','Prazos, audiências e compromissos'],
     movimentacoes:['Movimentações','Histórico processual'],
     documentos:['Documentos','Arquivos e documentos'],
@@ -2242,7 +2244,7 @@ function ir(pagina){
   const mods={
     dashboard:pDashboard,clientes:pClientes,processos:pJudiciais,
     administrativos:pAdministrativos,judiciais:pJudiciais,
-    movimentacoes:pMovimentacoes,prazos:pPrazos,audiencias:pAudiencias,
+    movimentacoes:pMovimentacoes,prazos:pPrazos,audiencias:pAudiencias,publicacoes:pPublicacoes,
     financeiro:pFinanceiro,documentos:pDocumentos,datajud:pDatajud,
     config:pConfig,contratos:pModuloSimples,cartorio:pModuloSimples,
     nfe:pModuloSimples,documentacao:pModuloSimples,extrajudiciais:pModuloSimples,djen:pDjen,atendimento:pAtendimento,tarefas:pTarefas,alvaras:pAlvaras,
@@ -3583,6 +3585,93 @@ async function excluirPrazo(id){
   if(!confirm('Excluir prazo?'))return;
   await supa.from('prazos').delete().eq('id',id);
   toast('Removido.','ok');carregarPrazos();
+}
+
+// ---- PUBLICAÇÕES (DJEN) ----
+let pubFiltro='naolidas';
+async function pPublicacoes(){
+  const c=document.getElementById('conteudo');
+  c.innerHTML=`
+  <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0">← Voltar</button>
+  <div id="pub-stats" class="stat-cards-row" style="grid-template-columns:repeat(3,1fr)"></div>
+  <div class="toolbar">
+    <select class="filtro" onchange="pubFiltro=this.value;carregarPublicacoes()">
+      <option value="naolidas">Não lidas</option>
+      <option value="todas">Todas</option>
+      <option value="semvinculo">Sem processo vinculado</option>
+      <option value="comprazo">Prazo já gerado</option>
+    </select>
+    <button class="btn btn-secondary" onclick="carregarPublicacoes()">↻ Atualizar</button>
+  </div>
+  <div class="card"><div class="table-wrap"><table>
+    <thead><tr><th>Data</th><th>Tribunal</th><th>Tipo</th><th>Processo</th><th>Trecho</th><th></th></tr></thead>
+    <tbody id="pub-tbody"><tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8">Carregando...</td></tr></tbody>
+  </table></div></div>`;
+  const sel=c.querySelector('.filtro'); if(sel) sel.value=pubFiltro;
+  carregarPublicacoes();
+}
+async function carregarPublicacoes(){
+  const{data:all}=await supa.from('publicacoes').select('id,lida,processo_id').limit(5000);
+  const naoLidas=(all||[]).filter(p=>!p.lida).length;
+  const semVinc=(all||[]).filter(p=>!p.processo_id).length;
+  const st=document.getElementById('pub-stats');
+  if(st)st.innerHTML=[
+    ['Não lidas',naoLidas,'#f87171'],
+    ['Sem processo',semVinc,'#fbbf24'],
+    ['Total',(all||[]).length,'#60a5fa']
+  ].map(([l,n,cor])=>`<div class="stat-card"><div class="stat-val" style="color:${cor}">${n}</div><div class="stat-label">${l}</div></div>`).join('');
+  let q=supa.from('publicacoes').select('*,processos(numero,clientes(nome))').order('data_disponibilizacao',{ascending:false}).limit(300);
+  if(pubFiltro==='naolidas')q=q.eq('lida',false);
+  else if(pubFiltro==='semvinculo')q=q.is('processo_id',null);
+  else if(pubFiltro==='comprazo')q=q.eq('prazo_gerado',true);
+  const{data,error}=await q;
+  const tb=document.getElementById('pub-tbody');if(!tb)return;
+  if(error){tb.innerHTML=`<tr><td colspan="6" style="color:#ef4444;padding:20px">Erro: ${error.message}</td></tr>`;return;}
+  if(!data?.length){tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8">Nenhuma publicação nesta categoria.</td></tr>';return;}
+  tb.innerHTML=data.map(p=>`<tr style="${p.lida?'opacity:.5':''}">
+    <td style="font-size:12px;white-space:nowrap">${p.data_disponibilizacao?new Date(p.data_disponibilizacao+'T12:00:00').toLocaleDateString('pt-BR'):''}</td>
+    <td style="font-size:12px">${p.tribunal||''}</td>
+    <td style="font-size:12px">${p.tipo||''}</td>
+    <td style="font-size:12px">${p.processos?.numero?`<a href="#" onclick="abrirProcesso('${p.processo_id}');return false" style="color:var(--azul3)">${p.processos.numero}</a>`:'<span style="color:#fbbf24">sem vínculo</span>'}</td>
+    <td style="font-size:12px;max-width:340px;color:#94a3b8">${truncar((p.texto||'').replace(/\s+/g,' '),90)}</td>
+    <td style="white-space:nowrap"><div style="display:flex;gap:4px;align-items:center">
+      <button class="btn-icon" title="Ver texto completo" onclick="verTextoPub('${p.id}')">👁️</button>
+      ${!p.prazo_gerado?`<button class="btn btn-sm" style="background:#dbeafe;color:#1d4ed8" onclick="gerarPrazoDaPub('${p.id}')">+ Prazo</button>`:'<span style="color:#15803d;font-size:11px">✓ prazo</span>'}
+      ${!p.lida?`<button class="btn-icon" title="Marcar como lida" onclick="marcarLidaPub('${p.id}')">✔️</button>`:''}
+    </div></td>
+  </tr>`).join('');
+}
+async function verTextoPub(id){
+  const{data:p}=await supa.from('publicacoes').select('*,processos(numero)').eq('id',id).single();
+  if(!p){toast('Publicação não encontrada.','erro');return;}
+  abrirModal('📰 '+(p.tribunal||'')+' — '+(p.data_disponibilizacao||''),
+    `<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">${p.tipo||''} ${p.processos?.numero?'· Proc. '+p.processos.numero:''} ${p.link?'· <a href="'+p.link+'" target="_blank" rel="noopener" style="color:var(--azul3)">abrir no DJEN</a>':''}</div>
+     <div style="white-space:pre-wrap;font-size:13px;line-height:1.5;max-height:55vh;overflow:auto;background:rgba(7,18,32,.6);padding:12px;border-radius:8px">${escHtml(p.texto||'(sem texto)')}</div>`,
+    null,'Fechar',false,true);
+  supa.from('publicacoes').update({lida:true}).eq('id',id);
+}
+async function marcarLidaPub(id){
+  await supa.from('publicacoes').update({lida:true}).eq('id',id);
+  toast('Marcada como lida.','ok');carregarPublicacoes();
+}
+async function gerarPrazoDaPub(id){
+  const{data:p}=await supa.from('publicacoes').select('*').eq('id',id).single();
+  if(!p){toast('Publicação não encontrada.','erro');return;}
+  abrirModal('Gerar prazo da publicação',`<form id="form-pub-prazo">
+    <div class="form-field"><label>Data do prazo *</label><input type="date" name="data"></div>
+    <div class="form-field"><label>Descrição *</label><input name="descricao" value="${escHtml((p.tipo||'Prazo')+' — '+(p.tribunal||''))}"></div>
+    <div class="form-field"><label>Tipo</label><select name="tipo"><option>Processual</option><option>Recursal</option><option>Administrativo</option><option>Audiência</option><option>Outro</option></select></div>
+    <div class="form-field"><label>Publicação (referência)</label><textarea rows="3" readonly style="opacity:.7">${escHtml(truncar((p.texto||'').replace(/\s+/g,' '),400))}</textarea></div>
+  </form>`,async()=>{
+    const d=coletarForm('form-pub-prazo');
+    if(!d.data||!d.descricao){toast('Preencha a data e a descrição.','erro');return false;}
+    const reg={data:d.data,descricao:d.descricao,tipo:d.tipo||'Processual',cumprido:false,observacao:'Origem: DJEN '+(p.tribunal||'')+' '+(p.data_disponibilizacao||'')};
+    if(p.processo_id)reg.processo_id=p.processo_id;
+    const{error}=await supa.from('prazos').insert([reg]);
+    if(error){toast('Erro: '+error.message,'erro');return false;}
+    await supa.from('publicacoes').update({prazo_gerado:true,lida:true}).eq('id',id);
+    toast('✅ Prazo criado a partir da publicação!','ok');carregarPublicacoes();
+  });
 }
 
 // ---- FINANCEIRO ----
