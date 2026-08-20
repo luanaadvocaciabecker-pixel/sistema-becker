@@ -51,13 +51,22 @@ crontab -e
 Os andamentos novos aparecem sozinhos na tela do processo (seção "Últimas movimentações")
 e no site, sem ninguém digitar.
 
-## Robô DJEN (publicações/intimações) — roda SÓ no Oracle (Brasil)
+## Robô DJEN (publicações/intimações)
 
-O arquivo `atualiza_djen.mjs` busca as **publicações/intimações oficiais** (DJEN/Comunica)
-e grava na tabela `publicacoes`.
+> ✅ **EM PRODUÇÃO: o DJEN roda automático DENTRO do Supabase** (pg_cron + pg_net),
+> todo dia às 07:00/07:06 (BRT). O banco fica em São Paulo (IP do Brasil), então passa
+> pelo bloqueio de país do DJEN. **Não precisa de Oracle nem de rodar nada à mão.**
+>
+> Objetos no banco: função `djen_fire()` (dispara os pedidos), `djen_process()` (grava as
+> publicações em `public.publicacoes`), tabela de rastreio `djen_req`, e os agendamentos
+> `djen_fire_diario` / `djen_process_diario` em `cron.job`.
+> A Edge Function `djen` NÃO é usada (o egress dela sai fora do Brasil e leva 403).
+
+O script `atualiza_djen.mjs` abaixo é uma **alternativa/backup** para rodar manualmente
+(ex.: Oracle em região Brasil ou Cloud Shell de São Paulo) — não é o método ativo.
 
 ⚠️ **A API do DJEN é bloqueada por país** — só responde de **IP do Brasil**. Por isso ela
-**não roda no GitHub** (IP fora do Brasil); roda no **Oracle em região Brasil (São Paulo)**.
+**não roda no GitHub** (IP fora do Brasil).
 
 Variáveis de ambiente extras:
 - `DJEN_OABS` (opcional): OABs do escritório, ex.: `12345/SC,67890/SC`. Se preenchido, busca
