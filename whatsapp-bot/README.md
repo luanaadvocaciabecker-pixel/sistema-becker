@@ -31,3 +31,11 @@ sozinho, com segurança (LGPD).
 - Preencher telefone dos clientes (hoje ~420 de 1466 têm telefone) para reconhecer mais gente pelo número.
 - Resposta em linguagem natural com IA (opcional).
 - Estado de conversa (lembrar que já pediu o CPF) — hoje é sem estado (funciona, mas cada mensagem é avaliada isolada).
+
+## Atualização — detalhe do processo (v3)
+O robô agora responde em 2 níveis:
+- **Resumo** (padrão): última movimentação de cada processo do cliente.
+- **Detalhe completo**: quando o cliente pede "histórico/detalhe/andamentos" ou envia o
+  número do processo. Retorna dados (classe, assunto, vara, comarca, tribunal) + últimos
+  12 andamentos + prazos em aberto. Funções SQL: `processos_do_cliente`, `montar_detalhe_processo`.
+- Trava LGPD mantida: só abre processo do próprio cliente identificado.
