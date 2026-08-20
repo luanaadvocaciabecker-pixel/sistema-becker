@@ -46,3 +46,9 @@ dossiê cru em linguagem simples e acolhedora ("Oi Fulano, seu processo teve X e
 - Liga com a env `ANTHROPIC_API_KEY` (e opcional `ANTHROPIC_MODEL`, padrão claude-haiku-4-5).
 - Regras no system prompt: usar SOMENTE os dados fornecidos (não inventa), traduzir juridiquês,
   sem conselho jurídico, curto. Qualquer erro/sem chave → cai no texto "lista" (grátis).
+
+## Atualização — tom formal-humano (v5)
+System prompt da IA reescrito para soar como o escritório falando com o cliente:
+formal, natural e cordial, "Prezado(a) [nome]... Atenciosamente, Equipe Becker Advogados",
+sem cara de IA/robô, sem emojis, mantendo a relação advogado-cliente. Guardas mantidas
+(usar só os dados; sem conselho/opinião jurídica). Modelo padrão: claude-haiku-4-5.
