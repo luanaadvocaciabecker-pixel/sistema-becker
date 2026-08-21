@@ -1,14 +1,27 @@
 // Edge Function `whatsapp` — deployada no Supabase (cópia para versionamento).
-// Recebe o webhook do Evolution (ou um teste {test:true,from,text}),
-// identifica o cliente e responde o status do processo (com trava de LGPD).
+// Recebe o webhook do WhatsApp, identifica o cliente e responde o status do
+// processo com trava de LGPD + camada de IA (tom formal-humano).
+//
+// Suporta 3 formatos de entrada (detecta sozinho):
+//   1) Meta Cloud API (oficial)  -> GET (verificação) + POST entry[].changes[].value.messages[]
+//   2) Evolution API (backup)    -> POST { data.key.remoteJid, data.message... }
+//   3) Teste manual              -> POST { test:true, from, text }
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const SB = Deno.env.get("SUPABASE_URL")!;
 const SVC = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const WTOKEN = Deno.env.get("WHATSAPP_TOKEN") || "";
+const WTOKEN = Deno.env.get("WHATSAPP_TOKEN") || ""; // tb é o verify_token do webhook Meta (GET)
+// Meta Cloud API (oficial)
+const META_TOKEN = Deno.env.get("META_TOKEN") || "";       // token permanente do WABA
+const META_PHONE_ID = Deno.env.get("META_PHONE_ID") || ""; // Phone number ID
+const META_VER = Deno.env.get("META_GRAPH_VER") || "v21.0";
+// Evolution (backup)
 const EVO_URL = Deno.env.get("EVOLUTION_URL") || "";
 const EVO_KEY = Deno.env.get("EVOLUTION_KEY") || "";
 const EVO_INST = Deno.env.get("EVOLUTION_INSTANCE") || "";
+// IA
+const AI_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
+const AI_MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-haiku-4-5";
 const sbH = { apikey: SVC, Authorization: `Bearer ${SVC}`, "Content-Type": "application/json" };
 
 async function rpc(fn: string, args: unknown) {
@@ -19,17 +32,57 @@ async function rpc(fn: string, args: unknown) {
 async function logar(row: Record<string, unknown>) {
   await fetch(`${SB}/rest/v1/whatsapp_log`, { method: "POST", headers: { ...sbH, Prefer: "return=minimal" }, body: JSON.stringify(row) }).catch(() => {});
 }
-async function enviar(numero: string, texto: string) {
-  if (!EVO_URL || !EVO_KEY || !EVO_INST) return false;
-  const r = await fetch(`${EVO_URL}/message/sendText/${EVO_INST}`, {
-    method: "POST", headers: { "apikey": EVO_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({ number: numero, text: texto }),
-  });
-  return r.ok;
+
+// Envia a resposta pelo canal configurado. Prioriza Meta; cai pro Evolution; senão modo teste.
+async function enviar(numero: string, texto: string): Promise<boolean> {
+  if (META_TOKEN && META_PHONE_ID) {
+    const r = await fetch(`https://graph.facebook.com/${META_VER}/${META_PHONE_ID}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${META_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", to: numero, type: "text", text: { body: texto } }),
+    });
+    return r.ok;
+  }
+  if (EVO_URL && EVO_KEY && EVO_INST) {
+    const r = await fetch(`${EVO_URL}/message/sendText/${EVO_INST}`, {
+      method: "POST", headers: { "apikey": EVO_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ number: numero, text: texto }),
+    });
+    return r.ok;
+  }
+  return false; // modo teste: só devolve o texto na resposta HTTP
 }
 
-const PEDIR_CPF = "Olá! 👋 Sou o assistente virtual da *Becker Advogados*. Para confirmar sua identidade e te passar a situação do seu processo com segurança, me envie o seu *CPF* (somente os números). 🔒";
-const NAO_ACHOU = "Não localizei um cadastro com esses dados. Um de nossos atendentes vai te responder em breve. 🙏";
+const SYSTEM_IA = [
+  "Você redige, em nome do escritório Becker Advogados, uma mensagem de WhatsApp para o próprio cliente, atualizando-o sobre o processo dele.",
+  "Tom: FORMAL, porém natural, cordial e humano — como um advogado atencioso escreveria ao seu cliente, preservando a relação advogado-cliente.",
+  "NUNCA soe robótico e NÃO se identifique como IA, robô, 'assistente virtual' ou 'resposta automática'.",
+  "Regras invioláveis: use SOMENTE os dados fornecidos — jamais invente fatos, datas, valores, prazos ou resultados; se algum dado não constar, não mencione.",
+  "Traduza os termos jurídicos para uma linguagem que o cliente entenda, mantendo a seriedade e a precisão.",
+  "Explique de forma acolhedora o que aconteceu recentemente no processo e em que ponto ele está agora.",
+  "NÃO dê opinião, conselho, prognóstico ou estratégia jurídica. Se o cliente pedir isso, diga com cordialidade que um advogado do escritório o atenderá pessoalmente.",
+  "Estrutura: inicie com 'Prezado(a) [primeiro nome],'; escreva de 3 a 7 linhas; português do Brasil; sem emojis; encerre com 'Atenciosamente,' seguido de 'Equipe Becker Advogados.'"
+].join(" ");
+
+async function explicar(nome: string, dossie: string, pergunta: string): Promise<string | null> {
+  if (!AI_KEY) return null;
+  const user = `Nome do cliente: ${nome}\nPergunta/mensagem do cliente: "${pergunta}"\n\nDados reais do(s) processo(s) (use apenas isto):\n${dossie}`;
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": AI_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      body: JSON.stringify({ model: AI_MODEL, max_tokens: 600, system: SYSTEM_IA, messages: [{ role: "user", content: user }] })
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const txt = (j?.content || []).map((c: any) => c?.text || "").join("").trim();
+    return txt || null;
+  } catch { return null; }
+}
+
+const PEDIR_CPF = "Olá! Para confirmarmos sua identidade e tratarmos do seu processo com segurança, por favor, informe o seu CPF (somente os números). Agradecemos a compreensão.";
+const NAO_ACHOU = "Não localizamos um cadastro com esses dados. Um de nossos atendentes entrará em contato com você em breve. Atenciosamente, Equipe Becker Advogados.";
+const DICA = "\n\nPara ver o histórico completo de um processo, responda com o número dele.";
 
 function extrairCpf(texto: string): string {
   const m = texto.match(/\d{3}\D?\d{3}\D?\d{3}\D?\d{2}/);
@@ -38,43 +91,107 @@ function extrairCpf(texto: string): string {
   return dig.length >= 11 ? dig.slice(0, 14) : "";
 }
 
+async function montarResposta(clienteId: number, nome: string, texto: string) {
+  const procs = await rpc("processos_do_cliente", { p_id: clienteId });
+  const lista = Array.isArray(procs) ? procs : [];
+  const runs = texto.match(/\d{6,}/g) || [];
+  let escolhido: any = null;
+  for (const run of runs) {
+    const p = lista.find((pp: any) => String(pp.numero || "").replace(/\D/g, "").includes(run));
+    if (p) { escolhido = p; break; }
+  }
+  const querDetalhe = /detalh|hist[oó]ric|andament|complet|\btudo\b|movimenta|documento/i.test(texto);
+  if (!escolhido && querDetalhe) {
+    if (lista.length === 1) escolhido = lista[0];
+    else if (lista.length > 1) {
+      const nums = lista.map((p: any) => "• " + (p.numero || "(sem nº)")).join("\n");
+      return { texto: "Você possui " + lista.length + " processos conosco. Sobre qual deseja o histórico completo? Por favor, responda com o número:\n\n" + nums, status: "escolher_processo" };
+    }
+  }
+  let base: string; let status: string;
+  if (escolhido) { base = await rpc("montar_detalhe_processo", { p_processo_id: escolhido.id }) as unknown as string; status = "detalhe"; }
+  else { base = (await rpc("montar_status_cliente", { p_id: clienteId }) as unknown as string) + (lista.length ? DICA : ""); status = "identificado"; }
+  const natural = await explicar(nome, base, texto);
+  if (natural) return { texto: natural, status: status + "_ia" };
+  return { texto: base, status };
+}
+
 async function responder(telefone: string, texto: string) {
   const porTel = await rpc("cliente_por_telefone", { p_tel: telefone });
   if (Array.isArray(porTel) && porTel.length === 1) {
-    const msg = await rpc("montar_status_cliente", { p_id: porTel[0].id });
-    return { texto: msg as unknown as string, cliente_id: porTel[0].id, status: "identificado" };
+    const r = await montarResposta(porTel[0].id, porTel[0].nome, texto);
+    return { ...r, cliente_id: porTel[0].id };
   }
   const cpf = extrairCpf(texto);
   if (cpf) {
     const porCpf = await rpc("cliente_por_cpf", { p_cpf: cpf });
     if (Array.isArray(porCpf) && porCpf.length === 1) {
-      const msg = await rpc("montar_status_cliente", { p_id: porCpf[0].id });
-      return { texto: msg as unknown as string, cliente_id: porCpf[0].id, status: "identificado_cpf" };
+      const r = await montarResposta(porCpf[0].id, porCpf[0].nome, texto);
+      return { ...r, cliente_id: porCpf[0].id };
     }
     return { texto: NAO_ACHOU, cliente_id: null, status: "nao_encontrado" };
   }
   return { texto: PEDIR_CPF, cliente_id: null, status: "pediu_cpf" };
 }
 
+// Extrai { telefone, texto } dos 3 formatos. Retorna null se não for msg de texto de cliente.
 function extrair(body: any): { telefone: string; texto: string } | null {
+  // 1) teste manual
   if (body?.test) return { telefone: String(body.from || ""), texto: String(body.text || "") };
+
+  // 2) Meta Cloud API
+  const val = body?.entry?.[0]?.changes?.[0]?.value;
+  if (val) {
+    const m = val.messages?.[0];
+    if (!m) return null; // status de entrega/leitura — ignora
+    const telefone = String(m.from || "");
+    const texto = m.text?.body
+      || m.button?.text
+      || m.interactive?.button_reply?.title
+      || m.interactive?.list_reply?.title
+      || "";
+    if (!telefone) return null;
+    return { telefone, texto: String(texto) };
+  }
+
+  // 3) Evolution
   const d = body?.data;
-  if (!d) return null;
-  if (d.key?.fromMe) return null;
-  const jid = String(d.key?.remoteJid || "");
-  if (!jid || jid.endsWith("@g.us")) return null;
-  const telefone = jid.split("@")[0];
-  const texto = d.message?.conversation || d.message?.extendedTextMessage?.text || d.message?.ephemeralMessage?.message?.extendedTextMessage?.text || "";
-  return { telefone, texto: String(texto) };
+  if (d) {
+    if (d.key?.fromMe) return null;
+    const jid = String(d.key?.remoteJid || "");
+    if (!jid || jid.endsWith("@g.us")) return null;
+    const telefone = jid.split("@")[0];
+    const texto = d.message?.conversation || d.message?.extendedTextMessage?.text || d.message?.ephemeralMessage?.message?.extendedTextMessage?.text || "";
+    return { telefone, texto: String(texto) };
+  }
+
+  return null;
 }
 
 Deno.serve(async (req) => {
+  const url = new URL(req.url);
+
+  // Verificação do webhook da Meta (GET com hub.challenge)
+  if (req.method === "GET") {
+    const mode = url.searchParams.get("hub.mode");
+    const token = url.searchParams.get("hub.verify_token");
+    const challenge = url.searchParams.get("hub.challenge");
+    if (mode === "subscribe" && WTOKEN && token === WTOKEN) {
+      return new Response(challenge || "", { status: 200, headers: { "Content-Type": "text/plain" } });
+    }
+    return new Response("forbidden", { status: 403 });
+  }
+
   try {
-    if (WTOKEN) {
-      const t = req.headers.get("x-webhook-token") || new URL(req.url).searchParams.get("token") || "";
+    const body = await req.json().catch(() => ({}));
+    // Guarda opcional só para POSTs que NÃO sejam da Meta (teste/Evolution).
+    // A Meta não manda x-webhook-token; ela é validada no GET (verify_token) acima.
+    const isMeta = !!body?.entry;
+    if (WTOKEN && !isMeta && !body?.test) {
+      const t = req.headers.get("x-webhook-token") || url.searchParams.get("token") || "";
       if (t !== WTOKEN) return new Response("unauthorized", { status: 401 });
     }
-    const body = await req.json().catch(() => ({}));
+
     const ex = extrair(body);
     if (!ex || !ex.telefone) return new Response(JSON.stringify({ ok: true, ignored: true }), { headers: { "Content-Type": "application/json" } });
     const r = await responder(ex.telefone, ex.texto);
