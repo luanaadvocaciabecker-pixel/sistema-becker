@@ -3341,6 +3341,16 @@ async function abrirNovoNegocio(id,aba){
   const docsPorItem={}, outros=[];
   (docs||[]).forEach(d=>{ if(d.nn_item_id){(docsPorItem[d.nn_item_id]=docsPorItem[d.nn_item_id]||[]).push(d);} else outros.push(d); });
   const n=data, s=_nnStatus(n);
+  // dados reais do cliente (quando vinculado): cadastro, processos e documentos já existentes
+  let cli=null, procs=[], docsCliente=[];
+  if(n.cliente_id){
+    const[rc,rp,rd]=await Promise.all([
+      supa.from('clientes').select('*').eq('id',n.cliente_id).single(),
+      somenteProcessosPrincipais(supa.from('processos').select('id,numero,tribunal,vara,comarca,situacao,assunto')).eq('cliente_id',n.cliente_id).order('created_at',{ascending:false}),
+      supa.from('documentos').select('id,nome,url').eq('cliente_id',n.cliente_id).is('novo_negocio_id',null).order('created_at',{ascending:false})
+    ]);
+    cli=rc&&rc.data||null; procs=(rp&&rp.data)||[]; docsCliente=(rd&&rd.data)||[];
+  }
   const itens=(n.nn_itens||[]).slice().sort((a,b)=>(b.obrigatorio-a.obrigatorio)||a.documento.localeCompare(b.documento));
   const obrig=itens.filter(i=>i.obrigatorio), cond=itens.filter(i=>!i.obrigatorio);
   const linhaItem=i=>{
@@ -3372,7 +3382,11 @@ async function abrirNovoNegocio(id,aba){
         <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="anexarItemNN(${n.id},null)">📎 Anexar outro</button>
       </div>
       ${outros.length?outros.map(d=>`<div style="font-size:13px;padding:4px 0"><a href="${d.url}" target="_blank" style="color:#60a5fa;text-decoration:none">📎 ${_nnEsc(d.nome)}</a> <span onclick="excluirDocNN(${d.id},${n.id},null)" style="cursor:pointer;color:#f87171">🗑</span></div>`).join(''):'<p style="color:#64748b;font-size:12px">Nenhum documento avulso.</p>'}
-    </div>`;
+    </div>
+    ${cli&&docsCliente.length?`<div style="border-top:1px solid rgba(255,255,255,.06);margin-top:16px;padding-top:12px">
+      <span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase">Documentos já no cadastro do cliente</span>
+      <div style="margin-top:6px">${docsCliente.map(d=>`<div style="font-size:13px;padding:4px 0"><a href="${d.url}" target="_blank" style="color:#60a5fa;text-decoration:none">📎 ${_nnEsc(d.nome)}</a></div>`).join('')}</div>
+    </div>`:''}`;
   // ---- painel Histórico ----
   const ev=[];
   if(n.created_at)ev.push(['🗂️','Entrou em Novos Negócios',new Date(n.created_at).toLocaleDateString('pt-BR')]);
@@ -3398,7 +3412,33 @@ async function abrirNovoNegocio(id,aba){
     ${tab('dados','📋','Dados')}${tab('docs','📄','Documentos')}${tab('hist','📝','Histórico')}
   </div>
   <div id="pnn-dados" style="display:${aba==='dados'?'block':'none'}">
-    <div class="card"><div class="card-body">
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h3 style="margin:0;font-size:15px">👤 Dados do cliente</h3>
+        ${cli?`<button class="btn btn-secondary btn-sm" onclick="abrirCliente('${cli.id}')">Ver ficha completa →</button>`:`<button class="btn btn-secondary btn-sm" onclick="vincularClienteNN(${n.id})">🔗 Vincular a um cliente</button>`}</div>
+      <div class="card-body">
+        ${cli?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px">
+          ${info('CPF/CNPJ',_nnEsc(cli.cpf_cnpj))}
+          ${info('Telefone',cli.telefone?waHtml(cli.telefone):'')}
+          ${info('WhatsApp',cli.whatsapp?waHtml(cli.whatsapp):'')}
+          ${info('E-mail',_nnEsc(cli.email))}
+          ${info('Responsável',_nnEsc(cli.responsavel||n.responsavel))}
+          ${info('Endereço',[cli.rua,cli.numero,cli.bairro,cli.cidade,cli.estado].filter(Boolean).map(_nnEsc).join(', '))}
+        </div>`:`<p style="color:#94a3b8;font-size:13px;margin:0">Este novo negócio ainda não está vinculado a um cadastro de cliente. Clique em <strong>🔗 Vincular a um cliente</strong> para puxar os dados, processos e documentos automaticamente.</p>`}
+      </div>
+    </div>
+
+    ${cli?`<div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h3 style="margin:0;font-size:15px">⚖️ Processos do cliente</h3></div>
+      <div class="card-body" style="padding-top:6px">
+        ${procs.length?procs.map(p=>`<div onclick="abrirProcesso('${p.id}')" style="display:flex;align-items:center;gap:10px;padding:9px 6px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer">
+          <span style="color:#60a5fa;font-weight:600;font-size:13px">${_nnEsc(p.numero||'(sem nº)')}</span>
+          <span style="flex:1;color:#94a3b8;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc([p.tribunal,p.vara,p.assunto].filter(Boolean).join(' · '))}</span>
+          <span style="color:#64748b;font-size:16px">›</span>
+        </div>`).join(''):'<p style="color:#64748b;font-size:13px;margin:0">Nenhum processo cadastrado para este cliente ainda.</p>'}
+      </div>
+    </div>`:''}
+
+    <div class="card"><div class="card-header"><h3 style="margin:0;font-size:15px">🗂️ Dados do novo negócio</h3></div><div class="card-body">
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px">
         ${info('Ação (novo negócio)',_nnEsc(n.acao))}
         ${info('Categoria',NN_LABEL[n.categoria]||n.categoria)}
@@ -3468,6 +3508,33 @@ async function toggleItemNN(itemId,negId,presente){
   const neg=_nnCache.find(x=>x.id===negId);
   if(neg&&neg.nn_itens){const it=neg.nn_itens.find(i=>i.id===itemId);if(it)it.presente=presente;}
   abrirNovoNegocio(negId,'docs');
+}
+function vincularClienteNN(id){
+  abrirModal('🔗 Vincular a um cliente',
+    `<label style="font-size:12px;color:#94a3b8">Buscar cliente pelo nome</label>
+     <input id="vnn-busca" placeholder="Digite o nome..." oninput="buscarClienteNN(this.value,${id})" style="width:100%;padding:9px;margin:4px 0 8px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0">
+     <div id="vnn-res" style="max-height:260px;overflow:auto"></div>`,
+    null,'',false,true);
+}
+let _vnnTimer=null;
+function buscarClienteNN(q,negId){
+  clearTimeout(_vnnTimer);
+  const el=document.getElementById('vnn-res');
+  q=(q||'').trim();
+  if(q.length<2){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Digite ao menos 2 letras.</p>';return;}
+  _vnnTimer=setTimeout(async()=>{
+    const{data}=await supa.from('clientes').select('id,nome,cpf_cnpj').ilike('nome','%'+q+'%').limit(20);
+    if(!data||!data.length){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Nenhum cliente encontrado.</p>';return;}
+    el.innerHTML=data.map(c=>`<div onclick="confirmarVinculoNN(${negId},${c.id})" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer">
+      <div style="font-size:13px;color:#e2e8f0">${_nnEsc(c.nome)}</div>
+      ${c.cpf_cnpj?`<div style="font-size:11px;color:#64748b">${_nnEsc(c.cpf_cnpj)}</div>`:''}</div>`).join('');
+  },250);
+}
+async function confirmarVinculoNN(negId,clienteId){
+  const{error}=await supa.from('novos_negocios').update({cliente_id:clienteId}).eq('id',negId);
+  if(error){toast('Erro ao vincular.','erro');return;}
+  const neg=_nnCache.find(x=>x.id===negId);if(neg)neg.cliente_id=clienteId;
+  fecharModal();toast('✅ Cliente vinculado.','ok');abrirNovoNegocio(negId,'dados');
 }
 function editarObsNN(id){
   const n=_nnCache.find(x=>x.id===id)||{};
