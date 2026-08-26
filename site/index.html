@@ -3331,64 +3331,135 @@ function renderNovosNegociosLista(){
 }
 let _nnConclCount=0;
 function filtrarNN(f){_nnFiltro=(_nnFiltro===f?'todos':f);renderNovosNegocios();}
-async function abrirNovoNegocio(id){
+async function abrirNovoNegocio(id,aba){
+  aba=aba||'dados';
   const c=document.getElementById('conteudo');
   c.innerHTML='<p style="text-align:center;padding:40px;color:#94a3b8">Carregando...</p>';
   const{data,error}=await supa.from('novos_negocios').select('*,nn_itens(id,documento,obrigatorio,presente,observacao)').eq('id',id).single();
   if(error||!data){toast('Erro ao abrir o novo negócio.','erro');return;}
+  const{data:docs}=await supa.from('documentos').select('id,nome,url,nn_item_id').eq('novo_negocio_id',id);
+  const docsPorItem={}, outros=[];
+  (docs||[]).forEach(d=>{ if(d.nn_item_id){(docsPorItem[d.nn_item_id]=docsPorItem[d.nn_item_id]||[]).push(d);} else outros.push(d); });
   const n=data, s=_nnStatus(n);
   const itens=(n.nn_itens||[]).slice().sort((a,b)=>(b.obrigatorio-a.obrigatorio)||a.documento.localeCompare(b.documento));
   const obrig=itens.filter(i=>i.obrigatorio), cond=itens.filter(i=>!i.obrigatorio);
-  const linhaItem=i=>`<label style="display:flex;align-items:flex-start;gap:10px;padding:9px 10px;border-radius:8px;background:${i.presente?'rgba(22,163,74,.07)':(i.obrigatorio?'rgba(220,38,38,.06)':'transparent')};cursor:pointer;margin-bottom:4px">
-      <input type="checkbox" ${i.presente?'checked':''} onchange="toggleItemNN(${i.id},${n.id},this.checked)" style="margin-top:2px;width:17px;height:17px;flex-shrink:0;accent-color:#16a34a">
-      <span style="flex:1">
+  const linhaItem=i=>{
+    const files=docsPorItem[i.id]||[];
+    const anexos=files.map(d=>`<a href="${d.url}" target="_blank" style="color:#60a5fa;font-size:12px;text-decoration:none">📎 ${_nnEsc(d.nome).slice(0,26)}</a> <span onclick="excluirDocNN(${d.id},${n.id},${i.id})" title="Remover" style="cursor:pointer;color:#f87171;font-size:12px">🗑</span>`).join('<br>');
+    return `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 10px;border-radius:8px;background:${i.presente?'rgba(22,163,74,.07)':(i.obrigatorio?'rgba(220,38,38,.06)':'transparent')};margin-bottom:4px">
+      <input type="checkbox" ${i.presente?'checked':''} onchange="toggleItemNN(${i.id},${n.id},this.checked)" title="Marcar manualmente" style="margin-top:2px;width:17px;height:17px;flex-shrink:0;accent-color:#16a34a;cursor:pointer">
+      <span style="flex:1;min-width:0">
         <span style="color:${i.presente?'#86efac':'#e2e8f0'};font-size:13px;${i.presente?'':'font-weight:600'}">${_nnEsc(i.documento)}</span>
         ${i.obrigatorio?'':'<span style="font-size:10px;color:#94a3b8;border:1px solid #334155;border-radius:4px;padding:0 5px;margin-left:6px">condicional</span>'}
-        ${(!i.presente&&i.observacao)?`<span style="display:block;font-size:11px;color:${/verificar/i.test(i.observacao)?'#fbbf24':'#f87171'};margin-top:1px">↳ ${_nnEsc(i.observacao)}</span>`:''}
+        ${(!files.length&&i.observacao)?`<span style="display:block;font-size:11px;color:${/verificar/i.test(i.observacao)?'#fbbf24':'#f87171'};margin-top:1px">↳ ${_nnEsc(i.observacao)}</span>`:''}
+        ${anexos?`<div style="margin-top:4px">${anexos}</div>`:''}
       </span>
-      ${i.presente?'<span style="color:#16a34a;font-size:13px">✓</span>':(i.obrigatorio?'<span style="color:#dc2626;font-size:16px;line-height:1">•</span>':'')}
-    </label>`;
+      <button class="btn btn-secondary" style="padding:3px 9px;font-size:12px;flex-shrink:0" onclick="anexarItemNN(${n.id},${i.id})">📎 Anexar</button>
+    </div>`;
+  };
   const linkCliente=n.cliente_id?`<a href="#" onclick="abrirCliente('${n.cliente_id}');return false" style="color:var(--azul3,#60a5fa)">${_nnEsc(n.cliente_nome)}</a>`:_nnEsc(n.cliente_nome);
-  const info=(rot,val)=>val?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${rot}</span><div style="margin-top:2px;font-size:13px">${val}</div></div>`:'';
+  const info=(rot,val)=>val?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${rot}</span><div style="margin-top:3px;font-size:13px">${val}</div></div>`:'';
+  // ---- painel Documentos (checklist + anexos + outros) ----
+  const painelDocs=`
+    ${s.faltam>0?`<div style="background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#fca5a5">⚠️ <strong>Faltam ${s.faltam} documento(s) obrigatório(s)</strong> — anexe o arquivo (marca sozinho) ou solicite ao cliente antes de repassar.</div>`:`<div style="background:rgba(22,163,74,.1);border:1px solid rgba(22,163,74,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#86efac">✅ Documentação obrigatória completa. Pronto para repassar.</div>`}
+    <p style="font-size:12px;color:#94a3b8;margin:0 0 10px">Clique em <strong>📎 Anexar</strong> em cada documento. Quando o arquivo sobe, o item marca ✓ sozinho. (Ou marque manualmente no quadradinho, se o documento estiver na pasta física.)</p>
+    <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin:4px 0 6px">Obrigatórios</div>
+    ${obrig.map(linhaItem).join('')||'<p style="color:#64748b;font-size:13px">—</p>'}
+    ${cond.length?`<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin:14px 0 6px">Condicionais (só se aplicável)</div>${cond.map(linhaItem).join('')}`:''}
+    <div style="border-top:1px solid rgba(255,255,255,.06);margin-top:16px;padding-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase">Outros documentos</span>
+        <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="anexarItemNN(${n.id},null)">📎 Anexar outro</button>
+      </div>
+      ${outros.length?outros.map(d=>`<div style="font-size:13px;padding:4px 0"><a href="${d.url}" target="_blank" style="color:#60a5fa;text-decoration:none">📎 ${_nnEsc(d.nome)}</a> <span onclick="excluirDocNN(${d.id},${n.id},null)" style="cursor:pointer;color:#f87171">🗑</span></div>`).join(''):'<p style="color:#64748b;font-size:12px">Nenhum documento avulso.</p>'}
+    </div>`;
+  // ---- painel Histórico ----
+  const ev=[];
+  if(n.created_at)ev.push(['🗂️','Entrou em Novos Negócios',new Date(n.created_at).toLocaleDateString('pt-BR')]);
+  if(n.origem_atendimento&&n.origem_atendimento!=='nada')ev.push(['🎧','Atendimento registrado: '+_nnEsc(n.origem_atendimento),'']);
+  if(n.tarefa_id)ev.push(['📨','Repassado'+(n.responsavel?' para '+_nnEsc(n.responsavel):'')+' (tarefa criada)','']);
+  if(n.observacao)ev.push(['📝',_nnEsc(n.observacao),'']);
+  const painelHist=ev.length?`<div style="display:flex;flex-direction:column;gap:2px">${ev.map(([ic,tx,dt])=>`<div style="display:flex;gap:10px;padding:10px;border-left:2px solid var(--azul3,#60a5fa);background:rgba(13,27,42,.5);border-radius:0 8px 8px 0;margin-bottom:6px"><span>${ic}</span><span style="flex:1;font-size:13px;color:#cbd5e1">${tx}</span>${dt?`<span style="font-size:11px;color:#64748b">${dt}</span>`:''}</div>`).join('')}</div>`:'<p style="color:#64748b;font-size:13px">Sem histórico registrado.</p>';
+
+  const tab=(k,ic,lbl)=>`<button id="tabnn-${k}" class="btn-tab ${aba===k?'ativo':''}" onclick="mostrarTabNN('${k}')">${ic} ${lbl}</button>`;
   c.innerHTML=`
   <div style="margin-bottom:14px"><button class="btn btn-secondary" onclick="ir('novos-negocios')">← Voltar</button></div>
   <div class="card" style="margin-bottom:18px">
     <div class="card-header" style="flex-wrap:wrap;gap:8px">
       <h3 style="margin:0">🗂️ ${linkCliente}</h3>
-      <span style="font-size:13px;font-weight:700;color:${s.cor};background:${s.bg};padding:4px 12px;border-radius:20px">${s.emoji} ${s.rotulo}${s.cls!=='vermelho'?` · ${s.totalObrig-s.faltam}/${s.totalObrig} obrigatórios`:''}</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:13px;font-weight:700;color:${s.cor};background:${s.bg};padding:4px 12px;border-radius:20px">${s.emoji} ${s.rotulo}${s.cls!=='vermelho'?` · ${s.totalObrig-s.faltam}/${s.totalObrig} obrig.`:''}</span>
+        <button class="btn btn-primary btn-sm" onclick="repassarNN(${n.id})">📨 Repassar</button>
+        <button class="btn btn-sm" style="background:#16a34a;color:#fff" onclick="concluirNN(${n.id})">✔️ Concluir 1ª ação</button>
+      </div>
     </div>
-    <div class="card-body">
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px">
+  </div>
+  <div style="display:flex;gap:0;border-bottom:2px solid var(--cinza3,#1e3350);margin-bottom:18px;overflow-x:auto">
+    ${tab('dados','📋','Dados')}${tab('docs','📄','Documentos')}${tab('hist','📝','Histórico')}
+  </div>
+  <div id="pnn-dados" style="display:${aba==='dados'?'block':'none'}">
+    <div class="card"><div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px">
         ${info('Ação (novo negócio)',_nnEsc(n.acao))}
         ${info('Categoria',NN_LABEL[n.categoria]||n.categoria)}
         ${info('Responsável',_nnEsc(n.responsavel))}
         ${info('Prazo',n.prazo?new Date(n.prazo+'T12:00:00').toLocaleDateString('pt-BR'):'')}
-        ${info('Pasta',_nnEsc(n.pasta))}
+        ${info('Pasta (Drive)',_nnEsc(n.pasta))}
         ${info('Arquivos na pasta',n.num_arquivos||'0')}
         ${info('Atendimento',n.origem_atendimento&&n.origem_atendimento!=='nada'?_nnEsc(n.origem_atendimento):'')}
       </div>
-      ${n.observacao?`<div style="margin-top:12px;padding:10px 12px;background:rgba(13,27,42,.7);border-left:3px solid var(--azul3,#60a5fa);border-radius:6px;font-size:13px;color:#cbd5e1;line-height:1.5">📝 ${_nnEsc(n.observacao)}</div>`:''}
-    </div>
+      ${n.observacao?`<div style="margin-top:14px;padding:10px 12px;background:rgba(13,27,42,.7);border-left:3px solid var(--azul3,#60a5fa);border-radius:6px;font-size:13px;color:#cbd5e1;line-height:1.5">📝 ${_nnEsc(n.observacao)}</div>`:''}
+      <div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="editarObsNN(${n.id})">📝 Editar observação</button></div>
+    </div></div>
   </div>
-
-  <div class="card" style="margin-bottom:18px">
-    <div class="card-header"><h3 style="margin:0">📄 Documentos da pasta</h3>
-      <span style="font-size:12px;color:#94a3b8">Marque o que já está na pasta. O que falta fica destacado.</span></div>
-    <div class="card-body">
-      ${s.faltam>0?`<div style="background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#fca5a5">⚠️ <strong>Faltam ${s.faltam} documento(s) obrigatório(s)</strong> — solicite ao cliente antes de repassar.</div>`:`<div style="background:rgba(22,163,74,.1);border:1px solid rgba(22,163,74,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#86efac">✅ Todos os documentos obrigatórios estão na pasta. Pronto para repassar.</div>`}
-      <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin:4px 0 6px">Obrigatórios</div>
-      ${obrig.map(linhaItem).join('')||'<p style="color:#64748b;font-size:13px">—</p>'}
-      ${cond.length?`<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin:14px 0 6px">Condicionais (só se aplicável)</div>${cond.map(linhaItem).join('')}`:''}
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <button class="btn btn-primary" onclick="repassarNN(${n.id})">📨 Repassar (criar tarefa)</button>
-      <button class="btn btn-secondary" onclick="editarObsNN(${n.id})">📝 Editar observação</button>
-      <button class="btn" style="background:#16a34a;color:#fff" onclick="concluirNN(${n.id})">✔️ Concluir 1ª ação (sair de Novos Negócios)</button>
-    </div>
-  </div>`;
+  <div id="pnn-docs" style="display:${aba==='docs'?'block':'none'}"><div class="card"><div class="card-body">${painelDocs}</div></div></div>
+  <div id="pnn-hist" style="display:${aba==='hist'?'block':'none'}"><div class="card"><div class="card-body">${painelHist}</div></div></div>`;
+}
+function mostrarTabNN(aba){
+  ['dados','docs','hist'].forEach(k=>{
+    const p=document.getElementById('pnn-'+k), b=document.getElementById('tabnn-'+k);
+    if(p)p.style.display=k===aba?'block':'none';
+    if(b)b.classList.toggle('ativo',k===aba);
+  });
+}
+function anexarItemNN(negId,itemId){
+  const inp=document.createElement('input');
+  inp.type='file';inp.accept='.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt,.zip';
+  inp.onchange=async()=>{
+    const file=inp.files[0];if(!file)return;
+    toast('Enviando arquivo...','');
+    const path=`nn/${negId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+    const upRes=await fetch(`${SUPA_URL}/storage/v1/object/documentos-clientes/${path}`,{
+      method:'POST',headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},body:file});
+    if(!upRes.ok){const e=await upRes.json().catch(()=>({}));toast('Erro no upload: '+(e.message||e.error||upRes.status),'erro');return;}
+    const url=`${SUPA_URL}/storage/v1/object/public/documentos-clientes/${path}`;
+    const neg=_nnCache.find(x=>x.id===negId);
+    const reg={nome:file.name,tipo:file.type,url,tamanho:file.size,novo_negocio_id:negId,nn_item_id:itemId||null,cliente_id:(neg&&neg.cliente_id)||null};
+    const saveRes=await fetch(`${SUPA_URL}/rest/v1/documentos`,{method:'POST',headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Prefer':'return=minimal'},body:JSON.stringify(reg)});
+    if(!saveRes.ok){toast('Arquivo enviado, mas erro ao salvar registro.','erro');return;}
+    if(itemId){
+      await supa.from('nn_itens').update({presente:true}).eq('id',itemId);
+      if(neg&&neg.nn_itens){const it=neg.nn_itens.find(i=>i.id===itemId);if(it)it.presente=true;}
+    }
+    toast('✅ Documento anexado.','ok');
+    abrirNovoNegocio(negId,'docs');
+  };
+  inp.click();
+}
+async function excluirDocNN(docId,negId,itemId){
+  if(!confirm('Remover este documento?'))return;
+  await fetch(`${SUPA_URL}/rest/v1/documentos?id=eq.${docId}`,{method:'DELETE',headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+  if(itemId){
+    // se não sobrou nenhum arquivo para esse item, desmarca (reflete a realidade)
+    const{data:rest}=await supa.from('documentos').select('id').eq('nn_item_id',itemId).limit(1);
+    if(!rest||!rest.length){
+      await supa.from('nn_itens').update({presente:false}).eq('id',itemId);
+      const neg=_nnCache.find(x=>x.id===negId);
+      if(neg&&neg.nn_itens){const it=neg.nn_itens.find(i=>i.id===itemId);if(it)it.presente=false;}
+    }
+  }
+  toast('Removido.','ok');
+  abrirNovoNegocio(negId,'docs');
 }
 async function toggleItemNN(itemId,negId,presente){
   const{error}=await supa.from('nn_itens').update({presente}).eq('id',itemId);
@@ -3396,7 +3467,7 @@ async function toggleItemNN(itemId,negId,presente){
   // atualiza cache local e o cabeçalho de status sem recarregar tudo
   const neg=_nnCache.find(x=>x.id===negId);
   if(neg&&neg.nn_itens){const it=neg.nn_itens.find(i=>i.id===itemId);if(it)it.presente=presente;}
-  abrirNovoNegocio(negId);
+  abrirNovoNegocio(negId,'docs');
 }
 function editarObsNN(id){
   const n=_nnCache.find(x=>x.id===id)||{};
