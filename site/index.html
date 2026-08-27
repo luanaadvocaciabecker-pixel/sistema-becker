@@ -1750,6 +1750,7 @@ const supa=(()=>{
       lt(c,v){q.filters.push(`${c}=lt.${v}`);return b},
       gt(c,v){q.filters.push(`${c}=gt.${v}`);return b},
       in(c,vals){q.filters.push(`${c}=in.(${(vals||[]).map(v=>encodeURIComponent(String(v))).join(',')})`);return b},
+      is(c,v){q.filters.push(`${c}=is.${v===null?'null':(v===true?'true':(v===false?'false':v))}`);return b},
       single(){q.single=true;return b},
       insert(d){q.op='insert';q.insData=d;return b},
       update(d){q.op='update';q.updData=d;return b},
