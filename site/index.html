@@ -3268,7 +3268,7 @@ function _nnStatus(neg){
 }
 async function pNovosNegocios(){
   const c=document.getElementById('conteudo');
-  c.innerHTML='<p style="text-align:center;padding:40px;color:#94a3b8">Carregando novos negócios...</p>';
+  c.innerHTML='<p style="text-align:center;padding:40px;color:#64748b">Carregando novos negócios...</p>';
   const{data,error}=await supa.from('novos_negocios')
     .select('*,nn_itens(id,documento,obrigatorio,presente,observacao)')
     .eq('status','aberto').order('created_at',{ascending:true});
@@ -3286,21 +3286,21 @@ function renderNovosNegocios(){
   const completos=lista.filter(x=>x.s.cls==='verde').length;
   const faltando=lista.filter(x=>x.s.cls==='amarelo').length;
   const semPasta=lista.filter(x=>x.s.cls==='vermelho').length;
-  const card=(emoji,valor,rotulo,filtro,cor)=>`<div onclick="filtrarNN('${filtro}')" style="flex:1;min-width:130px;cursor:pointer;background:${_nnFiltro===filtro?'rgba(201,165,92,.14)':'var(--cinza2,#0f2033)'};border:1px solid ${_nnFiltro===filtro?'#C9A55C':'var(--cinza3,#1e3350)'};border-radius:12px;padding:14px 16px;transition:.15s">
+  const card=(emoji,valor,rotulo,filtro,cor)=>`<div onclick="filtrarNN('${filtro}')" style="flex:1;min-width:130px;cursor:pointer;background:${_nnFiltro===filtro?'rgba(201,165,92,.14)':'var(--card)'};border:1px solid ${_nnFiltro===filtro?'#C9A55C':'var(--cinza3)'};border-radius:12px;padding:14px 16px;transition:.15s">
     <div style="font-size:26px;font-weight:800;color:${cor}">${emoji} ${valor}</div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:2px">${rotulo}</div></div>`;
+    <div style="font-size:12px;color:#64748b;margin-top:2px">${rotulo}</div></div>`;
   let html=`
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
-    ${card('📋',total,'Em triagem (abertos)','todos','#e2e8f0')}
+    ${card('📋',total,'Em triagem (abertos)','todos','var(--texto)')}
     ${card('🟢',completos,'Documentação completa','completos','#16a34a')}
     ${card('🟡',faltando,'Faltam documentos','faltando','#d97706')}
     ${card('🔴',semPasta,'Sem pasta / vazio','sempasta','#dc2626')}
   </div>
   <div class="card" style="margin-bottom:0">
     <div class="card-header" style="gap:10px;flex-wrap:wrap">
-      <h3 style="margin:0">Novos Negócios ${conclCount?`<span style="font-size:12px;color:#94a3b8;font-weight:500">· ${conclCount} já concluídos</span>`:''}</h3>
+      <h3 style="margin:0">Novos Negócios ${conclCount?`<span style="font-size:12px;color:#64748b;font-weight:500">· ${conclCount} já concluídos</span>`:''}</h3>
       <div style="display:flex;gap:8px;align-items:center">
-        <input id="nn-busca" placeholder="🔍 Buscar cliente ou ação..." value="${_nnEsc(_nnBusca)}" oninput="_nnBusca=this.value;renderNovosNegociosLista()" style="padding:7px 12px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0;min-width:220px">
+        <input id="nn-busca" placeholder="🔍 Buscar cliente ou ação..." value="${_nnEsc(_nnBusca)}" oninput="_nnBusca=this.value;renderNovosNegociosLista()" style="padding:7px 12px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto);min-width:220px">
         <button class="btn btn-primary btn-sm" onclick="novoNegocio()">+ Novo</button>
       </div>
     </div>
@@ -3317,15 +3317,15 @@ function renderNovosNegociosLista(){
   else if(_nnFiltro==='sempasta')lista=lista.filter(x=>x.s.cls==='vermelho');
   const q=_nnBusca.trim().toLowerCase();
   if(q)lista=lista.filter(x=>(x.n.cliente_nome||'').toLowerCase().includes(q)||(x.n.acao||'').toLowerCase().includes(q));
-  if(!lista.length){el.innerHTML='<div class="empty-state" style="padding:30px;text-align:center;color:#94a3b8"><div style="font-size:34px">📭</div><p>Nenhum novo negócio neste filtro.</p></div>';return;}
+  if(!lista.length){el.innerHTML='<div class="empty-state" style="padding:30px;text-align:center;color:#64748b"><div style="font-size:34px">📭</div><p>Nenhum novo negócio neste filtro.</p></div>';return;}
   el.innerHTML=lista.map(({n,s})=>`
-    <div onclick="abrirNovoNegocio(${n.id})" style="display:flex;align-items:center;gap:12px;padding:12px 10px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer" onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background='none'">
+    <div onclick="abrirNovoNegocio(${n.id})" style="display:flex;align-items:center;gap:12px;padding:12px 10px;border-bottom:1px solid var(--border);cursor:pointer" onmouseover="this.style.background='rgba(0,0,0,.035)'" onmouseout="this.style.background='none'">
       <div style="width:10px;height:10px;border-radius:50%;background:${s.cor};flex-shrink:0" title="${s.rotulo}"></div>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.cliente_nome)}</div>
-        <div style="font-size:12px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.acao||'—')}</div>
+        <div style="font-weight:600;color:var(--texto);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.cliente_nome)}</div>
+        <div style="font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.acao||'—')}</div>
       </div>
-      <span class="tag" style="background:rgba(148,163,184,.12);color:#cbd5e1;font-size:11px;flex-shrink:0">${NN_LABEL[n.categoria]||n.categoria}</span>
+      <span class="tag" style="background:rgba(148,163,184,.12);color:#334155;font-size:11px;flex-shrink:0">${NN_LABEL[n.categoria]||n.categoria}</span>
       <span style="font-size:12px;font-weight:700;color:${s.cor};min-width:96px;text-align:right;flex-shrink:0">${s.emoji} ${s.rotulo}</span>
     </div>`).join('');
 }
@@ -3334,7 +3334,7 @@ function filtrarNN(f){_nnFiltro=(_nnFiltro===f?'todos':f);renderNovosNegocios();
 async function abrirNovoNegocio(id,aba){
   aba=aba||'dados';
   const c=document.getElementById('conteudo');
-  c.innerHTML='<p style="text-align:center;padding:40px;color:#94a3b8">Carregando...</p>';
+  c.innerHTML='<p style="text-align:center;padding:40px;color:#64748b">Carregando...</p>';
   const{data,error}=await supa.from('novos_negocios').select('*,nn_itens(id,documento,obrigatorio,presente,observacao)').eq('id',id).single();
   if(error||!data){toast('Erro ao abrir o novo negócio.','erro');return;}
   const{data:docs}=await supa.from('documentos').select('id,nome,url,nn_item_id').eq('novo_negocio_id',id);
@@ -3359,8 +3359,8 @@ async function abrirNovoNegocio(id,aba){
     return `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 10px;border-radius:8px;background:${i.presente?'rgba(22,163,74,.07)':(i.obrigatorio?'rgba(220,38,38,.06)':'transparent')};margin-bottom:4px">
       <input type="checkbox" ${i.presente?'checked':''} onchange="toggleItemNN(${i.id},${n.id},this.checked)" title="Marcar manualmente" style="margin-top:2px;width:17px;height:17px;flex-shrink:0;accent-color:#16a34a;cursor:pointer">
       <span style="flex:1;min-width:0">
-        <span style="color:${i.presente?'#86efac':'#e2e8f0'};font-size:13px;${i.presente?'':'font-weight:600'}">${_nnEsc(i.documento)}</span>
-        ${i.obrigatorio?'':'<span style="font-size:10px;color:#94a3b8;border:1px solid #334155;border-radius:4px;padding:0 5px;margin-left:6px">condicional</span>'}
+        <span style="color:${i.presente?'#15803d':'var(--texto)'};font-size:13px;${i.presente?'':'font-weight:600'}">${_nnEsc(i.documento)}</span>
+        ${i.obrigatorio?'':'<span style="font-size:10px;color:#64748b;border:1px solid #334155;border-radius:4px;padding:0 5px;margin-left:6px">condicional</span>'}
         ${(!files.length&&i.observacao)?`<span style="display:block;font-size:11px;color:${/verificar/i.test(i.observacao)?'#fbbf24':'#f87171'};margin-top:1px">↳ ${_nnEsc(i.observacao)}</span>`:''}
         ${anexos?`<div style="margin-top:4px">${anexos}</div>`:''}
       </span>
@@ -3373,24 +3373,24 @@ async function abrirNovoNegocio(id,aba){
   const _itemNome={}; itens.forEach(i=>{_itemNome[i.id]=i.documento;});
   const todosDocs=(docs||[]);
   const painelDocs=`
-    ${s.faltam>0?`<div style="background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#fca5a5">⚠️ <strong>Faltam ${s.faltam} documento(s) obrigatório(s)</strong> — anexe o arquivo (marca sozinho) ou solicite ao cliente antes de repassar.</div>`:`<div style="background:rgba(22,163,74,.1);border:1px solid rgba(22,163,74,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#86efac">✅ Documentação obrigatória completa. Pronto para repassar.</div>`}
-    <p style="font-size:12px;color:#94a3b8;margin:0 0 10px">Clique em <strong>📎 Anexar</strong> em cada documento. Quando o arquivo sobe, o item marca ✓ sozinho. (Ou marque manualmente no quadradinho, se o documento estiver na pasta física.)</p>
+    ${s.faltam>0?`<div style="background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#b91c1c">⚠️ <strong>Faltam ${s.faltam} documento(s) obrigatório(s)</strong> — anexe o arquivo (marca sozinho) ou solicite ao cliente antes de repassar.</div>`:`<div style="background:rgba(22,163,74,.1);border:1px solid rgba(22,163,74,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#15803d">✅ Documentação obrigatória completa. Pronto para repassar.</div>`}
+    <p style="font-size:12px;color:#64748b;margin:0 0 10px">Clique em <strong>📎 Anexar</strong> em cada documento. Quando o arquivo sobe, o item marca ✓ sozinho. (Ou marque manualmente no quadradinho, se o documento estiver na pasta física.)</p>
     <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin:4px 0 6px">Obrigatórios</div>
     ${obrig.map(linhaItem).join('')||'<p style="color:#64748b;font-size:13px">—</p>'}
     ${cond.length?`<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin:14px 0 6px">Condicionais (só se aplicável)</div>${cond.map(linhaItem).join('')}`:''}
 
-    <div style="border-top:1px solid rgba(255,255,255,.06);margin-top:18px;padding-top:14px">
+    <div style="border-top:1px solid var(--border);margin-top:18px;padding-top:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-size:13px;font-weight:700;color:#e2e8f0">📂 Todos os documentos anexados (${todosDocs.length})</span>
+        <span style="font-size:13px;font-weight:700;color:var(--texto)">📂 Todos os documentos anexados (${todosDocs.length})</span>
         <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="anexarItemNN(${n.id},null)">📎 Anexar documento</button>
       </div>
-      ${todosDocs.length?todosDocs.map(d=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05)">
+      ${todosDocs.length?todosDocs.map(d=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border)">
         <a href="${d.url}" target="_blank" style="flex:1;color:#60a5fa;text-decoration:none;font-size:13px">📎 ${_nnEsc(d.nome)}</a>
         ${d.nn_item_id?`<span style="font-size:11px;color:#64748b">${_nnEsc(_itemNome[d.nn_item_id]||'')}</span>`:'<span style="font-size:11px;color:#64748b">avulso</span>'}
         <span onclick="excluirDocNN(${d.id},${n.id},${d.nn_item_id||'null'})" title="Remover" style="cursor:pointer;color:#f87171">🗑</span>
       </div>`).join(''):'<p style="color:#64748b;font-size:12px;margin:0">Nenhum documento anexado ainda. Use o botão 📎 Anexar em cada item acima, ou o botão aqui pra subir um arquivo avulso.</p>'}
     </div>
-    ${cli&&docsCliente.length?`<div style="border-top:1px solid rgba(255,255,255,.06);margin-top:16px;padding-top:12px">
+    ${cli&&docsCliente.length?`<div style="border-top:1px solid var(--border);margin-top:16px;padding-top:12px">
       <span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase">Documentos já no cadastro do cliente</span>
       <div style="margin-top:6px">${docsCliente.map(d=>`<div style="font-size:13px;padding:4px 0"><a href="${d.url}" target="_blank" style="color:#60a5fa;text-decoration:none">📎 ${_nnEsc(d.nome)}</a></div>`).join('')}</div>
     </div>`:''}`;
@@ -3400,7 +3400,7 @@ async function abrirNovoNegocio(id,aba){
   if(n.origem_atendimento&&n.origem_atendimento!=='nada')ev.push(['🎧','Atendimento registrado: '+_nnEsc(n.origem_atendimento),'']);
   if(n.tarefa_id)ev.push(['📨','Repassado'+(n.responsavel?' para '+_nnEsc(n.responsavel):'')+' (tarefa criada)','']);
   if(n.observacao)ev.push(['📝',_nnEsc(n.observacao),'']);
-  const painelHist=ev.length?`<div style="display:flex;flex-direction:column;gap:2px">${ev.map(([ic,tx,dt])=>`<div style="display:flex;gap:10px;padding:10px;border-left:2px solid var(--azul3,#60a5fa);background:rgba(13,27,42,.5);border-radius:0 8px 8px 0;margin-bottom:6px"><span>${ic}</span><span style="flex:1;font-size:13px;color:#cbd5e1">${tx}</span>${dt?`<span style="font-size:11px;color:#64748b">${dt}</span>`:''}</div>`).join('')}</div>`:'<p style="color:#64748b;font-size:13px">Sem histórico registrado.</p>';
+  const painelHist=ev.length?`<div style="display:flex;flex-direction:column;gap:2px">${ev.map(([ic,tx,dt])=>`<div style="display:flex;gap:10px;padding:10px;border-left:2px solid var(--azul3,#60a5fa);background:#F8FAFC;border-radius:0 8px 8px 0;margin-bottom:6px"><span>${ic}</span><span style="flex:1;font-size:13px;color:#334155">${tx}</span>${dt?`<span style="font-size:11px;color:#64748b">${dt}</span>`:''}</div>`).join('')}</div>`:'<p style="color:#64748b;font-size:13px">Sem histórico registrado.</p>';
 
   const tab=(k,ic,lbl)=>`<button id="tabnn-${k}" class="btn-tab ${aba===k?'ativo':''}" onclick="mostrarTabNN('${k}')">${ic} ${lbl}</button>`;
   c.innerHTML=`
@@ -3415,7 +3415,7 @@ async function abrirNovoNegocio(id,aba){
       </div>
     </div>
   </div>
-  <div style="display:flex;gap:0;border-bottom:2px solid var(--cinza3,#1e3350);margin-bottom:18px;overflow-x:auto">
+  <div style="display:flex;gap:0;border-bottom:2px solid var(--cinza3);margin-bottom:18px;overflow-x:auto">
     ${tab('dados','📋','Dados')}${tab('docs','📄','Documentos')}${tab('hist','📝','Histórico')}
   </div>
   <div id="pnn-dados" style="display:${aba==='dados'?'block':'none'}">
@@ -3430,16 +3430,16 @@ async function abrirNovoNegocio(id,aba){
           ${info('E-mail',_nnEsc(cli.email))}
           ${info('Responsável',_nnEsc(cli.responsavel||n.responsavel))}
           ${info('Endereço',[cli.rua,cli.numero,cli.bairro,cli.cidade,cli.estado].filter(Boolean).map(_nnEsc).join(', '))}
-        </div>`:`<p style="color:#94a3b8;font-size:13px;margin:0">Este novo negócio ainda não está vinculado a um cadastro de cliente. Clique em <strong>🔗 Vincular a um cliente</strong> para puxar os dados, processos e documentos automaticamente.</p>`}
+        </div>`:`<p style="color:#64748b;font-size:13px;margin:0">Este novo negócio ainda não está vinculado a um cadastro de cliente. Clique em <strong>🔗 Vincular a um cliente</strong> para puxar os dados, processos e documentos automaticamente.</p>`}
       </div>
     </div>
 
     ${cli?`<div class="card" style="margin-bottom:16px">
       <div class="card-header"><h3 style="margin:0;font-size:15px">⚖️ Processos do cliente</h3></div>
       <div class="card-body" style="padding-top:6px">
-        ${procs.length?procs.map(p=>`<div onclick="abrirProcesso('${p.id}')" style="display:flex;align-items:center;gap:10px;padding:9px 6px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer">
+        ${procs.length?procs.map(p=>`<div onclick="abrirProcesso('${p.id}')" style="display:flex;align-items:center;gap:10px;padding:9px 6px;border-bottom:1px solid var(--border);cursor:pointer">
           <span style="color:#60a5fa;font-weight:600;font-size:13px">${_nnEsc(p.numero||'(sem nº)')}</span>
-          <span style="flex:1;color:#94a3b8;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc([p.tribunal,p.vara,p.assunto].filter(Boolean).join(' · '))}</span>
+          <span style="flex:1;color:#64748b;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc([p.tribunal,p.vara,p.assunto].filter(Boolean).join(' · '))}</span>
           <span style="color:#64748b;font-size:16px">›</span>
         </div>`).join(''):'<p style="color:#64748b;font-size:13px;margin:0">Nenhum processo cadastrado para este cliente ainda.</p>'}
       </div>
@@ -3455,7 +3455,7 @@ async function abrirNovoNegocio(id,aba){
         ${info('Arquivos na pasta',n.num_arquivos||'0')}
         ${info('Atendimento',n.origem_atendimento&&n.origem_atendimento!=='nada'?_nnEsc(n.origem_atendimento):'')}
       </div>
-      ${n.observacao?`<div style="margin-top:14px;padding:10px 12px;background:rgba(13,27,42,.7);border-left:3px solid var(--azul3,#60a5fa);border-radius:6px;font-size:13px;color:#cbd5e1;line-height:1.5">📝 ${_nnEsc(n.observacao)}</div>`:''}
+      ${n.observacao?`<div style="margin-top:14px;padding:10px 12px;background:#F8FAFC;border-left:3px solid var(--azul3,#60a5fa);border-radius:6px;font-size:13px;color:#334155;line-height:1.5">📝 ${_nnEsc(n.observacao)}</div>`:''}
       <div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="editarObsNN(${n.id})">📝 Editar observação</button></div>
     </div></div>
   </div>
@@ -3518,8 +3518,8 @@ async function toggleItemNN(itemId,negId,presente){
 }
 function vincularClienteNN(id){
   abrirModal('🔗 Vincular a um cliente',
-    `<label style="font-size:12px;color:#94a3b8">Buscar cliente pelo nome</label>
-     <input id="vnn-busca" placeholder="Digite o nome..." oninput="buscarClienteNN(this.value,${id})" style="width:100%;padding:9px;margin:4px 0 8px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0">
+    `<label style="font-size:12px;color:#64748b">Buscar cliente pelo nome</label>
+     <input id="vnn-busca" placeholder="Digite o nome..." oninput="buscarClienteNN(this.value,${id})" style="width:100%;padding:9px;margin:4px 0 8px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
      <div id="vnn-res" style="max-height:260px;overflow:auto"></div>`,
     null,'',false,true);
 }
@@ -3532,8 +3532,8 @@ function buscarClienteNN(q,negId){
   _vnnTimer=setTimeout(async()=>{
     const{data}=await supa.from('clientes').select('id,nome,cpf_cnpj').ilike('nome','%'+q+'%').limit(20);
     if(!data||!data.length){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Nenhum cliente encontrado.</p>';return;}
-    el.innerHTML=data.map(c=>`<div onclick="confirmarVinculoNN(${negId},${c.id})" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer">
-      <div style="font-size:13px;color:#e2e8f0">${_nnEsc(c.nome)}</div>
+    el.innerHTML=data.map(c=>`<div onclick="confirmarVinculoNN(${negId},${c.id})" style="padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer">
+      <div style="font-size:13px;color:var(--texto)">${_nnEsc(c.nome)}</div>
       ${c.cpf_cnpj?`<div style="font-size:11px;color:#64748b">${_nnEsc(c.cpf_cnpj)}</div>`:''}</div>`).join('');
   },250);
 }
@@ -3546,7 +3546,7 @@ async function confirmarVinculoNN(negId,clienteId){
 function editarObsNN(id){
   const n=_nnCache.find(x=>x.id===id)||{};
   abrirModal('Observação do novo negócio',
-    `<textarea id="nn-obs" style="width:100%;min-height:110px;padding:10px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0">${_nnEsc(n.observacao||'')}</textarea>`,
+    `<textarea id="nn-obs" style="width:100%;min-height:110px;padding:10px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">${_nnEsc(n.observacao||'')}</textarea>`,
     async()=>{
       const v=(document.getElementById('nn-obs').value||'').trim();
       const{error}=await supa.from('novos_negocios').update({observacao:v}).eq('id',id);
@@ -3557,17 +3557,17 @@ function editarObsNN(id){
 function repassarNN(id){
   const n=_nnCache.find(x=>x.id===id);if(!n){toast('Recarregue a página.','erro');return;}
   const s=_nnStatus(n);
-  const aviso=s.faltam>0?`<div style="background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px;color:#fca5a5">⚠️ Ainda faltam ${s.faltam} documento(s) obrigatório(s). Você pode repassar mesmo assim, mas confira antes.</div>`:'';
+  const aviso=s.faltam>0?`<div style="background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12.5px;color:#b91c1c">⚠️ Ainda faltam ${s.faltam} documento(s) obrigatório(s). Você pode repassar mesmo assim, mas confira antes.</div>`:'';
   const opts=NN_RESP.map(r=>`<option value="${r}">`).join('');
   abrirModal('📨 Repassar novo negócio',
     `${aviso}
-     <label style="font-size:12px;color:#94a3b8">Repassar para (responsável)</label>
-     <input id="nn-resp" list="nn-resp-list" value="${_nnEsc(n.responsavel||'')}" placeholder="Nome de quem vai executar" style="width:100%;padding:9px;margin:4px 0 12px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0">
+     <label style="font-size:12px;color:#64748b">Repassar para (responsável)</label>
+     <input id="nn-resp" list="nn-resp-list" value="${_nnEsc(n.responsavel||'')}" placeholder="Nome de quem vai executar" style="width:100%;padding:9px;margin:4px 0 12px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
      <datalist id="nn-resp-list">${opts}</datalist>
-     <label style="font-size:12px;color:#94a3b8">Prazo (opcional)</label>
-     <input id="nn-prazo" type="date" style="width:100%;padding:9px;margin:4px 0 12px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0">
-     <label style="font-size:12px;color:#94a3b8">Instrução (opcional)</label>
-     <textarea id="nn-inst" placeholder="Ex.: elaborar a inicial; solicitar docs faltantes ao cliente" style="width:100%;min-height:70px;padding:9px;margin-top:4px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0"></textarea>`,
+     <label style="font-size:12px;color:#64748b">Prazo (opcional)</label>
+     <input id="nn-prazo" type="date" style="width:100%;padding:9px;margin:4px 0 12px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
+     <label style="font-size:12px;color:#64748b">Instrução (opcional)</label>
+     <textarea id="nn-inst" placeholder="Ex.: elaborar a inicial; solicitar docs faltantes ao cliente" style="width:100%;min-height:70px;padding:9px;margin-top:4px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)"></textarea>`,
     async()=>{
       const resp=(document.getElementById('nn-resp').value||'').trim();
       if(!resp){toast('Informe o responsável.','erro');return false;}
@@ -3590,8 +3590,8 @@ function repassarNN(id){
 function concluirNN(id){
   const n=_nnCache.find(x=>x.id===id)||{};
   abrirModal('✔️ Concluir 1ª ação',
-    `<p style="font-size:13.5px;line-height:1.6;color:#cbd5e1">Confirmar que a <strong>primeira ação contratada foi realizada</strong> para <strong>${_nnEsc(n.cliente_nome||'')}</strong>?</p>
-     <p style="font-size:12.5px;color:#94a3b8">Ele sai da aba <strong>Novos Negócios</strong> e passa a ser um caso normal do escritório (segue nas telas de Clientes/Processos).</p>`,
+    `<p style="font-size:13.5px;line-height:1.6;color:#334155">Confirmar que a <strong>primeira ação contratada foi realizada</strong> para <strong>${_nnEsc(n.cliente_nome||'')}</strong>?</p>
+     <p style="font-size:12.5px;color:#64748b">Ele sai da aba <strong>Novos Negócios</strong> e passa a ser um caso normal do escritório (segue nas telas de Clientes/Processos).</p>`,
     async()=>{
       const{error}=await supa.from('novos_negocios').update({status:'concluido',concluido_em:new Date().toISOString()}).eq('id',id);
       if(error){toast('Erro ao concluir.','erro');return false;}
@@ -3604,16 +3604,16 @@ function novoNegocio(){
   const cats=Object.keys(NN_LABEL).filter(k=>k!=='universal').map(k=>`<option value="${k}">${NN_LABEL[k]}</option>`).join('');
   const resp=NN_RESP.map(r=>`<option value="${r}">`).join('');
   abrirModal('+ Novo Negócio',
-    `<label style="font-size:12px;color:#94a3b8">Cliente *</label>
-     <input id="nnn-cli" placeholder="Nome do cliente" style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0">
-     <label style="font-size:12px;color:#94a3b8">O que foi contratado (1ª ação) *</label>
-     <input id="nnn-acao" placeholder="Ex.: Elaborar contestação no processo Nº..." style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0">
-     <label style="font-size:12px;color:#94a3b8">Categoria *</label>
-     <select id="nnn-cat" style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0">${cats}</select>
-     <label style="font-size:12px;color:#94a3b8">Responsável / Prazo</label>
+    `<label style="font-size:12px;color:#64748b">Cliente *</label>
+     <input id="nnn-cli" placeholder="Nome do cliente" style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
+     <label style="font-size:12px;color:#64748b">O que foi contratado (1ª ação) *</label>
+     <input id="nnn-acao" placeholder="Ex.: Elaborar contestação no processo Nº..." style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
+     <label style="font-size:12px;color:#64748b">Categoria *</label>
+     <select id="nnn-cat" style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">${cats}</select>
+     <label style="font-size:12px;color:#64748b">Responsável / Prazo</label>
      <div style="display:flex;gap:8px;margin:4px 0 10px">
-       <input id="nnn-resp" list="nnn-resp-list" placeholder="Responsável" style="flex:1;padding:9px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0">
-       <input id="nnn-prazo" type="date" style="flex:1;padding:9px;border-radius:8px;border:1px solid var(--cinza3,#1e3350);background:var(--cinza1,#0a1728);color:#e2e8f0">
+       <input id="nnn-resp" list="nnn-resp-list" placeholder="Responsável" style="flex:1;padding:9px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
+       <input id="nnn-prazo" type="date" style="flex:1;padding:9px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
      </div>
      <datalist id="nnn-resp-list">${resp}</datalist>`,
     async()=>{
