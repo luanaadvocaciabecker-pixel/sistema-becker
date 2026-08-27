@@ -3255,6 +3255,20 @@ function formProcesso(d={}){
 // ══════════════════════════════════════════════════════════════════════════
 const NN_LABEL={universal:'Universal',inventario:'Inventário Extrajudicial',previdenciario:'Previdenciário',notificacao:'Notificação Extrajudicial',revisional:'Revisional / Superendividamento',trabalhista:'Trabalhista',divorcio:'Divórcio',escritura:'Escritura / Registro de Imóvel',contrato:'Contrato (elaboração/análise)',usucapiao:'Usucapião',prova:'Produção Antecipada de Provas',defesa_civel:'Defesa Cível (processo em andamento)',alvara:'Alvará Judicial',civel_geral:'Cível (geral)',outro:'Outro'};
 const NN_RESP=['Luana','Cibele','Alana','Aline','Andressa','Karina','Samaira','Ana','Magalhães'];
+const NN_DRIVE_RAIZ='https://1drv.ms/f/c/50bce61748c202f9/IgD5AsJIF-a8IIBQmQEAAAAAAbje9iwXxDmisMHX8NvvBtU?e=oiJauu';
+function abrirPastaNN(link){ window.open(link||NN_DRIVE_RAIZ,'_blank','noopener'); }
+function editarLinkNN(id){
+  const n=_nnCache.find(x=>x.id===id)||{};
+  abrirModal('📁 Link da pasta no Drive',
+    `<p style="font-size:12.5px;color:#64748b;margin:0 0 8px">Cole o link da pasta <strong>deste cliente</strong> no OneDrive/Drive. Depois é só clicar em "Abrir pasta" que entra direto — mesmo que a pasta esteja no nome de outro membro da família.</p>
+     <input id="nn-link" value="${_nnEsc(n.link_pasta||'')}" placeholder="https://1drv.ms/..." style="width:100%;padding:9px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">`,
+    async()=>{
+      const v=(document.getElementById('nn-link').value||'').trim();
+      const{error}=await supa.from('novos_negocios').update({link_pasta:v||null}).eq('id',id);
+      if(error){toast('Erro ao salvar.','erro');return false;}
+      if(n)n.link_pasta=v||null; toast('Link salvo.','ok'); abrirNovoNegocio(id,'dados');
+    });
+}
 let _nnCache=[], _nnFiltro='todos', _nnBusca='';
 function _nnEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function _nnStatus(neg){
@@ -3410,6 +3424,7 @@ async function abrirNovoNegocio(id,aba){
       <h3 style="margin:0">🗂️ ${linkCliente}</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <span style="font-size:13px;font-weight:700;color:${s.cor};background:${s.bg};padding:4px 12px;border-radius:20px">${s.emoji} ${s.rotulo}${s.cls!=='vermelho'?` · ${s.totalObrig-s.faltam}/${s.totalObrig} obrig.`:''}</span>
+        <button class="btn btn-secondary btn-sm" onclick="abrirPastaNN(${n.link_pasta?`'${_nnEsc(n.link_pasta)}'`:'null'})">📁 Abrir pasta</button>
         <button class="btn btn-primary btn-sm" onclick="repassarNN(${n.id})">📨 Repassar</button>
         <button class="btn btn-sm" style="background:#16a34a;color:#fff" onclick="concluirNN(${n.id})">✔️ Concluir 1ª ação</button>
       </div>
@@ -3456,7 +3471,12 @@ async function abrirNovoNegocio(id,aba){
         ${info('Atendimento',n.origem_atendimento&&n.origem_atendimento!=='nada'?_nnEsc(n.origem_atendimento):'')}
       </div>
       ${n.observacao?`<div style="margin-top:14px;padding:10px 12px;background:#F8FAFC;border-left:3px solid var(--azul3,#60a5fa);border-radius:6px;font-size:13px;color:#334155;line-height:1.5">📝 ${_nnEsc(n.observacao)}</div>`:''}
-      <div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="editarObsNN(${n.id})">📝 Editar observação</button></div>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-secondary btn-sm" onclick="editarObsNN(${n.id})">📝 Editar observação</button>
+        <button class="btn btn-secondary btn-sm" onclick="abrirPastaNN(${n.link_pasta?`'${_nnEsc(n.link_pasta)}'`:'null'})">📁 Abrir pasta no Drive</button>
+        <button class="btn btn-secondary btn-sm" onclick="editarLinkNN(${n.id})">🔗 ${n.link_pasta?'Editar link da pasta':'Definir link da pasta'}</button>
+      </div>
+      ${n.link_pasta?`<div style="margin-top:8px;font-size:12px;color:#64748b">Pasta: <a href="${_nnEsc(n.link_pasta)}" target="_blank" style="color:#2563eb">${_nnEsc(n.link_pasta).slice(0,60)}…</a></div>`:`<div style="margin-top:8px;font-size:12px;color:#64748b">Sem link específico — o botão abre a pasta-raiz do Drive. Defina o link desta pasta para abrir direto.</div>`}
     </div></div>
   </div>
   <div id="pnn-docs" style="display:${aba==='docs'?'block':'none'}"><div class="card"><div class="card-body">${painelDocs}</div></div></div>
