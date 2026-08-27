@@ -3370,18 +3370,25 @@ async function abrirNovoNegocio(id,aba){
   const linkCliente=n.cliente_id?`<a href="#" onclick="abrirCliente('${n.cliente_id}');return false" style="color:var(--azul3,#60a5fa)">${_nnEsc(n.cliente_nome)}</a>`:_nnEsc(n.cliente_nome);
   const info=(rot,val)=>val?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${rot}</span><div style="margin-top:3px;font-size:13px">${val}</div></div>`:'';
   // ---- painel Documentos (checklist + anexos + outros) ----
+  const _itemNome={}; itens.forEach(i=>{_itemNome[i.id]=i.documento;});
+  const todosDocs=(docs||[]);
   const painelDocs=`
     ${s.faltam>0?`<div style="background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#fca5a5">⚠️ <strong>Faltam ${s.faltam} documento(s) obrigatório(s)</strong> — anexe o arquivo (marca sozinho) ou solicite ao cliente antes de repassar.</div>`:`<div style="background:rgba(22,163,74,.1);border:1px solid rgba(22,163,74,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#86efac">✅ Documentação obrigatória completa. Pronto para repassar.</div>`}
     <p style="font-size:12px;color:#94a3b8;margin:0 0 10px">Clique em <strong>📎 Anexar</strong> em cada documento. Quando o arquivo sobe, o item marca ✓ sozinho. (Ou marque manualmente no quadradinho, se o documento estiver na pasta física.)</p>
     <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin:4px 0 6px">Obrigatórios</div>
     ${obrig.map(linhaItem).join('')||'<p style="color:#64748b;font-size:13px">—</p>'}
     ${cond.length?`<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin:14px 0 6px">Condicionais (só se aplicável)</div>${cond.map(linhaItem).join('')}`:''}
-    <div style="border-top:1px solid rgba(255,255,255,.06);margin-top:16px;padding-top:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase">Outros documentos</span>
-        <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="anexarItemNN(${n.id},null)">📎 Anexar outro</button>
+
+    <div style="border-top:1px solid rgba(255,255,255,.06);margin-top:18px;padding-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;font-weight:700;color:#e2e8f0">📂 Todos os documentos anexados (${todosDocs.length})</span>
+        <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="anexarItemNN(${n.id},null)">📎 Anexar documento</button>
       </div>
-      ${outros.length?outros.map(d=>`<div style="font-size:13px;padding:4px 0"><a href="${d.url}" target="_blank" style="color:#60a5fa;text-decoration:none">📎 ${_nnEsc(d.nome)}</a> <span onclick="excluirDocNN(${d.id},${n.id},null)" style="cursor:pointer;color:#f87171">🗑</span></div>`).join(''):'<p style="color:#64748b;font-size:12px">Nenhum documento avulso.</p>'}
+      ${todosDocs.length?todosDocs.map(d=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05)">
+        <a href="${d.url}" target="_blank" style="flex:1;color:#60a5fa;text-decoration:none;font-size:13px">📎 ${_nnEsc(d.nome)}</a>
+        ${d.nn_item_id?`<span style="font-size:11px;color:#64748b">${_nnEsc(_itemNome[d.nn_item_id]||'')}</span>`:'<span style="font-size:11px;color:#64748b">avulso</span>'}
+        <span onclick="excluirDocNN(${d.id},${n.id},${d.nn_item_id||'null'})" title="Remover" style="cursor:pointer;color:#f87171">🗑</span>
+      </div>`).join(''):'<p style="color:#64748b;font-size:12px;margin:0">Nenhum documento anexado ainda. Use o botão 📎 Anexar em cada item acima, ou o botão aqui pra subir um arquivo avulso.</p>'}
     </div>
     ${cli&&docsCliente.length?`<div style="border-top:1px solid rgba(255,255,255,.06);margin-top:16px;padding-top:12px">
       <span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase">Documentos já no cadastro do cliente</span>
