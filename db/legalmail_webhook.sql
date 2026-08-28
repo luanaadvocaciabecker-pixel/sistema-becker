@@ -115,3 +115,74 @@ end $$;
 revoke all on function public.lm_ingest(jsonb) from anon, authenticated;
 revoke all on function public.lm_date(text) from anon, authenticated;
 grant execute on function public.lm_ingest(jsonb) to service_role;
+
+-- ============================================================================
+-- 4) Reconciliação diária (cumprido/excedido) — pull do GET /api/v1/notices
+--    Edge Function: whatsapp-bot/edge-function-legalmail-reconcile.ts
+-- ============================================================================
+create or replace function public.lm_reconcile(notices jsonb)
+returns jsonb language plpgsql security definer set search_path=public as $$
+declare
+  n jsonb; nid bigint; num text; digits text; pid bigint;
+  dlim date; ddisp date; pstatus text; cumpr boolean; texto text; dest text;
+  n_pub int:=0; n_prz int:=0; n_cumpr int:=0; n_exc int:=0;
+begin
+  if notices is not null and jsonb_typeof(notices)<>'array' then
+    notices := coalesce(notices->'notices', notices);
+  end if;
+  if notices is null or jsonb_typeof(notices)<>'array' then
+    return jsonb_build_object('erro','sem array de notices');
+  end if;
+  for n in select value from jsonb_array_elements(notices) loop
+    begin nid := (n->>'id')::bigint; exception when others then nid:=null; end;
+    if nid is null then continue; end if;
+    num := n->>'numero_processo';
+    digits := regexp_replace(coalesce(num,''),'\D','','g');
+    pid := null;
+    if digits<>'' and digits !~ '^0+$' then
+      select p.id into pid from processos p
+       where regexp_replace(coalesce(p.numero,''),'\D','','g')=digits limit 1;
+    end if;
+    ddisp   := lm_date(n->>'data_disponibilizacao');
+    dlim    := lm_date(n->>'data_limite_manifestacao');
+    pstatus := lower(coalesce(n->>'prazo_status',''));
+    texto   := n->>'teor';
+    dest    := coalesce(n->'destinatario'->>'nome', n->>'destinatario');
+    cumpr   := (pstatus='cumprido');
+    insert into publicacoes(legalmail_id, processo_id, numero_processo, tribunal, tipo,
+                            data_disponibilizacao, texto, destinatario, lida, prazo_gerado)
+    values (nid, pid, num, n->>'tribunal', coalesce(n->>'tipo','Intimação'),
+            ddisp, texto, dest, false, (dlim is not null))
+    on conflict (legalmail_id) where legalmail_id is not null
+    do update set processo_id           = coalesce(excluded.processo_id, publicacoes.processo_id),
+                  data_disponibilizacao = coalesce(excluded.data_disponibilizacao, publicacoes.data_disponibilizacao),
+                  texto                 = coalesce(excluded.texto, publicacoes.texto),
+                  tribunal              = coalesce(excluded.tribunal, publicacoes.tribunal),
+                  prazo_gerado          = (dlim is not null);
+    n_pub := n_pub + 1;
+    if dlim is not null then
+      insert into prazos(legalmail_id, processo_id, descricao, data_prazo, data, tipo, status, alertar_dias, cumprido)
+      values (nid, pid, left(coalesce(n->>'tipo','Intimação')||' — '||coalesce(texto,''),200),
+              dlim, dlim, coalesce(n->>'tipo','Intimação'),
+              case when pstatus='' then 'pendente' else pstatus end, 3, cumpr)
+      on conflict (legalmail_id) where legalmail_id is not null
+      do update set data_prazo = excluded.data_prazo, data = excluded.data,
+                    status = excluded.status, cumprido = excluded.cumprido,
+                    processo_id = coalesce(excluded.processo_id, prazos.processo_id);
+      n_prz := n_prz + 1;
+      if pstatus='cumprido' then n_cumpr := n_cumpr + 1; end if;
+      if pstatus='excedido' then n_exc   := n_exc + 1; end if;
+    end if;
+  end loop;
+  return jsonb_build_object('publicacoes',n_pub,'prazos',n_prz,'cumpridos',n_cumpr,'excedidos',n_exc);
+end $$;
+revoke all on function public.lm_reconcile(jsonb) from anon, authenticated;
+grant execute on function public.lm_reconcile(jsonb) to service_role;
+
+-- Agendamento diário (07:30 BRT = 10:30 UTC). O header x-reconcile-key reusa a
+-- LEGALMAIL_WEBHOOK_KEY já configurada. Requer o segredo LEGALMAIL_API_KEY na função.
+-- SELECT cron.schedule('legalmail_reconcile_diario','30 10 * * *',
+--   $$ select net.http_post(
+--        url:='https://<PROJ>.supabase.co/functions/v1/legalmail-reconcile',
+--        headers:=jsonb_build_object('Content-Type','application/json','x-reconcile-key','<WEBHOOK_KEY>'),
+--        body:='{}'::jsonb, timeout_milliseconds:=120000) $$);
