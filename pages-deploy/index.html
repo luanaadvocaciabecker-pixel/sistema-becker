@@ -1790,7 +1790,6 @@ const USUARIOS_BECKER={
   'juridico5@advocaciabecker.com':{nome:'Ana Beatriz Muller',funcao:'Estagiária'},
   'cibele@advocaciabecker.com':{nome:'Cibele Becker',funcao:'Sócia'},
   'alana@advocaciabecker.com':{nome:'Alana Pais Lemos',funcao:'Advogada'},
-  'andressa@advocaciabecker.com':{nome:'Andressa Dantas Vieira',funcao:'Advogada'},
   'atendimento@advocaciabecker.com':{nome:'Secretaria',funcao:'Atendimento'}
 };
 function perfilPadraoUsuario(){
@@ -2518,7 +2517,7 @@ async function pClientes(){
   <div class="toolbar">
     <div class="search-box"><input type="text" placeholder="Buscar nome, CPF, e-mail..." oninput="clientesFiltro.busca=this.value;buscarClientes()"></div>
     <select class="filtro" onchange="clientesFiltro.resp=this.value;buscarClientes()">
-      <option value="">Todos os advogados</option><option>Cibele Becker</option><option>Alana Pais Lemos</option><option>Andressa Dantas Vieira</option><option>Luana Fernandes</option><option>Samaira Leite da Silva</option>
+      <option value="">Todos os advogados</option><option>Cibele Becker</option><option>Alana Pais Lemos</option><option>Maria Helena</option><option>Luana Fernandes</option><option>Samaira Leite da Silva</option>
     </select>
     <select class="filtro" onchange="clientesFiltro.status=this.value;buscarClientes()">
       <option value="">Todos os status</option><option>Ativo</option><option>Inativo</option><option>Encerrado</option>
@@ -2986,7 +2985,7 @@ function formCliente(d={}){return`<form id="form-cliente">
     <div class="form-field"><label>Estado</label><input name="estado" id="campo-estado" value="${d.estado||'SC'}"></div>
     <div class="form-field"><label>Responsável</label>
       <select name="responsavel">
-        ${['Cibele Becker','Alana Pais Lemos','Andressa Dantas Vieira','Luana Fernandes','Samaira Leite da Silva'].map(o=>`<option ${(d.responsavel||'Cibele Becker')===o?'selected':''}>${o}</option>`).join('')}
+        ${['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'].map(o=>`<option ${(d.responsavel||'Cibele Becker')===o?'selected':''}>${o}</option>`).join('')}
       </select>
     </div>
   </div>
@@ -3010,7 +3009,7 @@ async function pJudiciais(){
       <option value="">Todos os processos</option><option>Ativo</option><option>Em andamento</option><option>Suspenso</option><option>Arquivado</option>
     </select>
     <select class="filtro" onchange="processosFiltro.resp=this.value;buscarProcessos()">
-      <option value="">Todos os responsáveis</option><option>Alana</option><option>Andressa</option><option>Luana</option><option>Samaira</option><option>Cibele</option>
+      <option value="">Todos os responsáveis</option><option>Alana</option><option>Maria Helena</option><option>Luana</option><option>Samaira</option><option>Cibele</option>
     </select>
     <button id="btn-meus-proc" class="btn btn-secondary" onclick="toggleMeusProc()" style="white-space:nowrap">👤 Meus processos</button>
     <button class="btn btn-primary" onclick="novoProcesso()">+ Novo Processo</button>
@@ -3212,7 +3211,7 @@ function tagSituacaoProcesso(s){
 }
 function formProcesso(d={}){
   const opts=clientesCache.map(cl=>`<option value="${cl.id}" ${d.cliente_id==cl.id?'selected':''}>${cl.nome}</option>`).join('');
-  const advs=['Cibele Becker','Alana Pais Lemos','Andressa Dantas Vieira','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
   const advsOpts=(sel,req)=>`<option value="">${req?'Selecione...':'— Nenhum —'}</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
   return`<form id="form-processo">
   <div style="background:rgba(200,167,91,0.06);border:1px solid rgba(200,167,91,0.15);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--azul3)">
@@ -3263,7 +3262,7 @@ function formProcesso(d={}){
 // NOVOS NEGÓCIOS — triagem de novos casos (checklist de documentos + handoff)
 // ══════════════════════════════════════════════════════════════════════════
 const NN_LABEL={universal:'Universal',inventario:'Inventário Extrajudicial',previdenciario:'Previdenciário',notificacao:'Notificação Extrajudicial',revisional:'Revisional / Superendividamento',trabalhista:'Trabalhista',divorcio:'Divórcio',escritura:'Escritura / Registro de Imóvel',contrato:'Contrato (elaboração/análise)',usucapiao:'Usucapião',prova:'Produção Antecipada de Provas',defesa_civel:'Defesa Cível (processo em andamento)',alvara:'Alvará Judicial',civel_geral:'Cível (geral)',outro:'Outro'};
-const NN_RESP=['Luana','Cibele','Alana','Aline','Andressa','Karina','Samaira','Ana','Magalhães'];
+const NN_RESP=['Luana','Cibele','Alana','Aline','Maria Helena','Karina','Samaira','Ana','Magalhães'];
 const NN_DRIVE_RAIZ='https://1drv.ms/f/c/50bce61748c202f9/IgD5AsJIF-a8IIBQmQEAAAAAAbje9iwXxDmisMHX8NvvBtU?e=oiJauu';
 function abrirPastaNN(link){ window.open(link||NN_DRIVE_RAIZ,'_blank','noopener'); }
 function editarLinkNN(id){
@@ -3756,7 +3755,7 @@ async function buscarAdministrativos(){
 }
 function formProcessoAdm(d={}){
   const opts=clientesCache.map(cl=>`<option value="${cl.id}" ${d.cliente_id==cl.id?'selected':''}>${cl.nome}</option>`).join('');
-  const advs=['Cibele Becker','Alana Pais Lemos','Andressa Dantas Vieira','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
   const advsOpts=(sel)=>`<option value="">Selecione...</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
   const orgaos=['INSS','Previdência Social','FGTS/Caixa Econômica','Receita Federal','Prefeitura Municipal','Governo do Estado','INSS — Aposentadoria','INSS — Benefício por Incapacidade','INSS — BPC/LOAS','Conselho Profissional','Outro'];
   const orgOpts=(sel)=>orgaos.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
@@ -3812,7 +3811,7 @@ async function converterParaJudicial(admId){
   const{data:adm}=await supa.from('processos_adm').select('*,clientes(nome)').eq('id',admId).single();
   if(!adm)return;
   if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(500);clientesCache=data||[];}
-  const advs=['Cibele Becker','Alana Pais Lemos','Andressa Dantas Vieira','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
   const advsOpts=(sel)=>`<option value="">Selecione...</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
   const formHtml=`<form id="form-converter">
     <div style="background:rgba(61,142,240,0.08);border:1px solid rgba(61,142,240,0.2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#93c5fd">
@@ -4500,10 +4499,10 @@ function pUsuarios(){
             <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
           </tr>
           <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
-            <td style="padding:12px;font-size:13px">andressa@advocaciabecker.com</td>
-            <td style="padding:12px;font-size:13px;font-weight:600">Andressa Dantas Vieira</td>
+            <td style="padding:12px;font-size:13px;color:#94a3b8">(e-mail a definir)</td>
+            <td style="padding:12px;font-size:13px;font-weight:600">Maria Helena</td>
             <td style="padding:12px"><span class="tag andamento">Advogada</span></td>
-            <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
+            <td style="padding:12px"><span class="tag aguardando">Pendente login</span></td>
           </tr>
           <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
             <td style="padding:12px;font-size:13px">juridico5@advocaciabecker.com</td>
@@ -4745,7 +4744,7 @@ async function pCibele(){
   const ha30d=new Date(hoje.getTime()-30*86400000);
   const em7Str=new Date(hoje.getTime()+7*86400000).toISOString().split('T')[0];
   const hojStr=hoje.toISOString().split('T')[0];
-  const ADVS=['Cibele Becker','Alana Pais Lemos','Andressa Dantas Vieira','Luana Fernandes','Samaira Leite da Silva'];
+  const ADVS=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
   const [rCl,rPr,rPz,rTk,rHon,rAlv,rAud]=await Promise.all([
     supa.from('clientes').select('id',{count:'exact'}),
     somenteProcessosPrincipais(supa.from('processos').select('id,situacao,advogado_responsavel,updated_at')),
@@ -4847,7 +4846,7 @@ async function pDesempenho(){
   const c=document.getElementById('conteudo');
   c.innerHTML='<p style="text-align:center;padding:60px;color:rgba(255,255,255,.2)">Carregando indicadores...</p>';
   const hoje=new Date();hoje.setHours(0,0,0,0);
-  const ADVS=['Cibele Becker','Alana Pais Lemos','Andressa Dantas Vieira','Luana Fernandes','Samaira Leite da Silva'];
+  const ADVS=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
   const [rPr,rTk,rPz,rAud]=await Promise.all([
     somenteProcessosPrincipais(supa.from('processos').select('id,situacao,advogado_responsavel')),
     supa.from('tarefas').select('id,status,responsavel').limit(500).catch(function(){return{data:[]};}),
@@ -5350,7 +5349,7 @@ async function beckerIABuscar(){
 let tarefasFiltro={status:'',responsavel:''};
 async function pTarefas(){
   const c=document.getElementById('conteudo');
-  const advs=['Cibele Becker','Alana Pais Lemos','Andressa Dantas Vieira','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
   c.innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div class="toolbar">
@@ -5418,7 +5417,7 @@ async function carregarTarefas(){
   }).join('');
 }
 async function novaTarefa(){
-  const advs=['Cibele Becker','Alana Pais Lemos','Andressa Dantas Vieira','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
   abrirModal('Nova Tarefa',`<form id="form-tarefa">
     <div class="form-field"><label>Título *</label><input name="titulo" placeholder="Ex: Protocolar recurso"></div>
@@ -5454,7 +5453,7 @@ async function novaTarefa(){
 async function editarTarefa(id){
   const{data:t}=await supa.from('tarefas').select('*').eq('id',id).single();
   if(!t){toast('Tarefa não encontrada.','erro');return;}
-  const advs=['Cibele Becker','Alana Pais Lemos','Andressa Dantas Vieira','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
   abrirModal('Editar Tarefa',`<form id="form-tarefa">
     <div class="form-field"><label>Título *</label><input name="titulo" value="${escHtml(t.titulo||'')}"></div>
