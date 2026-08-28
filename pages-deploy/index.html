@@ -3384,6 +3384,7 @@ async function abrirNovoNegocio(id,aba){
   };
   const linkCliente=n.cliente_id?`<a href="#" onclick="abrirCliente('${n.cliente_id}');return false" style="color:var(--azul3,#60a5fa)">${_nnEsc(n.cliente_nome)}</a>`:_nnEsc(n.cliente_nome);
   const info=(rot,val)=>val?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${rot}</span><div style="margin-top:3px;font-size:13px">${val}</div></div>`:'';
+  const infoA=(rot,val)=>`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${rot}</span><div style="margin-top:3px;font-size:13px;${val?'':'color:#b45309'}">${val||'— (falta)'}</div></div>`;
   // ---- painel Documentos (checklist + anexos + outros) ----
   const _itemNome={}; itens.forEach(i=>{_itemNome[i.id]=i.documento;});
   const todosDocs=(docs||[]);
@@ -3436,17 +3437,25 @@ async function abrirNovoNegocio(id,aba){
   </div>
   <div id="pnn-dados" style="display:${aba==='dados'?'block':'none'}">
     <div class="card" style="margin-bottom:16px">
-      <div class="card-header"><h3 style="margin:0;font-size:15px">👤 Dados do cliente</h3>
-        ${cli?`<button class="btn btn-secondary btn-sm" onclick="abrirCliente('${cli.id}')">Ver ficha completa →</button>`:`<button class="btn btn-secondary btn-sm" onclick="vincularClienteNN(${n.id})">🔗 Vincular a um cliente</button>`}</div>
+      <div class="card-header" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0;font-size:15px">👤 Dados do cliente</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${cli?`<button class="btn btn-primary btn-sm" onclick="editarDadosClienteNN(${cli.id},${n.id})">✏️ Editar dados</button>
+          <button class="btn btn-secondary btn-sm" onclick="abrirCliente('${cli.id}')">Ver ficha completa →</button>`
+          :`<button class="btn btn-secondary btn-sm" onclick="vincularClienteNN(${n.id})">🔗 Vincular a um cliente</button>`}</div></div>
       <div class="card-body">
         ${cli?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px">
-          ${info('CPF/CNPJ',_nnEsc(cli.cpf_cnpj))}
-          ${info('Telefone',cli.telefone?waHtml(cli.telefone):'')}
-          ${info('WhatsApp',cli.whatsapp?waHtml(cli.whatsapp):'')}
-          ${info('E-mail',_nnEsc(cli.email))}
-          ${info('Responsável',_nnEsc(cli.responsavel||n.responsavel))}
-          ${info('Endereço',[cli.rua,cli.numero,cli.bairro,cli.cidade,cli.estado].filter(Boolean).map(_nnEsc).join(', '))}
-        </div>`:`<p style="color:#64748b;font-size:13px;margin:0">Este novo negócio ainda não está vinculado a um cadastro de cliente. Clique em <strong>🔗 Vincular a um cliente</strong> para puxar os dados, processos e documentos automaticamente.</p>`}
+          ${infoA('CPF/CNPJ',_nnEsc(cli.cpf_cnpj))}
+          ${infoA('Telefone',cli.telefone?waHtml(cli.telefone):'')}
+          ${infoA('WhatsApp',cli.whatsapp?waHtml(cli.whatsapp):'')}
+          ${infoA('E-mail',_nnEsc(cli.email))}
+          ${infoA('Estado civil',_nnEsc(cli.estado_civil))}
+          ${infoA('Profissão',_nnEsc(cli.profissao))}
+          ${infoA('CEP',_nnEsc(cli.cep))}
+          ${infoA('Endereço',[cli.rua,cli.numero,cli.bairro,cli.cidade,cli.estado].filter(Boolean).map(_nnEsc).join(', '))}
+          ${infoA('Responsável',_nnEsc(cli.responsavel||n.responsavel))}
+        </div>
+        ${(!cli.cpf_cnpj||!cli.telefone)?'<div style="margin-top:12px;background:rgba(217,119,6,.1);border:1px solid rgba(217,119,6,.3);border-radius:8px;padding:9px 11px;font-size:12.5px;color:#b45309">⚠️ Faltam dados do cliente (o contrato pode ter vindo ilegível no OCR). Clique em <strong>✏️ Editar dados</strong> para completar.</div>':''}`
+        :`<p style="color:#64748b;font-size:13px;margin:0">Este novo negócio ainda não está vinculado a um cadastro de cliente. Clique em <strong>🔗 Vincular a um cliente</strong> para puxar os dados, processos e documentos automaticamente.</p>`}
       </div>
     </div>
 
@@ -3536,6 +3545,30 @@ async function toggleItemNN(itemId,negId,presente){
   const neg=_nnCache.find(x=>x.id===negId);
   if(neg&&neg.nn_itens){const it=neg.nn_itens.find(i=>i.id===itemId);if(it)it.presente=presente;}
   abrirNovoNegocio(negId,'docs');
+}
+async function editarDadosClienteNN(clienteId,negId){
+  const{data:cl}=await supa.from('clientes').select('*').eq('id',clienteId).single();
+  const c=cl||{};
+  const campo=(id,lbl,val,ph='')=>`<label style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase">${lbl}</label>
+    <input id="${id}" value="${_nnEsc(val||'')}" placeholder="${ph}" style="width:100%;padding:8px;margin:3px 0 10px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">`;
+  abrirModal('✏️ Editar dados do cliente',
+    `${campo('ec-nome','Nome completo',c.nome)}
+     <div style="display:flex;gap:8px"><div style="flex:1">${campo('ec-cpf','CPF/CNPJ',c.cpf_cnpj)}</div><div style="flex:1">${campo('ec-rg','RG',c.rg)}</div></div>
+     <div style="display:flex;gap:8px"><div style="flex:1">${campo('ec-tel','Telefone',c.telefone,'(47) 9...')}</div><div style="flex:1">${campo('ec-wpp','WhatsApp',c.whatsapp,'(47) 9...')}</div></div>
+     ${campo('ec-email','E-mail',c.email)}
+     <div style="display:flex;gap:8px"><div style="flex:1">${campo('ec-estciv','Estado civil',c.estado_civil)}</div><div style="flex:1">${campo('ec-prof','Profissão',c.profissao)}</div></div>
+     <div style="display:flex;gap:8px"><div style="flex:1">${campo('ec-cep','CEP',c.cep)}</div><div style="flex:2">${campo('ec-rua','Endereço',c.rua)}</div></div>
+     <div style="display:flex;gap:8px"><div style="flex:2">${campo('ec-cidade','Cidade',c.cidade)}</div><div style="flex:1">${campo('ec-estado','UF',c.estado)}</div></div>`,
+    async()=>{
+      const g=id=>(document.getElementById(id).value||'').trim();
+      const upd={nome:g('ec-nome')||c.nome,cpf_cnpj:g('ec-cpf')||null,rg:g('ec-rg')||null,telefone:g('ec-tel')||null,
+        whatsapp:g('ec-wpp')||null,email:g('ec-email')||null,estado_civil:g('ec-estciv')||null,profissao:g('ec-prof')||null,
+        cep:g('ec-cep')||null,rua:g('ec-rua')||null,cidade:g('ec-cidade')||null,estado:g('ec-estado')||null};
+      const{error}=await supa.from('clientes').update(upd).eq('id',clienteId);
+      if(error){toast('Erro ao salvar: '+error.message,'erro');return false;}
+      toast('✅ Dados do cliente atualizados.','ok');
+      abrirNovoNegocio(negId,'dados');
+    },'Salvar dados');
 }
 function vincularClienteNN(id){
   abrirModal('🔗 Vincular a um cliente',
@@ -4448,8 +4481,8 @@ function pUsuarios(){
         <tbody>
           <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
             <td style="padding:12px;font-size:13px">juridico1@advocaciabecker.com</td>
-            <td style="padding:12px;font-size:13px;font-weight:600">Cibele Becker</td>
-            <td style="padding:12px"><span class="tag ativo">Admin</span></td>
+            <td style="padding:12px;font-size:13px;font-weight:600">Luana Fernandes</td>
+            <td style="padding:12px"><span class="tag ativo">Advogada · Admin</span></td>
             <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
           </tr>
           <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
