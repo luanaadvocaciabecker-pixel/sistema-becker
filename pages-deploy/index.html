@@ -1785,13 +1785,21 @@ function chavePerfilUsuario(){
   const email=(usuarioAtual?.email||'usuario').toLowerCase();
   return 'becker_perfil_'+email;
 }
+const USUARIOS_BECKER={
+  'juridico1@advocaciabecker.com':{nome:'Luana Fernandes',funcao:'Advogada'},
+  'juridico5@advocaciabecker.com':{nome:'Ana Beatriz Muller',funcao:'Estagiária'},
+  'cibele@advocaciabecker.com':{nome:'Cibele Becker',funcao:'Sócia'},
+  'alana@advocaciabecker.com':{nome:'Alana Pais Lemos',funcao:'Advogada'},
+  'andressa@advocaciabecker.com':{nome:'Andressa Dantas Vieira',funcao:'Advogada'},
+  'atendimento@advocaciabecker.com':{nome:'Secretaria',funcao:'Atendimento'}
+};
 function perfilPadraoUsuario(){
-  const email=usuarioAtual?.email||'';
+  const email=(usuarioAtual?.email||'').toLowerCase().trim();
+  if(USUARIOS_BECKER[email]) return{...USUARIOS_BECKER[email],foto:''};
   let nome=email.split('@')[0].replace(/[._]/g,' ').split(' ').map(w=>w[0]?.toUpperCase()+w.slice(1)).join(' ');
-  if(/^juridico\s*\d*$/i.test(nome.trim()))nome='Luana Fernandes';
   if(/luana/i.test(email))nome='Luana Fernandes';
   if(/cibele/i.test(email))nome='Cibele Becker';
-  return{nome:nome||'Luana Fernandes',funcao:'Advogada',foto:''};
+  return{nome:nome||'Usuário Becker',funcao:'Advogada',foto:''};
 }
 function carregarPerfilUsuario(){
   const base=perfilPadraoUsuario();
@@ -4495,6 +4503,12 @@ function pUsuarios(){
             <td style="padding:12px;font-size:13px">andressa@advocaciabecker.com</td>
             <td style="padding:12px;font-size:13px;font-weight:600">Andressa Dantas Vieira</td>
             <td style="padding:12px"><span class="tag andamento">Advogada</span></td>
+            <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
+            <td style="padding:12px;font-size:13px">juridico5@advocaciabecker.com</td>
+            <td style="padding:12px;font-size:13px;font-weight:600">Ana Beatriz Muller</td>
+            <td style="padding:12px"><span class="tag andamento">Estagiária</span></td>
             <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
           </tr>
           <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
