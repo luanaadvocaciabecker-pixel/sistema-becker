@@ -186,3 +186,19 @@ grant execute on function public.lm_reconcile(jsonb) to service_role;
 --        url:='https://<PROJ>.supabase.co/functions/v1/legalmail-reconcile',
 --        headers:=jsonb_build_object('Content-Type','application/json','x-reconcile-key','<WEBHOOK_KEY>'),
 --        body:='{}'::jsonb, timeout_milliseconds:=120000) $$);
+
+-- ============================================================================
+-- 5) v2 da reconciliação (estratégia "de hoje pra frente" + data estimada)
+--    Substitui a lm_reconcile acima. Aplicado via migrations:
+--    legalmail_reconcile_estimado + guarda contra sobrescrever correção humana.
+-- ============================================================================
+-- lm_add_business_days(d, n): soma N dias úteis (pula sáb/dom; sem feriados).
+-- lm_reconcile(notices):
+--   * pendente sem data-limite -> prazo ESTIMADO (disponibilização + 15 dias úteis),
+--     status='estimado', descrição prefixada "⚠ ESTIMADO (conferir) —".
+--   * pendente com data-limite -> data real, status='pendente'.
+--   * cumprido/excedido -> só atualiza prazo existente (não cria passado).
+--   * NÃO sobrescreve prazo cujo status saiu de estimado/pendente ou já cumprido
+--     (protege correção/conclusão feita por humano).
+-- A Edge Function legalmail-reconcile puxa /notices (limit<=50, paginado) só da
+-- janela recente (?dias, padrão 7) e chama esta função. Agendada 07:30 BRT.
