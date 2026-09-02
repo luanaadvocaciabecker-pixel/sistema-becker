@@ -202,3 +202,17 @@ grant execute on function public.lm_reconcile(jsonb) to service_role;
 --     (protege correção/conclusão feita por humano).
 -- A Edge Function legalmail-reconcile puxa /notices (limit<=50, paginado) só da
 -- janela recente (?dias, padrão 7) e chama esta função. Agendada 07:30 BRT.
+
+-- ============================================================================
+-- 6) v3 dos prazos — LER a data do tribunal (sem chutar). Aplicado via execute_sql.
+-- ============================================================================
+-- Descoberta: o TEXTO da intimação traz "Prazo: N dias", "Status do prazo:
+-- Prazo aberto/fechado" e, quando ABERTO, "Data final: DD/MM/AAAA" (já com feriados).
+--   * Prazo aberto  -> usa a Data final do tribunal (exata) -> prazo 'pendente'.
+--   * Prazo fechado -> aguardando abertura: NÃO cria prazo (entra quando abrir).
+--   * Sem prazo no texto -> só publicação (inbox), sem prazo.
+-- Função public.lm_upsert_prazo_por_texto(nid,pid,texto,ddisp): extrai a Data final
+--   e cria/atualiza o prazo; nunca sobrescreve prazo já confirmado/cumprido por humano.
+-- lm_ingest (webhook) e lm_reconcile (diária) passam a chamar essa função — fim do
+-- chute de "15 dias úteis". Não precisamos de motor de cálculo/feriados: o tribunal
+-- já entrega a data pronta.
