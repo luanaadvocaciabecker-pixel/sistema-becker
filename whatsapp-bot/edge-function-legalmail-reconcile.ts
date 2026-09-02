@@ -4,6 +4,9 @@
 // há mais de `dias` dias nunca seria revisitada e ficaria presa em "ESTIMADO" para sempre mesmo
 // com a data real já disponível na API. "cumprido"/"excedido" continuam só na janela recente
 // (padrão: últimos 7 dias por data de captura; ?dias=N muda a janela). limit<=50 com paginação.
+// O workspace pode ter milhares de "pendente" (backlog histórico) — a RPC lm_reconcile é chamada
+// UMA VEZ POR PÁGINA (50 registros) em vez de acumular tudo num array e mandar de uma vez, senão
+// o Postgres cancela a chamada por statement timeout e NADA é salvo daquela rodada.
 // ?debug=1 mostra diagnóstico.
 //
 // Estratégia (definida com a Luana):
@@ -21,7 +24,7 @@ const API  = Deno.env.get("LEGALMAIL_API_KEY") || "";
 const GUARD = Deno.env.get("LEGALMAIL_WEBHOOK_KEY") || "";
 const BASE = Deno.env.get("LEGALMAIL_BASE") || "https://api.legalmail.com.br";
 const PAGE = 50;
-const MAX_PAGES = 60; // "pendente" agora é puxado sem filtro de data, então precisa de mais páginas
+const MAX_PAGES = 200; // cobre até 10.000 registros de backlog; a paginação para sozinha quando acabar
 const sbH = { apikey: SVC, Authorization: `Bearer ${SVC}`, "Content-Type": "application/json" };
 
 async function reconcile(notices: unknown[]) {
@@ -31,8 +34,11 @@ async function reconcile(notices: unknown[]) {
   return r.ok ? await r.json() : { erro: `rpc ${r.status} ${await r.text()}` };
 }
 
-async function pull(status: string, since: string | null, debug: Record<string, unknown>[] | null): Promise<unknown[]> {
-  const out: unknown[] = [];
+// Puxa e grava página por página (cada página gera uma chamada de RPC pequena e rápida).
+async function pullAndReconcile(status: string, since: string | null, debug: Record<string, unknown>[] | null) {
+  let puxados = 0;
+  const agg: Record<string, number> = { publicacoes: 0, prazos: 0, cumpridos: 0, excedidos: 0 };
+  const erros: string[] = [];
   for (let p = 0; p < MAX_PAGES; p++) {
     const u = `${BASE}/api/v1/notices?api_key=${encodeURIComponent(API)}`
             + `&prazo_status=${encodeURIComponent(status)}&limit=${PAGE}&offset=${p*PAGE}`
@@ -43,10 +49,21 @@ async function pull(status: string, since: string | null, debug: Record<string, 
     let j: any = {}; try { j = JSON.parse(txt); } catch { /* */ }
     const arr = Array.isArray(j?.notices) ? j.notices : (Array.isArray(j) ? j : []);
     if (debug && p === 0) debug.push({ status, http: r.status, total: j?.total ?? null, amostra: txt.slice(0,160) });
-    out.push(...arr);
+    if (arr.length) {
+      puxados += arr.length;
+      const res = await reconcile(arr);
+      if (res && !res.erro) {
+        agg.publicacoes += res.publicacoes || 0;
+        agg.prazos      += res.prazos      || 0;
+        agg.cumpridos   += res.cumpridos   || 0;
+        agg.excedidos   += res.excedidos   || 0;
+      } else {
+        erros.push(`pagina ${p}: ${res?.erro}`);
+      }
+    }
     if (arr.length < PAGE) break;
   }
-  return out;
+  return { puxados, agg, erros };
 }
 
 Deno.serve(async (req: Request) => {
@@ -64,18 +81,24 @@ Deno.serve(async (req: Request) => {
   const dias = Math.max(1, Math.min(60, parseInt(url.searchParams.get("dias") || "7", 10) || 7));
   const since = new Date(Date.now() - dias*86400000).toISOString().slice(0,10);
 
-  const all: unknown[] = [];
+  let puxados = 0;
+  const agg: Record<string, number> = { publicacoes: 0, prazos: 0, cumpridos: 0, excedidos: 0 };
+  const erros: string[] = [];
   // "pendente" sem filtro de captura: precisa reconsultar TODO pendente em aberto (não só os
   // capturados na janela recente), porque a data-limite pode ser preenchida pelo tribunal/Legal Mail
   // dias depois da captura — se filtrássemos por data_captura_inicio, uma intimação capturada há mais
   // de `dias` dias nunca mais seria revisitada e ficaria presa em "ESTIMADO" mesmo com a data real disponível.
-  try { all.push(...await pull("pendente", null, debug)); } catch (e) { if (debug) debug.push({ status: "pendente", erro: String(e) }); }
   // "cumprido"/"excedido" são transições recentes: a janela de dias é suficiente aqui.
-  for (const st of ["cumprido", "excedido"]) {
-    try { all.push(...await pull(st, since, debug)); } catch (e) { if (debug) debug.push({ status: st, erro: String(e) }); }
+  for (const [st, s] of [["pendente", null], ["cumprido", since], ["excedido", since]] as [string, string|null][]) {
+    try {
+      const res = await pullAndReconcile(st, s, debug);
+      puxados += res.puxados;
+      agg.publicacoes += res.agg.publicacoes; agg.prazos += res.agg.prazos;
+      agg.cumpridos += res.agg.cumpridos; agg.excedidos += res.agg.excedidos;
+      erros.push(...res.erros);
+    } catch (e) { erros.push(`${st}: ${String(e)}`); }
   }
-  const res = await reconcile(all);
-  return new Response(JSON.stringify({ janela_dias: dias, desde: since, puxados: all.length, ...res, ...(debug ? { debug } : {}) }), {
+  return new Response(JSON.stringify({ janela_dias: dias, desde: since, puxados, ...agg, erros: erros.length ? erros : undefined, ...(debug ? { debug } : {}) }), {
     status: 200, headers: { "Content-Type": "application/json" },
   });
 });
