@@ -3924,7 +3924,8 @@ async function excluirMov(id){
 // Buckets que se organizam sozinhos por data — nada fica "amontoado":
 //   hoje = vence hoje e não cumprido | vencido = data passou e não cumprido (decorrido)
 //   aberto = futuro e não cumprido   | cumprido = marcado como cumprido
-let prazosCache=[]; let prazoBucket='ativos'; let prazoVerCumpridos=false;
+let prazosCache=[]; let prazoBucket='ativos'; let prazoVerCumpridos=false; let prazoAdv='';
+const _advCurto=s=>{if(!s)return'';const w=s.trim().split(/\s+/)[0];return w?w[0].toUpperCase()+w.slice(1).toLowerCase():'';};
 function _classPrazo(p){
   if(p.cumprido)return'cumprido';
   const hoje=new Date();hoje.setHours(0,0,0,0);
@@ -3940,6 +3941,7 @@ async function pPrazos(filtroInicial='ativos'){
   document.getElementById('conteudo').innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div id="prazos-stats" class="stat-cards-row" style="grid-template-columns:repeat(5,1fr)"></div>
+  <div id="prazos-adv" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px"></div>
   <div class="toolbar" style="justify-content:flex-end">
     <button class="btn btn-primary" onclick="novoPrazo()">+ Novo Prazo</button>
   </div>
@@ -3947,17 +3949,25 @@ async function pPrazos(filtroInicial='ativos'){
   await carregarPrazos();
 }
 async function carregarPrazos(){
-  const{data,error}=await supa.from('prazos').select('*,processos(numero)').order('data').limit(500);
+  const{data,error}=await supa.from('prazos').select('*,processos(numero,advogado_responsavel)').order('data').limit(500);
   prazosCache=(error||!data)?[]:data;
   renderPrazos();
 }
 // filtrarPrazos mantido para compatibilidade (novoPrazo/cumprir/excluirPrazo chamam ele)
 function filtrarPrazos(f){ if(f){const m={pendentes:'ativos',todos:'todos',cumpridos:'cumprido',audiencias:'audiencias'};prazoBucket=m[f]||f;} carregarPrazos(); }
 function renderPrazos(){
+  const advDe=p=>(p.processos?.advogado_responsavel||'');
+  const base=prazoAdv?prazosCache.filter(p=>advDe(p)===prazoAdv):prazosCache;
+  // chips de advogado
+  const advBox=document.getElementById('prazos-adv');
+  if(advBox){
+    const chips=[['','Todos'],['LUANA FERNANDES MIRANDA','Luana'],['SAMAIRA LEITE DA SILVA','Samaira'],['ALANA PAIS LEMOS','Alana'],['MARIA HELENA','Maria Helena']];
+    advBox.innerHTML=chips.map(([v,l])=>{const n=v?prazosCache.filter(p=>advDe(p)===v&&!p.cumprido&&p.data>=new Date().toISOString().split('T')[0]).length:'';const on=prazoAdv===v;return `<button onclick="prazoAdv='${v.replace(/'/g,"\\'")}';renderPrazos()" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">👤 ${l}${v!==''?` (${n})`:''}</button>`;}).join('');
+  }
   const g={hoje:[],vencido:[],aberto:[],cumprido:[]};
-  prazosCache.forEach(p=>g[_classPrazo(p)].push(p));
+  base.forEach(p=>g[_classPrazo(p)].push(p));
   const stats=document.getElementById('prazos-stats');
-  const estCount=prazosCache.filter(p=>!p.cumprido&&p.status==='estimado').length;
+  const estCount=base.filter(p=>!p.cumprido&&p.status==='estimado').length;
   if(stats)stats.innerHTML=[
     ['hoje','Vencendo HOJE',g.hoje.length,'#f87171'],
     ['vencido','Decorridos',g.vencido.length,'#fbbf24'],
@@ -3972,7 +3982,7 @@ function renderPrazos(){
   else if(prazoBucket==='vencido'){lista=g.vencido;vazio='Nenhum prazo decorrido em aberto. ✅';}
   else if(prazoBucket==='aberto')lista=g.aberto;
   else if(prazoBucket==='cumprido')lista=g.cumprido;
-  else if(prazoBucket==='estimados'){lista=prazosCache.filter(p=>!p.cumprido&&p.status==='estimado');vazio='Nenhum prazo estimado a conferir. 👍';}
+  else if(prazoBucket==='estimados'){lista=base.filter(p=>!p.cumprido&&p.status==='estimado');vazio='Nenhum prazo estimado a conferir. 👍';}
   else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
   else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.cumprido];
   else lista=[...g.hoje,...g.vencido,...g.aberto]; // 'ativos' (padrão): tudo que ainda exige ação
@@ -4005,7 +4015,7 @@ function renderPrazosLista(lista,comAcoes=false){
       </div>
       <div class="prazo-info">
         <h4>${p.descricao||'Prazo'} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}</h4>
-        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${p.tipo||''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${est?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
+        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${est?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
       </div>
       ${comAcoes?`<div style="display:flex;gap:6px;align-items:center">
         ${est&&!p.cumprido?`<button class="btn btn-sm" style="background:#fef3c7;color:#b45309" onclick="confirmarPrazo('${p.id}','${p.data||''}')">✎ Confirmar data</button>`:''}
