@@ -2,8 +2,9 @@
 // Cópia versionada; o deploy é feito no Supabase.
 //
 // Fluxo:
-//   1) Legal Mail faz POST JSON com o cabeçalho `X-LegalMail-Key` (quando há chave).
-//   2) Validamos a chave contra o segredo LEGALMAIL_WEBHOOK_KEY.
+//   1) Legal Mail faz POST JSON. A chave de autenticação vem no CORPO (`clientkey`)
+//      e/ou no cabeçalho `X-LegalMail-Key` — aceitamos qualquer um dos dois.
+//   2) Validamos contra o segredo LEGALMAIL_WEBHOOK_KEY.
 //   3) Respondemos 200 em < 3s (exigência do Legal Mail) e mapeamos em segundo plano
 //      via RPC `lm_ingest` (grava o cru em legalmail_eventos + publicacoes/prazos, idempotente).
 //
@@ -39,15 +40,18 @@ Deno.serve(async (req: Request) => {
     return new Response("method not allowed", { status: 405 });
   }
 
-  // Autenticação: cabeçalho X-LegalMail-Key deve bater com o segredo (se configurado).
-  if (WH_KEY) {
-    const got = req.headers.get("x-legalmail-key") || req.headers.get("X-LegalMail-Key") || "";
-    if (got !== WH_KEY) return new Response("unauthorized", { status: 401 });
-  }
-
-  let body: unknown = null;
+  // Lê o corpo primeiro (a chave do Legal Mail vem em `clientkey`, dentro do corpo).
+  let body: any = null;
   try { body = await req.json(); } catch { body = null; }
   if (body == null) return new Response("bad request", { status: 400 });
+
+  // Autenticação: aceita a chave do cabeçalho OU do corpo (clientkey).
+  if (WH_KEY) {
+    const got = req.headers.get("x-legalmail-key")
+             || req.headers.get("X-LegalMail-Key")
+             || (body && typeof body === "object" ? (body.clientkey || body.client_key || "") : "");
+    if (got !== WH_KEY) return new Response("unauthorized", { status: 401 });
+  }
 
   // Responde já; mapeia em segundo plano pra respeitar o limite de 3s do Legal Mail.
   // @ts-ignore EdgeRuntime existe no runtime do Supabase
