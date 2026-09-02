@@ -1,6 +1,10 @@
 // Edge Function `legalmail-reconcile` — sincroniza "de hoje pra frente".
-// Puxa /notices só da janela recente (padrão: últimos 7 dias por data de captura),
-// limit<=50 com paginação. ?debug=1 mostra diagnóstico. ?dias=N muda a janela.
+// "pendente" é puxado por inteiro (sem filtro de data de captura) a cada rodada, pois o Legal
+// Mail pode preencher a data-limite dias depois da captura — sem isso, uma intimação capturada
+// há mais de `dias` dias nunca seria revisitada e ficaria presa em "ESTIMADO" para sempre mesmo
+// com a data real já disponível na API. "cumprido"/"excedido" continuam só na janela recente
+// (padrão: últimos 7 dias por data de captura; ?dias=N muda a janela). limit<=50 com paginação.
+// ?debug=1 mostra diagnóstico.
 //
 // Estratégia (definida com a Luana):
 //   - pendente sem data-limite -> prazo ESTIMADO (disponibilização + 15 dias úteis), marcado "⚠ ESTIMADO (conferir)".
@@ -17,7 +21,7 @@ const API  = Deno.env.get("LEGALMAIL_API_KEY") || "";
 const GUARD = Deno.env.get("LEGALMAIL_WEBHOOK_KEY") || "";
 const BASE = Deno.env.get("LEGALMAIL_BASE") || "https://api.legalmail.com.br";
 const PAGE = 50;
-const MAX_PAGES = 20;
+const MAX_PAGES = 60; // "pendente" agora é puxado sem filtro de data, então precisa de mais páginas
 const sbH = { apikey: SVC, Authorization: `Bearer ${SVC}`, "Content-Type": "application/json" };
 
 async function reconcile(notices: unknown[]) {
@@ -27,12 +31,13 @@ async function reconcile(notices: unknown[]) {
   return r.ok ? await r.json() : { erro: `rpc ${r.status} ${await r.text()}` };
 }
 
-async function pull(status: string, since: string, debug: Record<string, unknown>[] | null): Promise<unknown[]> {
+async function pull(status: string, since: string | null, debug: Record<string, unknown>[] | null): Promise<unknown[]> {
   const out: unknown[] = [];
   for (let p = 0; p < MAX_PAGES; p++) {
     const u = `${BASE}/api/v1/notices?api_key=${encodeURIComponent(API)}`
             + `&prazo_status=${encodeURIComponent(status)}&limit=${PAGE}&offset=${p*PAGE}`
-            + `&data_captura_inicio=${since}&ordenar_por=id&ordem=desc`;
+            + (since ? `&data_captura_inicio=${since}` : '')
+            + `&ordenar_por=id&ordem=desc`;
     const r = await fetch(u, { headers: { "Accept": "application/json" } });
     const txt = await r.text();
     let j: any = {}; try { j = JSON.parse(txt); } catch { /* */ }
@@ -60,7 +65,13 @@ Deno.serve(async (req: Request) => {
   const since = new Date(Date.now() - dias*86400000).toISOString().slice(0,10);
 
   const all: unknown[] = [];
-  for (const st of ["pendente", "cumprido", "excedido"]) {
+  // "pendente" sem filtro de captura: precisa reconsultar TODO pendente em aberto (não só os
+  // capturados na janela recente), porque a data-limite pode ser preenchida pelo tribunal/Legal Mail
+  // dias depois da captura — se filtrássemos por data_captura_inicio, uma intimação capturada há mais
+  // de `dias` dias nunca mais seria revisitada e ficaria presa em "ESTIMADO" mesmo com a data real disponível.
+  try { all.push(...await pull("pendente", null, debug)); } catch (e) { if (debug) debug.push({ status: "pendente", erro: String(e) }); }
+  // "cumprido"/"excedido" são transições recentes: a janela de dias é suficiente aqui.
+  for (const st of ["cumprido", "excedido"]) {
     try { all.push(...await pull(st, since, debug)); } catch (e) { if (debug) debug.push({ status: st, erro: String(e) }); }
   }
   const res = await reconcile(all);
