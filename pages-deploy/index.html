@@ -1686,7 +1686,7 @@ function soDigitos(s){return String(s==null?'':s).replace(/\D/g,'');}
 function waLink(num){let d=soDigitos(num);if(!d)return '';if(d.length<=11)d='55'+d;return 'https://wa.me/'+d;}
 function waHtml(num,rotulo){const l=waLink(num);if(!l)return escHtml(num||'—');return `<a href="${l}" target="_blank" rel="noopener" style="color:#25D366;font-weight:600;text-decoration:none">💬 ${escHtml(num)}</a>`;}
 let movsFiltroProcesso='';
-const TIPOS_MOVIMENTACAO_PROCESSUAL=['DataJud','TJSC/eproc','Tribunal','Diário Oficial','JusBrasil','Manual'];
+const TIPOS_MOVIMENTACAO_PROCESSUAL=['DataJud','TJSC/eproc','Tribunal','Diário Oficial','JusBrasil','Manual','Projuris','Auditoria','Legal Mail'];
 const MODULOS_PROTEGIDOS={'financeiro':'becker2026','cibele':'becker2026'};
 const _modulosDesbloqueados=new Set();
 
@@ -3304,7 +3304,7 @@ async function pNovosNegocios(){
   c.innerHTML='<p style="text-align:center;padding:40px;color:#64748b">Carregando novos negócios...</p>';
   const{data,error}=await supa.from('novos_negocios')
     .select('*,nn_itens(id,documento,obrigatorio,presente,observacao)')
-    .eq('status','aberto').order('created_at',{ascending:true});
+    .in('status',['aberto','repassado']).order('created_at',{ascending:true});
   if(error){c.innerHTML=`<div class="card"><div class="card-body">Erro ao carregar: ${_nnEsc(error.message)}</div></div>`;return;}
   _nnCache=data||[];
   const{count:concl}=await supa.from('novos_negocios').select('id',{count:'exact'}).eq('status','concluido').limit(1);
@@ -3324,7 +3324,7 @@ function renderNovosNegocios(){
     <div style="font-size:12px;color:#64748b;margin-top:2px">${rotulo}</div></div>`;
   let html=`
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
-    ${card('📋',total,'Em triagem (abertos)','todos','var(--texto)')}
+    ${card('📋',total,'Em triagem','todos','var(--texto)')}
     ${card('🟢',completos,'Documentação completa','completos','#16a34a')}
     ${card('🟡',faltando,'Faltam documentos','faltando','#d97706')}
     ${card('🔴',semPasta,'Sem pasta / vazio','sempasta','#dc2626')}
@@ -3358,6 +3358,7 @@ function renderNovosNegociosLista(){
         <div style="font-weight:600;color:var(--texto);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.cliente_nome)}</div>
         <div style="font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.acao||'—')}</div>
       </div>
+      ${n.status==='repassado'?`<span class="tag" style="background:rgba(37,99,235,.12);color:#1d4ed8;font-size:11px;flex-shrink:0" title="Repassado para ${_nnEsc(n.responsavel||'')}">📨 ${_nnEsc(n.responsavel||'repassado')}</span>`:''}
       <span class="tag" style="background:rgba(148,163,184,.12);color:#334155;font-size:11px;flex-shrink:0">${NN_LABEL[n.categoria]||n.categoria}</span>
       <span style="font-size:12px;font-weight:700;color:${s.cor};min-width:96px;text-align:right;flex-shrink:0">${s.emoji} ${s.rotulo}</span>
     </div>`).join('');
@@ -3652,9 +3653,9 @@ function repassarNN(id){
         descricao:desc,responsavel:resp,cliente_id:n.cliente_id||null,prazo,prioridade:(s.faltam>0?'media':'alta'),status:'pendente'};
       const{data:t,error:e1}=await supa.from('tarefas').insert(tarefa).single();
       if(e1){toast('Erro ao criar tarefa: '+e1.message,'erro');return false;}
-      const{error:e2}=await supa.from('novos_negocios').update({responsavel:resp,tarefa_id:t?.id||null}).eq('id',id);
+      const{error:e2}=await supa.from('novos_negocios').update({responsavel:resp,tarefa_id:t?.id||null,status:'repassado'}).eq('id',id);
       if(e2){toast('Tarefa criada, mas houve erro ao vincular.','erro');}
-      n.responsavel=resp;
+      n.responsavel=resp;n.status='repassado';
       toast('✅ Tarefa criada e repassada para '+resp,'ok');
       abrirNovoNegocio(id);
     },'Criar tarefa e repassar');

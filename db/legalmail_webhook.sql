@@ -236,3 +236,30 @@ grant execute on function public.lm_reconcile(jsonb) to service_role;
 -- NOTA TRT: intimacoes do TRT chegam via DJEN como TEXTO LIVRE (sem "Data final"),
 --   entao NAO viram prazo automatico; /pleading/notices-to-comply veio vazio (so cobre
 --   prazos que o Legal Mail gerencia). Prazo do TRT depende de leitura por IA (a fazer).
+
+-- =====================================================================
+-- 8) Classe processual + sugestão de categoria por IA (set/2026)
+-- =====================================================================
+-- Colunas novas para o hub de prazos:
+--   publicacoes.classe / prazos.classe  -> classe processual vinda do /notices
+--   prazos.categoria_sugerida/_confianca/_motivo/_ia_em -> sugestão da IA (Haiku),
+--     NÃO sobrescreve `categoria` (verdade humana). categoria_fonte='humano' trava.
+alter table public.publicacoes add column if not exists classe text;
+alter table public.prazos      add column if not exists classe text;
+alter table public.prazos add column if not exists categoria_sugerida  text;
+alter table public.prazos add column if not exists categoria_confianca text;
+alter table public.prazos add column if not exists categoria_motivo    text;
+alter table public.prazos add column if not exists categoria_ia_em      timestamptz;
+alter table public.prazos add column if not exists categoria_fonte      text;
+-- lm_reconcile passou a gravar publicacoes.classe e prazos.classe (ver função no Supabase).
+-- Edge Function `prazos-classificar` lê classe+teor e grava as colunas categoria_sugerida*.
+
+-- =====================================================================
+-- 9) Reconciliação eProc: cadastra processos faltantes e liga órfãos (set/2026)
+-- =====================================================================
+-- Após conferência com a planilha do eProc 1º grau, 13 CNJs com prazos EM ABERTO
+-- estavam sem processo cadastrado (prazos órfãos). Criados como 'Ativo' SEM
+-- advogado_responsavel (aparecem no chip "Sem responsável" para atribuição) e
+-- vinculados os prazos/publicações/audiências por CNJ. Operação idempotente:
+-- reexecutar só afeta órfãos que ainda existirem.
+-- (Script executado via CTE: cnj_src -> insert processos -> update prazos/publicacoes/audiencias.)
