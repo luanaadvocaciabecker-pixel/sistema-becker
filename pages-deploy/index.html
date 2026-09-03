@@ -4019,7 +4019,7 @@ function renderPrazos(){
   else if(prazoBucket==='documentos'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='documentos');vazio='Nenhum prazo de documentos em aberto. 📎';}
   else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
   else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.cumprido];
-  else lista=[...g.hoje,...g.vencido,...g.aberto]; // 'ativos' (padrão): tudo que ainda exige ação
+  else lista=[...g.hoje,...g.aberto]; // 'ativos' (padrão): hoje + futuros. Vencidos saem daqui ("esquece o que já passou") e ficam só no card Vencidos.
   let html = lista.length?`<div class="card"><div class="card-body">${renderPrazosLista(lista,true)}</div></div>`
     :`<div class="empty-state"><div class="icon">✅</div><p>${vazio}</p></div>`;
   // Na visão padrão (ativos), as cumpridas ficam numa seção recolhida (fechada) no fim
