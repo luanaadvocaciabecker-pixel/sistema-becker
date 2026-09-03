@@ -203,3 +203,37 @@ grant execute on function public.lm_reconcile(jsonb) to service_role;
 -- A Edge Function legalmail-reconcile puxa /notices (limit<=50, paginado) e chama esta
 -- função; "pendente" é puxado por inteiro (sem filtro de data), "cumprido"/"excedido" só
 -- da janela recente (?dias, padrão 7). Agendada 07:30 BRT.
+
+-- ============================================================================
+-- 6) v3 dos prazos — LER a data do tribunal (sem chutar). Aplicado via execute_sql.
+-- ============================================================================
+-- Descoberta: o TEXTO da intimação traz "Prazo: N dias", "Status do prazo:
+-- Prazo aberto/fechado" e, quando ABERTO, "Data final: DD/MM/AAAA" (já com feriados).
+--   * Prazo aberto  -> usa a Data final do tribunal (exata) -> prazo 'pendente'.
+--   * Prazo fechado -> aguardando abertura: NÃO cria prazo (entra quando abrir).
+--   * Sem prazo no texto -> só publicação (inbox), sem prazo.
+-- Função public.lm_upsert_prazo_por_texto(nid,pid,texto,ddisp): extrai a Data final
+--   e cria/atualiza o prazo; nunca sobrescreve prazo já confirmado/cumprido por humano.
+-- lm_ingest (webhook) e lm_reconcile (diária) passam a chamar essa função — fim do
+-- chute de "15 dias úteis". Não precisamos de motor de cálculo/feriados: o tribunal
+-- já entrega a data pronta.
+
+-- ============================================================================
+-- 7) Autos sob demanda + Audiências do diário + mapa idprocessos (aplicado via execute_sql)
+-- ============================================================================
+-- processos.lm_idprocessos: id do processo no Legal Mail (preenchido de graça via
+--   GET /lawsuit/all -> RPC lm_set_idprocessos(pares jsonb)).
+-- processo_autos(processo_id, lm_idprocessos, job_id, status, pdf_path, n_autos...):
+--   autos baixados SOB DEMANDA. Edge Function legalmail-autos:
+--     action sync_ids -> preenche lm_idprocessos (gratis)
+--     action request  -> POST /lawsuit/case-files/download/request {idprocessos}
+--                        resp: {job_id, autos:N, custo:R$0,02*N}
+--     action status   -> GET /lawsuit/case-files/download/status -> {job_status:PROCESSING|COMPLETED, output_url}
+-- bucket storage 'autos' (privado) guarda o PDF.
+-- lm_upsert_audiencia(nid,pid,texto): extrai "Designo o dia DD/MM/AAAA ... audiencia"
+--   (data/hora/tipo) do texto do diario (TRT/DJEN vem so como texto livre) e grava em
+--   audiencias (dedupe por processo+data; idempotente por legalmail_id). Chamada por
+--   lm_ingest (webhook) e lm_reconcile (diaria).
+-- NOTA TRT: intimacoes do TRT chegam via DJEN como TEXTO LIVRE (sem "Data final"),
+--   entao NAO viram prazo automatico; /pleading/notices-to-comply veio vazio (so cobre
+--   prazos que o Legal Mail gerencia). Prazo do TRT depende de leitura por IA (a fazer).

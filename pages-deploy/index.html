@@ -3131,10 +3131,12 @@ async function abrirProcesso(id){
     <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🔄 Últimas movimentações</h4><div id="proc-movs">Carregando...</div></div>
     <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">⏰ Prazos</h4><div id="proc-prazos">Carregando...</div></div>
   </div>
-  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">📄 Documentos & íntegra</h4><div id="proc-docs">Carregando...</div></div>`;
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">📄 Documentos & íntegra</h4><div id="proc-docs">Carregando...</div></div>
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🏭 Produção Jurídica</h4><div id="proc-producao">Carregando...</div></div>`;
   carregarMovsProcesso(id);
   carregarPrazosProcesso(id);
   carregarDocsProcesso(id);
+  carregarProducaoProcesso(id);
 }
 async function carregarMovsProcesso(id){
   const el=document.getElementById('proc-movs');if(!el)return;
@@ -3148,8 +3150,26 @@ async function carregarMovsProcesso(id){
 }
 async function carregarPrazosProcesso(id){
   const el=document.getElementById('proc-prazos');if(!el)return;
-  const{data}=await supa.from('prazos').select('*,processos(numero)').eq('processo_id',id).order('data').limit(30);
+  // não-cumpridos primeiro (mais recentes primeiro dentro de cada grupo), senão um
+  // processo com muito histórico cumprido pode empurrar os prazos ainda ativos pra
+  // fora do limite de 30.
+  const{data}=await supa.from('prazos').select('*,processos(numero)').eq('processo_id',id)
+    .order('cumprido',{ascending:true}).order('data',{ascending:false}).limit(30);
   el.innerHTML=`<div class="card"><div class="card-body">${renderPrazosLista(data||[],true)}</div></div>`;
+}
+async function carregarProducaoProcesso(id){
+  const el=document.getElementById('proc-producao');if(!el)return;
+  const{data}=await supa.from('infinitum_producao_juridica').select('*').eq('processo_id',id).order('card_updated_at',{ascending:false});
+  if(!data?.length){el.innerHTML='<div class="empty-state" style="padding:20px"><p style="font-size:13px">Nenhum card do Infinitum vinculado a este processo ainda.</p></div>';return;}
+  el.innerHTML=`<div class="card"><div class="card-body">${data.map(function(c){
+    const dt=c.card_updated_at?new Date(c.card_updated_at).toLocaleDateString('pt-BR'):'';
+    return'<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)">'+
+      '<span style="font-size:11px;background:rgba(59,130,246,.12);color:#60a5fa;padding:2px 8px;border-radius:10px;font-weight:600">'+escHtml(c.pop_name||'Infinitum')+'</span>'+
+      (c.phase_name?' <span style="font-size:12px;color:#94a3b8">'+escHtml(c.phase_name)+'</span>':'')+
+      (c.phase_is_completion?' <span style="font-size:11px;color:#4ade80">✓ concluído</span>':'')+
+      '<div style="font-size:11px;color:#64748b;margin-top:2px">Atualizado em '+dt+'</div>'+
+    '</div>';
+  }).join('')}</div></div>`;
 }
 async function carregarDocsProcesso(id){
   const el=document.getElementById('proc-docs');if(!el)return;
@@ -3924,7 +3944,8 @@ async function excluirMov(id){
 // Buckets que se organizam sozinhos por data — nada fica "amontoado":
 //   hoje = vence hoje e não cumprido | vencido = data passou e não cumprido (decorrido)
 //   aberto = futuro e não cumprido   | cumprido = marcado como cumprido
-let prazosCache=[]; let prazoBucket='ativos'; let prazoVerCumpridos=false;
+let prazosCache=[]; let prazoBucket='ativos'; let prazoVerCumpridos=false; let prazoAdv='';
+const _advCurto=s=>{if(!s)return'';const w=s.trim().split(/\s+/)[0];return w?w[0].toUpperCase()+w.slice(1).toLowerCase():'';};
 function _classPrazo(p){
   if(p.cumprido)return'cumprido';
   const hoje=new Date();hoje.setHours(0,0,0,0);
@@ -3940,6 +3961,7 @@ async function pPrazos(filtroInicial='ativos'){
   document.getElementById('conteudo').innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div id="prazos-stats" class="stat-cards-row" style="grid-template-columns:repeat(5,1fr)"></div>
+  <div id="prazos-adv" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px"></div>
   <div class="toolbar" style="justify-content:flex-end">
     <button class="btn btn-primary" onclick="novoPrazo()">+ Novo Prazo</button>
   </div>
@@ -3947,23 +3969,39 @@ async function pPrazos(filtroInicial='ativos'){
   await carregarPrazos();
 }
 async function carregarPrazos(){
-  const{data,error}=await supa.from('prazos').select('*,processos(numero)').order('data').limit(500);
-  prazosCache=(error||!data)?[]:data;
+  // Duas consultas separadas (não-cumprido x cumprido) em vez de uma só ordenada por
+  // data: senão histórico antigo cumprido compete pelo mesmo limite e pode empurrar
+  // hoje/em aberto pra fora da tela (já aconteceu de verdade, ver commit que limpou
+  // 2.347 prazos "estimado" vencidos que estavam escondendo os prazos atuais).
+  const[ativos,cumpridos]=await Promise.all([
+    supa.from('prazos').select('*,processos(numero,advogado_responsavel)').eq('cumprido',false).order('data').limit(3000),
+    supa.from('prazos').select('*,processos(numero,advogado_responsavel)').eq('cumprido',true).order('data',{ascending:false}).limit(200)
+  ]);
+  prazosCache=[...(ativos.data||[]),...(cumpridos.data||[])];
   renderPrazos();
 }
 // filtrarPrazos mantido para compatibilidade (novoPrazo/cumprir/excluirPrazo chamam ele)
 function filtrarPrazos(f){ if(f){const m={pendentes:'ativos',todos:'todos',cumpridos:'cumprido',audiencias:'audiencias'};prazoBucket=m[f]||f;} carregarPrazos(); }
 function renderPrazos(){
+  const advDe=p=>(p.processos?.advogado_responsavel||'');
+  const base=prazoAdv?prazosCache.filter(p=>advDe(p)===prazoAdv):prazosCache;
+  // chips de advogado
+  const advBox=document.getElementById('prazos-adv');
+  if(advBox){
+    const chips=[['','Todos'],['LUANA FERNANDES MIRANDA','Luana'],['SAMAIRA LEITE DA SILVA','Samaira'],['ALANA PAIS LEMOS','Alana'],['MARIA HELENA','Maria Helena']];
+    advBox.innerHTML=chips.map(([v,l])=>{const n=v?prazosCache.filter(p=>advDe(p)===v&&!p.cumprido&&p.data>=new Date().toISOString().split('T')[0]).length:'';const on=prazoAdv===v;return `<button onclick="prazoAdv='${v.replace(/'/g,"\\'")}';renderPrazos()" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">👤 ${l}${v!==''?` (${n})`:''}</button>`;}).join('');
+  }
   const g={hoje:[],vencido:[],aberto:[],cumprido:[]};
-  prazosCache.forEach(p=>g[_classPrazo(p)].push(p));
+  base.forEach(p=>g[_classPrazo(p)].push(p));
   const stats=document.getElementById('prazos-stats');
-  const estCount=prazosCache.filter(p=>!p.cumprido&&p.status==='estimado').length;
+  const ativos=[...g.hoje,...g.vencido,...g.aberto];
+  const nCat=c=>ativos.filter(p=>p.categoria===c).length;
   if(stats)stats.innerHTML=[
-    ['hoje','Vencendo HOJE',g.hoje.length,'#f87171'],
-    ['vencido','Decorridos',g.vencido.length,'#fbbf24'],
+    ['hoje','Vence HOJE',g.hoje.length,'#f87171'],
     ['aberto','Em aberto',g.aberto.length,'#60a5fa'],
-    ['cumprido','Cumpridos',g.cumprido.length,'#4ade80'],
-    ['estimados','⚠ Estimados',estCount,'#f59e0b']
+    ['custas','💰 Custas',nCat('custas'),'#d97706'],
+    ['documentos','📎 Documentos',nCat('documentos'),'#7c3aed'],
+    ['vencido','Vencidos',g.vencido.length,'#fbbf24']
   ].map(([k,lbl,n,cor])=>`<div class="stat-card" style="cursor:pointer;${prazoBucket===k?'outline:2px solid '+cor+';outline-offset:-1px':''}" onclick="prazoBucket='${k}';renderPrazos()">
     <div class="stat-val" style="color:${cor}">${n}</div><div class="stat-label">${lbl}</div></div>`).join('');
   const el=document.getElementById('prazos-lista');if(!el)return;
@@ -3972,7 +4010,8 @@ function renderPrazos(){
   else if(prazoBucket==='vencido'){lista=g.vencido;vazio='Nenhum prazo decorrido em aberto. ✅';}
   else if(prazoBucket==='aberto')lista=g.aberto;
   else if(prazoBucket==='cumprido')lista=g.cumprido;
-  else if(prazoBucket==='estimados'){lista=prazosCache.filter(p=>!p.cumprido&&p.status==='estimado');vazio='Nenhum prazo estimado a conferir. 👍';}
+  else if(prazoBucket==='custas'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='custas');vazio='Nenhum prazo de custas em aberto. 💰';}
+  else if(prazoBucket==='documentos'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='documentos');vazio='Nenhum prazo de documentos em aberto. 📎';}
   else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
   else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.cumprido];
   else lista=[...g.hoje,...g.vencido,...g.aberto]; // 'ativos' (padrão): tudo que ainda exige ação
@@ -3997,18 +4036,24 @@ function renderPrazosLista(lista,comAcoes=false){
     const dt=new Date((p.data||'')+'T12:00:00');
     const cls=_classPrazo(p);const[bl,bc]=badge[cls];
     const est=(p.status==='estimado');
-    const seloEst=est?` <span title="Data estimada pelo sistema (disponibilização + 15 dias úteis). Confira e confirme." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">⚠ ESTIMADO</span>`:'';
-    return`<div class="prazo-item"${est?' style="background:rgba(245,158,11,.05)"':''}>
+    const estIA=(p.status==='estimado_ia');
+    const naoConfirmado=est||estIA;
+    const seloEst=est?` <span title="Data estimada pelo sistema (disponibilização + 15 dias úteis). Confira e confirme." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">⚠ ESTIMADO</span>`
+      :estIA?` <span title="Data estimada por IA (Infinitum/Publijus, leu o documento). Confira e confirme." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#0ea5e922;color:#0369a1">🤖 Estimado por IA</span>`:'';
+    const seloFonte=p.fonte==='infinitum'?` <span title="Origem: Infinitum/Publijus" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#8b5cf622;color:#7c3aed">via Infinitum</span>`:'';
+    return`<div class="prazo-item"${naoConfirmado?' style="background:rgba(245,158,11,.05)"':''}>
       <div class="prazo-data-box ${boxCls[cls]}">
         <div class="dia">${isNaN(dt)?'--':dt.getDate().toString().padStart(2,'0')}</div>
         <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
-        <h4>${p.descricao||'Prazo'} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}</h4>
-        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${p.tipo||''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${est?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
+        <h4>${p.descricao||'Prazo'} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}</h4>
+        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${naoConfirmado?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
       </div>
       ${comAcoes?`<div style="display:flex;gap:6px;align-items:center">
-        ${est&&!p.cumprido?`<button class="btn btn-sm" style="background:#fef3c7;color:#b45309" onclick="confirmarPrazo('${p.id}','${p.data||''}')">✎ Confirmar data</button>`:''}
+        ${!p.cumprido?`<button class="btn-icon" title="Marcar: recolher custas" style="opacity:${p.categoria==='custas'?1:.4}" onclick="setCatPrazo('${p.id}','custas')">💰</button>
+        <button class="btn-icon" title="Marcar: apresentar documento" style="opacity:${p.categoria==='documentos'?1:.4}" onclick="setCatPrazo('${p.id}','documentos')">📎</button>`:''}
+        ${naoConfirmado&&!p.cumprido?`<button class="btn btn-sm" style="background:#fef3c7;color:#b45309" onclick="confirmarPrazo('${p.id}','${p.data||''}')">✎ Confirmar data</button>`:''}
         ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d" onclick="cumprir('${p.id}')">✓ Cumprir</button>`:'<span style="color:#15803d;font-size:12px">✅ Cumprido</span>'}
         <button class="btn-icon" onclick="excluirPrazo('${p.id}')">🗑️</button>
       </div>`:''}
@@ -4039,6 +4084,15 @@ async function novoPrazo(){
 async function cumprir(id){
   await supa.from('prazos').update({cumprido:true}).eq('id',id);
   toast('Prazo cumprido!','ok');carregarPrazos();
+}
+// Marca/desmarca a categoria do prazo (custas / documentos). Clicar de novo tira.
+async function setCatPrazo(id,cat){
+  const atual=(prazosCache.find(x=>String(x.id)===String(id))||{}).categoria;
+  const nova=(atual===cat)?'geral':cat;
+  const{error}=await supa.from('prazos').update({categoria:nova}).eq('id',id);
+  if(error){toast('Erro: '+error.message,'erro');return;}
+  const p=prazosCache.find(x=>String(x.id)===String(id)); if(p)p.categoria=nova;
+  renderPrazos();
 }
 // Confirma a data real de um prazo ESTIMADO. Ao confirmar, status vira 'confirmado'
 // e a rotina automática do Legal Mail deixa de sobrescrever esse prazo.
@@ -4099,7 +4153,7 @@ async function carregarPublicacoes(){
   if(!data?.length){tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8">Nenhuma publicação nesta categoria.</td></tr>';return;}
   tb.innerHTML=data.map(p=>`<tr style="${p.lida?'opacity:.5':''}">
     <td style="font-size:12px;white-space:nowrap">${p.data_disponibilizacao?new Date(p.data_disponibilizacao+'T12:00:00').toLocaleDateString('pt-BR'):''}</td>
-    <td style="font-size:12px">${p.tribunal||''}</td>
+    <td style="font-size:12px">${p.tribunal||''}${p.fonte==='infinitum'?' <span title="Origem: Infinitum/Publijus" style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;background:#8b5cf622;color:#7c3aed">Infinitum</span>':''}</td>
     <td style="font-size:12px">${p.tipo||''}</td>
     <td style="font-size:12px">${p.processos?.numero?`<a href="#" onclick="abrirProcesso('${p.processo_id}');return false" style="color:var(--azul3)">${p.processos.numero}</a>`:'<span style="color:#fbbf24">sem vínculo</span>'}</td>
     <td style="font-size:12px;max-width:340px;color:#94a3b8">${truncar((p.texto||'').replace(/\s+/g,' '),90)}</td>
@@ -4680,10 +4734,12 @@ async function carregarNotificacoes(){
   const em7d=new Date(hoje.getTime()+7*86400000);
   const ha30d=new Date(hoje.getTime()-30*86400000);
   const ha15d=new Date(hoje.getTime()-15*86400000);
+  const ha180d=new Date(hoje.getTime()-180*86400000); // prazo vencido há mais de 6 meses é histórico morto, não alerta acionável
   const hojStr=hoje.toISOString().split('T')[0];
   const em7Str=em7d.toISOString().split('T')[0];
+  const ha180Str=ha180d.toISOString().split('T')[0];
   const [rPz,rPr,rTk,rAl,rAud]=await Promise.all([
-    supa.from('prazos').select('id,data,titulo,processos(numero)').eq('cumprido',false).lte('data',em7Str).order('data').limit(60),
+    supa.from('prazos').select('id,data,titulo,processos(numero)').eq('cumprido',false).gte('data',ha180Str).lte('data',em7Str).order('data').limit(60),
     somenteProcessosPrincipais(supa.from('processos').select('id,advogado_responsavel,updated_at,situacao')).eq('situacao','Ativo').limit(300),
     supa.from('tarefas').select('id,titulo,prazo,responsavel').neq('status','Concluido').not('prazo','is',null).lte('prazo',hojStr).limit(20).catch(function(){return{data:[]};}),
     supa.from('alvaras').select('id,etapa,valor,processos(numero)').in('etapa',['A Receber','Financeiro Notificado','Recebido']).limit(20).catch(function(){return{data:[]};}),
@@ -4765,17 +4821,17 @@ async function pCibele(){
   const [rCl,rPr,rPz,rTk,rHon,rAlv,rAud]=await Promise.all([
     supa.from('clientes').select('id',{count:'exact'}),
     somenteProcessosPrincipais(supa.from('processos').select('id,situacao,advogado_responsavel,updated_at')),
-    supa.from('prazos').select('id,data,cumprido,processo_id').eq('cumprido',false).lte('data',em7Str).limit(300),
+    supa.from('prazos').select('id',{count:'exact',head:true}).eq('cumprido',false).lte('data',hojStr),
     supa.from('tarefas').select('id,status,responsavel,prazo,titulo').neq('status','Concluido').limit(300).catch(function(){return{data:[]};}),
     supa.from('honorarios').select('id,valor_total,status').limit(500),
     supa.from('alvaras').select('id,etapa,valor,processos(numero)').neq('etapa','Finalizado').limit(100).catch(function(){return{data:[]};}),
     supa.from('prazos').select('id,data,processo_id').eq('tipo','Audiência').gte('data',hojStr).lte('data',em7Str).limit(50)
   ]);
-  const pr=rPr.data||[],pz=rPz.data||[],tk=rTk.data||[],hon=rHon.data||[],alv=rAlv.data||[],aud=rAud.data||[];
+  const pr=rPr.data||[],tk=rTk.data||[],hon=rHon.data||[],alv=rAlv.data||[],aud=rAud.data||[];
   const ativos=pr.filter(function(p){return p.situacao==='Ativo';}).length;
   const semResp=pr.filter(function(p){return p.situacao==='Ativo'&&!p.advogado_responsavel;}).length;
   const parados=pr.filter(function(p){return p.situacao==='Ativo'&&p.updated_at&&new Date(p.updated_at)<ha30d;}).length;
-  const pzVencidos=pz.filter(function(p){return new Date(p.data+'T12:00:00')<=hoje;}).length;
+  const pzVencidos=rPz.count||0;
   const tkAtrasadas=tk.filter(function(t){return t.prazo&&new Date(t.prazo+'T12:00:00')<=hoje;}).length;
   const honPend=hon.filter(function(h){return h.status==='Pendente'||h.status==='Atrasado';}).reduce(function(s,h){return s+(h.valor_total||0);},0);
   const alvPend=alv.reduce(function(s,a){return s+(a.valor||0);},0);
@@ -4864,11 +4920,15 @@ async function pDesempenho(){
   c.innerHTML='<p style="text-align:center;padding:60px;color:rgba(255,255,255,.2)">Carregando indicadores...</p>';
   const hoje=new Date();hoje.setHours(0,0,0,0);
   const ADVS=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
+  // Filtro por advogado empurrado pro servidor (.in(...)/embed !inner) em vez de
+  // buscar a tabela inteira e casar no cliente — senão um limite fixo bate no total
+  // do escritório, não no que interessa, e pode deixar de fora justamente o
+  // advogado errado quando o volume crescer (limit vira rede de segurança, não filtro).
   const [rPr,rTk,rPz,rAud]=await Promise.all([
     somenteProcessosPrincipais(supa.from('processos').select('id,situacao,advogado_responsavel')),
-    supa.from('tarefas').select('id,status,responsavel').limit(500).catch(function(){return{data:[]};}),
-    supa.from('prazos').select('id,cumprido,processo_id').limit(1000),
-    supa.from('prazos').select('id,processo_id,data').eq('tipo','Audiência').gte('data','2020-01-01').limit(1000)
+    supa.from('tarefas').select('id,status,responsavel').in('responsavel',ADVS).limit(5000).catch(function(){return{data:[]};}),
+    supa.from('prazos').select('id,cumprido,processo_id,processos!inner(advogado_responsavel)').in('processos.advogado_responsavel',ADVS).limit(5000),
+    supa.from('prazos').select('id,processo_id,data,processos!inner(advogado_responsavel)').eq('tipo','Audiência').gte('data','2020-01-01').in('processos.advogado_responsavel',ADVS).limit(5000)
   ]);
   const pr=rPr.data||[],tk=rTk.data||[],pz=rPz.data||[],aud=rAud.data||[];
   const stats=ADVS.map(function(adv){
@@ -5274,16 +5334,18 @@ function pBeckerIA(modo){
       <p style="font-size:11px;color:rgba(255,255,255,.3);margin-top:12px">Integração com Claude / GPT em configuração.</p>
     </div></div></div>`;
   } else if(modoAtivo==='resumo-proc'){
-    corpo=`<div style="max-width:600px;margin:0 auto"><div class="card"><div class="card-body" style="text-align:center;padding:40px">
-      <div style="font-size:48px;margin-bottom:16px">⚖️</div>
-      <h3 style="color:var(--azul3);margin-bottom:12px">Resumo Processual</h3>
-      <p style="color:rgba(255,255,255,.5);font-size:13px;line-height:1.8;margin-bottom:20px">Gere um resumo estruturado de um processo a partir do número ou das movimentações.</p>
-      <div class="form-field" style="text-align:left;margin-bottom:16px">
-        <input id="ia-num-proc" style="width:100%;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:13px" placeholder="Número do processo (CNJ)">
-      </div>
-      <button class="btn btn-primary">✨ Gerar Resumo</button>
-      <p style="font-size:11px;color:rgba(255,255,255,.3);margin-top:12px">Integração com Claude / GPT em configuração.</p>
-    </div></div></div>`;
+    corpo=`<div style="max-width:700px;margin:0 auto">
+      <div class="card"><div class="card-body" style="text-align:center;padding:32px">
+        <div style="font-size:48px;margin-bottom:16px">⚖️</div>
+        <h3 style="color:var(--azul3);margin-bottom:12px">Resumo Processual</h3>
+        <p style="color:rgba(255,255,255,.5);font-size:13px;line-height:1.8;margin-bottom:20px">Busca o que o Infinitum já tem registrado sobre o processo (resumo já calculado pela IA do Infinitum/Publijus e em que fase de produção ele está) — não gera nada novo, só reaproveita o que já foi processado lá.</p>
+        <div class="form-field" style="text-align:left;margin-bottom:16px">
+          <input id="ia-num-proc" style="width:100%;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:13px" placeholder="Número do processo (CNJ)" onkeydown="if(event.key==='Enter')beckerIAResumoProcessual()">
+        </div>
+        <button class="btn btn-primary" onclick="beckerIAResumoProcessual()">🔍 Buscar Resumo</button>
+      </div></div>
+      <div id="ia-resumo-proc-resultado" style="margin-top:20px"></div>
+    </div>`;
   } else if(modoAtivo==='documentos'){
     corpo=`<div style="max-width:700px;margin:0 auto">
       <p style="color:rgba(255,255,255,.5);font-size:13px;margin-bottom:20px">Selecione um modelo para gerar um documento jurídico.</p>
@@ -5309,6 +5371,29 @@ function pBeckerIA(modo){
   </div>`;
 }
 
+async function beckerIAResumoProcessual(){
+  const num=(document.getElementById('ia-num-proc')?.value||'').trim();
+  const res=document.getElementById('ia-resumo-proc-resultado');
+  if(!num){toast('Digite o número do processo.','erro');return;}
+  res.innerHTML='<div style="text-align:center;padding:30px;color:rgba(255,255,255,.4)">Buscando...</div>';
+  const{data:procs}=await supa.from('processos').select('id,numero').ilike('numero','%'+num+'%').limit(5);
+  if(!procs?.length){res.innerHTML='<div class="empty-state" style="padding:20px"><p style="font-size:13px">Processo não encontrado no Sistema Becker.</p></div>';return;}
+  const proc=procs[0];
+  const{data:cards}=await supa.from('infinitum_producao_juridica').select('*').eq('processo_id',proc.id).order('card_updated_at',{ascending:false});
+  if(!cards?.length){res.innerHTML='<div class="empty-state" style="padding:20px"><p style="font-size:13px">Nenhum resumo do Infinitum disponível para este processo ainda.</p></div>';return;}
+  res.innerHTML=cards.map(function(c){
+    const camposArr=Array.isArray(c.campos)?c.campos:[];
+    const resumoField=camposArr.find(function(f){return(f.field_label||'').toLowerCase().indexOf('resumo')>-1&&f.value;});
+    return'<div class="card" style="margin-bottom:12px"><div class="card-body">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">'+
+        '<span style="font-size:12px;font-weight:600;color:#60a5fa">'+escHtml(c.pop_name||'Infinitum')+(c.phase_name?' · '+escHtml(c.phase_name):'')+'</span>'+
+        '<span style="font-size:11px;color:#64748b">Proc. '+escHtml(proc.numero)+'</span>'+
+      '</div>'+
+      (resumoField?'<div style="white-space:pre-wrap;font-size:13px;line-height:1.5">'+escHtml(resumoField.value)+'</div>'
+        :'<p style="font-size:12px;color:#94a3b8">Este card ainda não tem um resumo preenchido.</p>')+
+    '</div></div>';
+  }).join('');
+}
 async function beckerIABuscar(){
   const query=(document.getElementById('ia-query')?.value||'').trim();
   const tribunal=document.getElementById('ia-tribunal')?.value||'';
