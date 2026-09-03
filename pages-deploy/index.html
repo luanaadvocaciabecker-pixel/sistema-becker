@@ -3303,7 +3303,7 @@ async function pNovosNegocios(){
   const c=document.getElementById('conteudo');
   c.innerHTML='<p style="text-align:center;padding:40px;color:#64748b">Carregando novos negócios...</p>';
   const{data,error}=await supa.from('novos_negocios')
-    .select('*,nn_itens(id,documento,obrigatorio,presente,observacao)')
+    .select('*,nn_itens(id,documento,obrigatorio,presente,observacao),clientes(telefone,whatsapp)')
     .in('status',['aberto','repassado']).order('created_at',{ascending:true});
   if(error){c.innerHTML=`<div class="card"><div class="card-body">Erro ao carregar: ${_nnEsc(error.message)}</div></div>`;return;}
   _nnCache=data||[];
@@ -3358,6 +3358,7 @@ function renderNovosNegociosLista(){
         <div style="font-weight:600;color:var(--texto);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.cliente_nome)}</div>
         <div style="font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.acao||'—')}</div>
       </div>
+      ${!((n.whatsapp||n.clientes?.telefone||n.clientes?.whatsapp||'').trim())?`<span class="tag" style="background:rgba(220,38,38,.12);color:#b91c1c;font-size:11px;flex-shrink:0" title="Sem número de contato — clique para preencher">📱 sem WhatsApp</span>`:''}
       ${n.status==='repassado'?`<span class="tag" style="background:rgba(37,99,235,.12);color:#1d4ed8;font-size:11px;flex-shrink:0" title="Repassado para ${_nnEsc(n.responsavel||'')}">📨 ${_nnEsc(n.responsavel||'repassado')}</span>`:''}
       <span class="tag" style="background:rgba(148,163,184,.12);color:#334155;font-size:11px;flex-shrink:0">${NN_LABEL[n.categoria]||n.categoria}</span>
       <span style="font-size:12px;font-weight:700;color:${s.cor};min-width:96px;text-align:right;flex-shrink:0">${s.emoji} ${s.rotulo}</span>
@@ -3679,6 +3680,8 @@ function novoNegocio(){
   abrirModal('+ Novo Negócio',
     `<label style="font-size:12px;color:#64748b">Cliente *</label>
      <input id="nnn-cli" placeholder="Nome do cliente" style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
+     <label style="font-size:12px;color:#64748b">WhatsApp do cliente 📱</label>
+     <input id="nnn-wpp" inputmode="tel" placeholder="(47) 9...." style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
      <label style="font-size:12px;color:#64748b">O que foi contratado (1ª ação) *</label>
      <input id="nnn-acao" placeholder="Ex.: Elaborar contestação no processo Nº..." style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
      <label style="font-size:12px;color:#64748b">Categoria *</label>
@@ -3694,13 +3697,17 @@ function novoNegocio(){
       const acao=(document.getElementById('nnn-acao').value||'').trim();
       const cat=document.getElementById('nnn-cat').value;
       if(!cli||!acao){toast('Preencha cliente e ação.','erro');return false;}
-      const reg={cliente_nome:cli,acao,categoria:cat,primeira_acao:acao,status:'aberto',
+      const wpp=(document.getElementById('nnn-wpp').value||'').trim();
+      const reg={cliente_nome:cli,acao,categoria:cat,primeira_acao:acao,status:'aberto',whatsapp:wpp||null,
         responsavel:(document.getElementById('nnn-resp').value||'').trim(),prazo:document.getElementById('nnn-prazo').value||null,num_arquivos:0,pasta:''};
       const{data:novo,error}=await supa.from('novos_negocios').insert(reg).single();
       if(error){toast('Erro ao criar: '+error.message,'erro');return false;}
-      // vincula cliente_id se o nome bater
-      const{data:cl}=await supa.from('clientes').select('id').ilike('nome',cli).limit(1);
-      if(cl&&cl[0]){await supa.from('novos_negocios').update({cliente_id:cl[0].id}).eq('id',novo.id);}
+      // vincula cliente_id se o nome bater; e leva o WhatsApp pro cadastro do cliente (se ele não tiver)
+      const{data:cl}=await supa.from('clientes').select('id,telefone,whatsapp').ilike('nome',cli).limit(1);
+      if(cl&&cl[0]){
+        await supa.from('novos_negocios').update({cliente_id:cl[0].id}).eq('id',novo.id);
+        if(wpp){const up={};if(!(cl[0].whatsapp||'').trim())up.whatsapp=wpp;if(!(cl[0].telefone||'').trim())up.telefone=wpp;if(Object.keys(up).length)await supa.from('clientes').update(up).eq('id',cl[0].id);}
+      }
       // semeia o checklist a partir do mestre (universal + categoria)
       const{data:mestre}=await supa.from('nn_checklist').select('documento,obrigatorio,observacao,categoria').in('categoria',['universal',cat]);
       if(mestre&&mestre.length){
