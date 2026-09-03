@@ -1970,7 +1970,7 @@ function renderSidebarMenu(){
       ['clientes','clientes','Todos os Clientes'],['novo-cliente','plus','Novo Cliente','novoCliente()'],['documentos','folder','Documentos'],['contratos','file','Contratos'],['documentacao','edit','Procurações']
     ])}
     ${grupoMenu('judiciais','judicial','Processos Judiciais','judiciais',[
-      ['judiciais','judicial','Todos os Processos'],['movimentacoes','refresh','Movimentações'],['prazos','clock','Prazos'],['prazos','court','Audiências'],['documentos','folder','Documentos'],['datajud','zap','Atualização Processual']
+      ['judiciais','judicial','Todos os Processos'],['movimentacoes','refresh','Movimentações'],['prazos','clock','Prazos'],['audiencias','court','Audiências'],['documentos','folder','Documentos'],['datajud','zap','Atualização Processual']
     ])}
     <div class="nav-item" data-page="novos-negocios" data-leaf="true" onclick="ir('novos-negocios')"><span class="nav-emoji">${iconeMenu('handshake')}</span>Novos Negócios</div>
     ${grupoMenu('administrativos','folder','Processos Administrativos','administrativos',[
@@ -2313,8 +2313,8 @@ async function pDashboard(){
     Promise.resolve({data:[],count:0}),
     safe(supa.from('prazos').select('id,data,cumprido',{count:'exact'}).eq('cumprido',false).lte('data',hojeIso)),
     safe(supa.from('prazos').select('id,data,descricao,tipo,cumprido,processo_id,processos(numero,clientes(nome),advogado_responsavel)',{count:'exact'}).eq('cumprido',false).gte('data',hojeIso).lte('data',em7dIso).order('data').limit(5)),
-    safe(supa.from('prazos').select('id,data,descricao,tipo,cumprido,processo_id,processos(numero,clientes(nome),advogado_responsavel)',{count:'exact'}).eq('cumprido',false).eq('tipo','Audiência').eq('data',hojeIso)),
-    safe(supa.from('prazos').select('id,data,descricao,tipo,cumprido,processo_id,processos(numero,clientes(nome),advogado_responsavel)',{count:'exact'}).eq('cumprido',false).eq('tipo','Audiência').gte('data',hojeIso).lte('data',em7dIso).order('data').limit(5)),
+    safe(supa.from('audiencias').select('id,data,hora,tipo,local,processo_id,processos(numero,clientes(nome))',{count:'exact'}).eq('data',hojeIso)),
+    safe(supa.from('audiencias').select('id,data,hora,tipo,local,processo_id,processos(numero,clientes(nome))',{count:'exact'}).gte('data',hojeIso).lte('data',em7dIso).order('data').limit(5)),
     safe(supa.from('movimentacoes').select('id,data,descricao,tipo,processos(numero,clientes(nome))').in('tipo',TIPOS_MOVIMENTACAO_PROCESSUAL).order('data',{ascending:false}).limit(5)),
     safe(supa.from('honorarios').select('id,valor_total,status').limit(500)),
     safe(supa.from('alvaras').select('id,valor,etapa,status').limit(500)),
@@ -2350,10 +2350,10 @@ async function pDashboard(){
     <td>${escHtml(p.processos?.advogado_responsavel||'—')}</td>
   </tr>`).join('');
   const audRows=(audProx.data||[]).map(a=>`<tr>
-    <td>${dataCurta(a.data)}</td>
+    <td>${dataCurta(a.data)}${a.hora?' '+String(a.hora).slice(0,5):''}</td>
     <td>${escHtml(procNumero(a))}</td>
     <td>${escHtml(nomeCliente(a))}</td>
-    <td>${escHtml(truncar(a.descricao||'—',18))}</td>
+    <td>${escHtml(truncar(a.tipo||a.local||'—',18))}</td>
   </tr>`).join('');
 
   c.innerHTML=`<div class="dash-premium">
@@ -2467,7 +2467,7 @@ async function dashProcTab(tipo,btn){
     if(!ids.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:rgba(255,255,255,.2)">Nenhum prazo hoje</td></tr>';const el=document.getElementById('tab-count-hoje');if(el)el.textContent='0';return;}
     q=somenteProcessosPrincipais(supa.from('processos').select('id,numero,situacao,assunto,tribunal,comarca,advogado_responsavel,updated_at,clientes(nome),prazos(data,cumprido),movimentacoes(data,descricao,tipo)')).in('id',ids).limit(25);
   }else if(tipo==='aud'){
-    const audSem=await supa.from('prazos').select('processo_id').eq('tipo','Audiência').gte('data',hoje.toISOString().split('T')[0]).lte('data',em7d.toISOString().split('T')[0]);
+    const audSem=await supa.from('audiencias').select('processo_id').gte('data',hoje.toISOString().split('T')[0]).lte('data',em7d.toISOString().split('T')[0]);
     const ids=(audSem.data||[]).map(a=>a.processo_id).filter(Boolean);
     if(!ids.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:rgba(255,255,255,.2)">Nenhuma audiência esta semana</td></tr>';const el=document.getElementById('tab-count-aud');if(el)el.textContent='0';return;}
     q=somenteProcessosPrincipais(supa.from('processos').select('id,numero,situacao,assunto,tribunal,comarca,advogado_responsavel,updated_at,clientes(nome),prazos(data,cumprido),movimentacoes(data,descricao,tipo)')).in('id',ids).limit(25);
@@ -3114,6 +3114,8 @@ async function abrirProcesso(id){
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;font-size:13px">
         ${campo('Cliente',p.clientes?.nome?`<a href="#" onclick="abrirCliente('${p.clientes.id}');return false" style="color:var(--azul3)">${p.clientes.nome}</a>`:'—')}
         ${campo('Advogado responsável',p.advogado_responsavel,'var(--azul3)')}
+        ${campo('Advogado auxiliar',p.advogado_auxiliar)}
+        ${campo('Secretária responsável',p.secretaria_responsavel)}
         ${campo('Tribunal',p.tribunal)}
         ${campo('Comarca',p.comarca)}
         ${campo('Vara',p.vara)}
@@ -3131,10 +3133,18 @@ async function abrirProcesso(id){
     <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🔄 Últimas movimentações</h4><div id="proc-movs">Carregando...</div></div>
     <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">⏰ Prazos</h4><div id="proc-prazos">Carregando...</div></div>
   </div>
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🏛️ Audiências</h4><div id="proc-audiencias">Carregando...</div></div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">📄 Documentos & íntegra</h4><div id="proc-docs">Carregando...</div></div>`;
   carregarMovsProcesso(id);
   carregarPrazosProcesso(id);
+  carregarAudienciasProcesso(id);
   carregarDocsProcesso(id);
+}
+async function carregarAudienciasProcesso(id){
+  const el=document.getElementById('proc-audiencias');if(!el)return;
+  const{data}=await supa.from('audiencias').select('*,processos(numero,clientes(nome))').eq('processo_id',id).order('data').limit(30);
+  if(!data?.length){el.innerHTML='<div class="empty-state" style="padding:16px"><p style="font-size:13px">Nenhuma audiência designada neste processo.</p></div>';return;}
+  el.innerHTML=`<div class="card"><div class="card-body">${renderAudienciasLista(data)}</div></div>`;
 }
 async function carregarMovsProcesso(id){
   const el=document.getElementById('proc-movs');if(!el)return;
@@ -5015,36 +5025,82 @@ function pModuloSimples(pagina){
   </div>`;
 }
 
-// ---- AUDIÊNCIAS ----
-function pAudiencias(){pPrazos('audiencias');}
+// ---- AUDIÊNCIAS (tabela `audiencias` — alimentada pelo Legal Mail + manual) ----
+let _audFiltro='proximas';
+function pAudiencias(){
+  document.getElementById('conteudo').innerHTML=`
+  <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0">← Voltar</button>
+  <div class="toolbar" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div id="aud-filtros" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+    <button class="btn btn-primary" onclick="novaAudiencia()">+ Nova Audiência</button>
+  </div>
+  <div id="aud-lista">Carregando...</div>`;
+  filtrarAudiencias(_audFiltro);
+}
+function _audChips(){
+  const box=document.getElementById('aud-filtros');if(!box)return;
+  const chips=[['proximas','Próximas'],['realizadas','Realizadas'],['todas','Todas']];
+  box.innerHTML=chips.map(([v,l])=>{const on=_audFiltro===v;return `<button onclick="filtrarAudiencias('${v}')" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">🏛️ ${l}</button>`;}).join('');
+}
 async function filtrarAudiencias(f){
+  _audFiltro=f||'proximas';_audChips();
   const hoje=new Date().toISOString().split('T')[0];
-  let q=supa.from('prazos').select('*,processos(numero)').eq('tipo','Audiência').order('data');
-  if(f==='proximas')q=q.gte('data',hoje);
-  if(f==='realizadas')q=q.lt('data',hoje);
-  const{data,error}=await q.limit(50);
+  let q=supa.from('audiencias').select('*,processos(numero,clientes(nome))').order('data');
+  if(_audFiltro==='proximas')q=q.gte('data',hoje);
+  if(_audFiltro==='realizadas')q=q.lt('data',hoje);
+  const{data,error}=await q.limit(200);
   const el=document.getElementById('aud-lista');if(!el)return;
-  if(error||!data?.length){el.innerHTML='<div class="empty-state"><div class="icon">🏛️</div><p>Nenhuma audiência encontrada.</p></div>';return;}
-  el.innerHTML=`<div class="card"><div class="card-body">${renderPrazosLista(data,true)}</div></div>`;
+  if(error||!data?.length){el.innerHTML='<div class="empty-state"><div class="icon">🏛️</div><p>Nenhuma audiência nesta categoria.</p></div>';return;}
+  el.innerHTML=`<div class="card"><div class="card-body">${renderAudienciasLista(data)}</div></div>`;
+}
+function renderAudienciasLista(lista){
+  return lista.map(a=>{
+    const dt=new Date((a.data||'')+'T12:00:00');
+    const passou=a.data&&a.data<new Date().toISOString().split('T')[0];
+    const hora=(a.hora||'').slice(0,5);
+    const cli=a.processos?.clientes?.nome||'';
+    return`<div class="prazo-item">
+      <div class="prazo-data-box ${passou?'ok':'proximo'}">
+        <div class="dia">${isNaN(dt)?'--':dt.getDate().toString().padStart(2,'0')}</div>
+        <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
+      </div>
+      <div class="prazo-info">
+        <h4>${a.tipo||'Audiência'}${hora?` · ${hora}`:''} ${passou?'<span style="font-size:10px;color:#94a3b8">realizada</span>':'<span style="font-size:10px;color:#60a5fa;font-weight:700">próxima</span>'}</h4>
+        <p>${a.processos?.numero?`Proc. ${a.processos.numero} · `:''}${cli?`🧑 ${cli} · `:''}${a.local?`📍 ${a.local} · `:''}${a.advogado_responsavel?`👤 ${_advCurto(a.advogado_responsavel)}`:''}</p>
+        ${a.observacoes?`<p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${a.observacoes}</p>`:''}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn-icon" onclick="excluirAudiencia('${a.id}')">🗑️</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 async function novaAudiencia(){
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
-  abrirModal('Nova Audiência',`<form id="form-prazo">
+  abrirModal('Nova Audiência',`<form id="form-aud">
     <div class="form-field"><label>Data *</label><input type="date" name="data"></div>
-    <div class="form-field"><label>Descrição *</label><input name="descricao" placeholder="Ex: Audiência de instrução e julgamento"></div>
-    <input type="hidden" name="tipo" value="Audiência">
+    <div class="form-field"><label>Hora</label><input type="time" name="hora"></div>
+    <div class="form-field"><label>Tipo</label>
+      <select name="tipo"><option>Audiência de Instrução</option><option>Audiência de Conciliação</option><option>Audiência Una</option><option>Sessão de Julgamento</option><option>Outra</option></select>
+    </div>
+    <div class="form-field"><label>Local</label><input name="local" placeholder="Ex: Fórum de Blumenau, sala 3 / videoconferência"></div>
     <div class="form-field"><label>Processo</label>
       <select name="processo_id"><option value="">—</option>${(procs||[]).map(p=>`<option value="${p.id}">${p.numero||'Sem nº'}</option>`).join('')}</select>
     </div>
-    <div class="form-field"><label>Observação</label><textarea name="observacao"></textarea></div>
+    <div class="form-field"><label>Observação</label><textarea name="observacoes"></textarea></div>
   </form>`,async()=>{
-    const d=coletarForm('form-prazo');
-    if(!d.data||!d.descricao){toast('Preencha data e descrição.','erro');return false;}
-    d.cumprido=false;if(!d.processo_id)delete d.processo_id;
-    const{error}=await supa.from('prazos').insert([d]);
+    const d=coletarForm('form-aud');
+    if(!d.data){toast('Preencha a data.','erro');return false;}
+    if(!d.hora)delete d.hora;if(!d.processo_id)delete d.processo_id;
+    const{error}=await supa.from('audiencias').insert([d]);
     if(error){toast('Erro: '+error.message,'erro');return false;}
     toast('Audiência cadastrada!','ok');filtrarAudiencias('proximas');
   });
+}
+async function excluirAudiencia(id){
+  if(!confirm('Excluir audiência?'))return;
+  await supa.from('audiencias').delete().eq('id',id);
+  toast('Removida.','ok');filtrarAudiencias(_audFiltro);
 }
 
 // ---- RELATÓRIOS ----
