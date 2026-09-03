@@ -157,7 +157,7 @@ declare
   item jsonb; cid uuid; num text; digits text; pid bigint;
   tribunal text; orgao text; tipo_com text; resumo text; link text;
   ddisp date; dprazo date; prz_id bigint;
-  n_pub int:=0; n_prz int:=0;
+  n_pub int:=0; n_prz int:=0; n_vazio int:=0;
 begin
   if cards is null or jsonb_typeof(cards) <> 'array' then
     return jsonb_build_object('erro','sem array de cards');
@@ -183,6 +183,14 @@ begin
     link     := public.infinitum_field(item->'values','%link%');
     ddisp    := public.lm_date(public.infinitum_field(item->'values','%data%','%prazo%'));
     dprazo   := public.lm_date(public.infinitum_field(item->'values','%estipulad%'));
+
+    -- Card sem nenhum conteúdo útil ainda (comum: card criado pelo webhook do
+    -- Publijus, mas o Infinitum ainda não preencheu os campos) -> pula. Sem isso,
+    -- toda rodada do cron recriaria uma publicação em branco pro mesmo card vazio.
+    if num is null and tribunal is null and resumo is null and link is null then
+      n_vazio := n_vazio + 1;
+      continue;
+    end if;
 
     insert into public.publicacoes(infinitum_id, processo_id, numero_processo, tribunal, tipo,
                                    data_disponibilizacao, texto, link, lida, prazo_gerado, fonte)
@@ -222,7 +230,7 @@ begin
     end if;
   end loop;
 
-  return jsonb_build_object('publicacoes', n_pub, 'prazos', n_prz);
+  return jsonb_build_object('publicacoes', n_pub, 'prazos', n_prz, 'ignorados_vazios', n_vazio);
 end $$;
 revoke all on function public.infinitum_reconcile_intimacoes(jsonb) from anon, authenticated;
 grant execute on function public.infinitum_reconcile_intimacoes(jsonb) to service_role;
