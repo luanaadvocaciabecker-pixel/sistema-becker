@@ -3966,7 +3966,7 @@ async function pPrazos(filtroInicial='ativos'){
   await carregarPrazos();
 }
 async function carregarPrazos(){
-  const{data,error}=await supa.from('prazos').select('*,processos(numero,advogado_responsavel)').order('data').limit(500);
+  const{data,error}=await supa.from('prazos').select('*,processos(numero,advogado_responsavel,clientes(nome))').order('data').limit(500);
   prazosCache=(error||!data)?[]:data;
   renderPrazos();
 }
@@ -3974,12 +3974,16 @@ async function carregarPrazos(){
 function filtrarPrazos(f){ if(f){const m={pendentes:'ativos',todos:'todos',cumpridos:'cumprido',audiencias:'audiencias'};prazoBucket=m[f]||f;} carregarPrazos(); }
 function renderPrazos(){
   const advDe=p=>(p.processos?.advogado_responsavel||'');
-  const base=prazoAdv?prazosCache.filter(p=>advDe(p)===prazoAdv):prazosCache;
-  // chips de advogado
+  // Compara por nome normalizado (MAIÚSCULO/trim); '__SEM__' = prazo sem responsável no processo.
+  const _advKey=s=>{const t=(s||'').trim().toUpperCase();return t?t:'__SEM__';};
+  const _advMatch=(p,v)=>{if(!v)return true;const k=_advKey(advDe(p));return v==='__SEM__'?k==='__SEM__':k.includes(v);};
+  const base=prazoAdv?prazosCache.filter(p=>_advMatch(p,prazoAdv)):prazosCache;
+  // chips de advogado (inclui Cibele e "Sem responsável" pra nenhum prazo ficar escondido)
   const advBox=document.getElementById('prazos-adv');
   if(advBox){
-    const chips=[['','Todos'],['LUANA FERNANDES MIRANDA','Luana'],['SAMAIRA LEITE DA SILVA','Samaira'],['ALANA PAIS LEMOS','Alana'],['MARIA HELENA','Maria Helena']];
-    advBox.innerHTML=chips.map(([v,l])=>{const n=v?prazosCache.filter(p=>advDe(p)===v&&!p.cumprido&&p.data>=new Date().toISOString().split('T')[0]).length:'';const on=prazoAdv===v;return `<button onclick="prazoAdv='${v.replace(/'/g,"\\'")}';renderPrazos()" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">👤 ${l}${v!==''?` (${n})`:''}</button>`;}).join('');
+    const hojeIso=new Date().toISOString().split('T')[0];
+    const chips=[['','Todos'],['LUANA','Luana'],['SAMAIRA','Samaira'],['ALANA','Alana'],['MARIA HELENA','Maria Helena'],['CIBELE','Cibele'],['__SEM__','Sem responsável']];
+    advBox.innerHTML=chips.map(([v,l])=>{const n=v?prazosCache.filter(p=>_advMatch(p,v)&&!p.cumprido&&p.data>=hojeIso).length:'';const on=prazoAdv===v;const ico=v==='__SEM__'?'⚠️':'👤';return `<button onclick="prazoAdv='${v.replace(/'/g,"\\'")}';renderPrazos()" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">${ico} ${l}${v!==''?` (${n})`:''}</button>`;}).join('');
   }
   const g={hoje:[],vencido:[],aberto:[],cumprido:[]};
   base.forEach(p=>g[_classPrazo(p)].push(p));
@@ -4029,6 +4033,11 @@ function renderPrazosLista(lista,comAcoes=false){
     // prazo em aberto mas a ≤3 dias já entra no visual de urgência (não espera "vencer hoje")
     const boxK=(cls==='aberto'&&dRest!==null&&dRest<=3)?'urgente':boxCls[cls];
     const chip=(cls!=='cumprido')?_chipDias(p):'';
+    // Sugestão da IA (só quando ainda não confirmada por humano e a categoria está em aberto/geral)
+    const semCat=(!p.categoria||p.categoria==='geral');
+    const sug=(!p.cumprido&&semCat&&p.categoria_fonte!=='humano'&&(p.categoria_sugerida==='custas'||p.categoria_sugerida==='documentos'))?p.categoria_sugerida:'';
+    const cliNome=p.processos?.clientes?.nome||'';
+    const mostrarCli=cliNome&&!(p.descricao||'').includes(cliNome);
     const est=(p.status==='estimado');
     const seloEst=est?` <span title="Data estimada pelo sistema (disponibilização + 15 dias úteis). Confira e confirme." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">⚠ ESTIMADO</span>`:'';
     return`<div class="prazo-item"${est?' style="background:rgba(245,158,11,.05)"':''}>
@@ -4038,9 +4047,11 @@ function renderPrazosLista(lista,comAcoes=false){
       </div>
       <div class="prazo-info">
         <h4>${p.descricao||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}</h4>
-        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${est?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
+        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${mostrarCli?`🧑 ${cliNome} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:' · <span style="color:#dc2626">⚠️ sem responsável</span>'}${p.classe?` · <span style="color:#64748b">${p.classe}</span>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${est?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
+        ${sug?`<p style="margin:4px 0 0"><span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:${sug==='custas'?'#d9770622':'#7c3aed22'};color:${sug==='custas'?'#b45309':'#6d28d9'}">🤖 IA sugere: ${sug==='custas'?'💰 Custas':'📎 Documentos'}${p.categoria_confianca?` · confiança ${p.categoria_confianca}`:''}</span>${p.categoria_motivo?` <span style="color:#94a3b8;font-size:11px">— ${p.categoria_motivo}</span>`:''}</p>`:''}
       </div>
-      ${comAcoes?`<div style="display:flex;gap:6px;align-items:center">
+      ${comAcoes?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        ${sug?`<button class="btn btn-sm" style="background:${sug==='custas'?'#fef3c7':'#ede9fe'};color:${sug==='custas'?'#b45309':'#6d28d9'};font-weight:700" title="Confirmar a sugestão da IA" onclick="setCatPrazo('${p.id}','${sug}')">✓ Confirmar ${sug==='custas'?'💰':'📎'}</button>`:''}
         ${!p.cumprido?`<button class="btn-icon" title="Marcar: recolher custas" style="opacity:${p.categoria==='custas'?1:.4}" onclick="setCatPrazo('${p.id}','custas')">💰</button>
         <button class="btn-icon" title="Marcar: apresentar documento" style="opacity:${p.categoria==='documentos'?1:.4}" onclick="setCatPrazo('${p.id}','documentos')">📎</button>`:''}
         ${est&&!p.cumprido?`<button class="btn btn-sm" style="background:#fef3c7;color:#b45309" onclick="confirmarPrazo('${p.id}','${p.data||''}')">✎ Confirmar data</button>`:''}
@@ -4058,6 +4069,9 @@ async function novoPrazo(){
     <div class="form-field"><label>Tipo</label>
       <select name="tipo"><option>Processual</option><option>Recursal</option><option>Administrativo</option><option>Audiência</option><option>Reunião</option><option>Outro</option></select>
     </div>
+    <div class="form-field"><label>Categoria</label>
+      <select name="categoria"><option value="geral">Geral</option><option value="custas">💰 Recolher custas</option><option value="documentos">📎 Apresentar documento</option></select>
+    </div>
     <div class="form-field"><label>Processo Relacionado</label>
       <select name="processo_id"><option value="">—</option>${(procs||[]).map(p=>`<option value="${p.id}">${p.numero||'Sem nº'}</option>`).join('')}</select>
     </div>
@@ -4065,7 +4079,9 @@ async function novoPrazo(){
   </form>`,async()=>{
     const d=coletarForm('form-prazo');
     if(!d.data||!d.descricao){toast('Preencha data e descrição.','erro');return false;}
-    d.cumprido=false;if(!d.processo_id)delete d.processo_id;
+    d.cumprido=false;d.status='pendente';if(!d.processo_id)delete d.processo_id;
+    // categoria escolhida à mão já entra como decisão humana (trava contra a IA)
+    if(d.categoria&&d.categoria!=='geral')d.categoria_fonte='humano';
     const{error}=await supa.from('prazos').insert([d]);
     if(error){toast('Erro: '+error.message,'erro');return false;}
     toast('Prazo cadastrado!','ok');carregarPrazos();
@@ -4076,12 +4092,13 @@ async function cumprir(id){
   toast('Prazo cumprido!','ok');carregarPrazos();
 }
 // Marca/desmarca a categoria do prazo (custas / documentos). Clicar de novo tira.
+// Grava categoria_fonte='humano': trava contra o classificador de IA sobrescrever a decisão da pessoa.
 async function setCatPrazo(id,cat){
   const atual=(prazosCache.find(x=>String(x.id)===String(id))||{}).categoria;
   const nova=(atual===cat)?'geral':cat;
-  const{error}=await supa.from('prazos').update({categoria:nova}).eq('id',id);
+  const{error}=await supa.from('prazos').update({categoria:nova,categoria_fonte:'humano'}).eq('id',id);
   if(error){toast('Erro: '+error.message,'erro');return;}
-  const p=prazosCache.find(x=>String(x.id)===String(id)); if(p)p.categoria=nova;
+  const p=prazosCache.find(x=>String(x.id)===String(id)); if(p){p.categoria=nova;p.categoria_fonte='humano';}
   renderPrazos();
 }
 // Confirma a data real de um prazo ESTIMADO. Ao confirmar, status vira 'confirmado'
