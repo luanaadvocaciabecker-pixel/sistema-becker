@@ -3967,13 +3967,14 @@ function renderPrazos(){
   const g={hoje:[],vencido:[],aberto:[],cumprido:[]};
   base.forEach(p=>g[_classPrazo(p)].push(p));
   const stats=document.getElementById('prazos-stats');
-  const estCount=base.filter(p=>!p.cumprido&&p.status==='estimado').length;
+  const ativos=[...g.hoje,...g.vencido,...g.aberto];
+  const nCat=c=>ativos.filter(p=>p.categoria===c).length;
   if(stats)stats.innerHTML=[
-    ['hoje','Vencendo HOJE',g.hoje.length,'#f87171'],
-    ['vencido','Decorridos',g.vencido.length,'#fbbf24'],
+    ['hoje','Vence HOJE',g.hoje.length,'#f87171'],
     ['aberto','Em aberto',g.aberto.length,'#60a5fa'],
-    ['cumprido','Cumpridos',g.cumprido.length,'#4ade80'],
-    ['estimados','⚠ Estimados',estCount,'#f59e0b']
+    ['custas','💰 Custas',nCat('custas'),'#d97706'],
+    ['documentos','📎 Documentos',nCat('documentos'),'#7c3aed'],
+    ['vencido','Vencidos',g.vencido.length,'#fbbf24']
   ].map(([k,lbl,n,cor])=>`<div class="stat-card" style="cursor:pointer;${prazoBucket===k?'outline:2px solid '+cor+';outline-offset:-1px':''}" onclick="prazoBucket='${k}';renderPrazos()">
     <div class="stat-val" style="color:${cor}">${n}</div><div class="stat-label">${lbl}</div></div>`).join('');
   const el=document.getElementById('prazos-lista');if(!el)return;
@@ -3982,7 +3983,8 @@ function renderPrazos(){
   else if(prazoBucket==='vencido'){lista=g.vencido;vazio='Nenhum prazo decorrido em aberto. ✅';}
   else if(prazoBucket==='aberto')lista=g.aberto;
   else if(prazoBucket==='cumprido')lista=g.cumprido;
-  else if(prazoBucket==='estimados'){lista=base.filter(p=>!p.cumprido&&p.status==='estimado');vazio='Nenhum prazo estimado a conferir. 👍';}
+  else if(prazoBucket==='custas'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='custas');vazio='Nenhum prazo de custas em aberto. 💰';}
+  else if(prazoBucket==='documentos'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='documentos');vazio='Nenhum prazo de documentos em aberto. 📎';}
   else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
   else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.cumprido];
   else lista=[...g.hoje,...g.vencido,...g.aberto]; // 'ativos' (padrão): tudo que ainda exige ação
@@ -4015,9 +4017,11 @@ function renderPrazosLista(lista,comAcoes=false){
       </div>
       <div class="prazo-info">
         <h4>${p.descricao||'Prazo'} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}</h4>
-        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${est?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
+        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${est?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
       </div>
       ${comAcoes?`<div style="display:flex;gap:6px;align-items:center">
+        ${!p.cumprido?`<button class="btn-icon" title="Marcar: recolher custas" style="opacity:${p.categoria==='custas'?1:.4}" onclick="setCatPrazo('${p.id}','custas')">💰</button>
+        <button class="btn-icon" title="Marcar: apresentar documento" style="opacity:${p.categoria==='documentos'?1:.4}" onclick="setCatPrazo('${p.id}','documentos')">📎</button>`:''}
         ${est&&!p.cumprido?`<button class="btn btn-sm" style="background:#fef3c7;color:#b45309" onclick="confirmarPrazo('${p.id}','${p.data||''}')">✎ Confirmar data</button>`:''}
         ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d" onclick="cumprir('${p.id}')">✓ Cumprir</button>`:'<span style="color:#15803d;font-size:12px">✅ Cumprido</span>'}
         <button class="btn-icon" onclick="excluirPrazo('${p.id}')">🗑️</button>
@@ -4049,6 +4053,15 @@ async function novoPrazo(){
 async function cumprir(id){
   await supa.from('prazos').update({cumprido:true}).eq('id',id);
   toast('Prazo cumprido!','ok');carregarPrazos();
+}
+// Marca/desmarca a categoria do prazo (custas / documentos). Clicar de novo tira.
+async function setCatPrazo(id,cat){
+  const atual=(prazosCache.find(x=>String(x.id)===String(id))||{}).categoria;
+  const nova=(atual===cat)?'geral':cat;
+  const{error}=await supa.from('prazos').update({categoria:nova}).eq('id',id);
+  if(error){toast('Erro: '+error.message,'erro');return;}
+  const p=prazosCache.find(x=>String(x.id)===String(id)); if(p)p.categoria=nova;
+  renderPrazos();
 }
 // Confirma a data real de um prazo ESTIMADO. Ao confirmar, status vira 'confirmado'
 // e a rotina automática do Legal Mail deixa de sobrescrever esse prazo.
