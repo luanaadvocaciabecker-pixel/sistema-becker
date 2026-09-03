@@ -1686,7 +1686,7 @@ function soDigitos(s){return String(s==null?'':s).replace(/\D/g,'');}
 function waLink(num){let d=soDigitos(num);if(!d)return '';if(d.length<=11)d='55'+d;return 'https://wa.me/'+d;}
 function waHtml(num,rotulo){const l=waLink(num);if(!l)return escHtml(num||'—');return `<a href="${l}" target="_blank" rel="noopener" style="color:#25D366;font-weight:600;text-decoration:none">💬 ${escHtml(num)}</a>`;}
 let movsFiltroProcesso='';
-const TIPOS_MOVIMENTACAO_PROCESSUAL=['DataJud','TJSC/eproc','Tribunal','Diário Oficial','JusBrasil','Manual'];
+const TIPOS_MOVIMENTACAO_PROCESSUAL=['DataJud','TJSC/eproc','Tribunal','Diário Oficial','JusBrasil','Manual','Projuris','Auditoria','Legal Mail'];
 const MODULOS_PROTEGIDOS={'financeiro':'becker2026','cibele':'becker2026'};
 const _modulosDesbloqueados=new Set();
 
@@ -1970,7 +1970,7 @@ function renderSidebarMenu(){
       ['clientes','clientes','Todos os Clientes'],['novo-cliente','plus','Novo Cliente','novoCliente()'],['documentos','folder','Documentos'],['contratos','file','Contratos'],['documentacao','edit','Procurações']
     ])}
     ${grupoMenu('judiciais','judicial','Processos Judiciais','judiciais',[
-      ['judiciais','judicial','Todos os Processos'],['movimentacoes','refresh','Movimentações'],['prazos','clock','Prazos'],['prazos','court','Audiências'],['documentos','folder','Documentos'],['datajud','zap','Atualização Processual']
+      ['judiciais','judicial','Todos os Processos'],['movimentacoes','refresh','Movimentações'],['prazos','clock','Prazos'],['audiencias','court','Audiências'],['documentos','folder','Documentos'],['datajud','zap','Atualização Processual']
     ])}
     <div class="nav-item" data-page="novos-negocios" data-leaf="true" onclick="ir('novos-negocios')"><span class="nav-emoji">${iconeMenu('handshake')}</span>Novos Negócios</div>
     ${grupoMenu('administrativos','folder','Processos Administrativos','administrativos',[
@@ -2313,8 +2313,8 @@ async function pDashboard(){
     Promise.resolve({data:[],count:0}),
     safe(supa.from('prazos').select('id,data,cumprido',{count:'exact'}).eq('cumprido',false).lte('data',hojeIso)),
     safe(supa.from('prazos').select('id,data,descricao,tipo,cumprido,processo_id,processos(numero,clientes(nome),advogado_responsavel)',{count:'exact'}).eq('cumprido',false).gte('data',hojeIso).lte('data',em7dIso).order('data').limit(5)),
-    safe(supa.from('prazos').select('id,data,descricao,tipo,cumprido,processo_id,processos(numero,clientes(nome),advogado_responsavel)',{count:'exact'}).eq('cumprido',false).eq('tipo','Audiência').eq('data',hojeIso)),
-    safe(supa.from('prazos').select('id,data,descricao,tipo,cumprido,processo_id,processos(numero,clientes(nome),advogado_responsavel)',{count:'exact'}).eq('cumprido',false).eq('tipo','Audiência').gte('data',hojeIso).lte('data',em7dIso).order('data').limit(5)),
+    safe(supa.from('audiencias').select('id,data,hora,tipo,local,processo_id,processos(numero,clientes(nome))',{count:'exact'}).eq('data',hojeIso)),
+    safe(supa.from('audiencias').select('id,data,hora,tipo,local,processo_id,processos(numero,clientes(nome))',{count:'exact'}).gte('data',hojeIso).lte('data',em7dIso).order('data').limit(5)),
     safe(supa.from('movimentacoes').select('id,data,descricao,tipo,processos(numero,clientes(nome))').in('tipo',TIPOS_MOVIMENTACAO_PROCESSUAL).order('data',{ascending:false}).limit(5)),
     safe(supa.from('honorarios').select('id,valor_total,status').limit(500)),
     safe(supa.from('alvaras').select('id,valor,etapa,status').limit(500)),
@@ -2350,10 +2350,10 @@ async function pDashboard(){
     <td>${escHtml(p.processos?.advogado_responsavel||'—')}</td>
   </tr>`).join('');
   const audRows=(audProx.data||[]).map(a=>`<tr>
-    <td>${dataCurta(a.data)}</td>
+    <td>${dataCurta(a.data)}${a.hora?' '+String(a.hora).slice(0,5):''}</td>
     <td>${escHtml(procNumero(a))}</td>
     <td>${escHtml(nomeCliente(a))}</td>
-    <td>${escHtml(truncar(a.descricao||'—',18))}</td>
+    <td>${escHtml(truncar(a.tipo||a.local||'—',18))}</td>
   </tr>`).join('');
 
   c.innerHTML=`<div class="dash-premium">
@@ -2467,7 +2467,7 @@ async function dashProcTab(tipo,btn){
     if(!ids.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:rgba(255,255,255,.2)">Nenhum prazo hoje</td></tr>';const el=document.getElementById('tab-count-hoje');if(el)el.textContent='0';return;}
     q=somenteProcessosPrincipais(supa.from('processos').select('id,numero,situacao,assunto,tribunal,comarca,advogado_responsavel,updated_at,clientes(nome),prazos(data,cumprido),movimentacoes(data,descricao,tipo)')).in('id',ids).limit(25);
   }else if(tipo==='aud'){
-    const audSem=await supa.from('prazos').select('processo_id').eq('tipo','Audiência').gte('data',hoje.toISOString().split('T')[0]).lte('data',em7d.toISOString().split('T')[0]);
+    const audSem=await supa.from('audiencias').select('processo_id').gte('data',hoje.toISOString().split('T')[0]).lte('data',em7d.toISOString().split('T')[0]);
     const ids=(audSem.data||[]).map(a=>a.processo_id).filter(Boolean);
     if(!ids.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:rgba(255,255,255,.2)">Nenhuma audiência esta semana</td></tr>';const el=document.getElementById('tab-count-aud');if(el)el.textContent='0';return;}
     q=somenteProcessosPrincipais(supa.from('processos').select('id,numero,situacao,assunto,tribunal,comarca,advogado_responsavel,updated_at,clientes(nome),prazos(data,cumprido),movimentacoes(data,descricao,tipo)')).in('id',ids).limit(25);
@@ -3114,6 +3114,8 @@ async function abrirProcesso(id){
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;font-size:13px">
         ${campo('Cliente',p.clientes?.nome?`<a href="#" onclick="abrirCliente('${p.clientes.id}');return false" style="color:var(--azul3)">${p.clientes.nome}</a>`:'—')}
         ${campo('Advogado responsável',p.advogado_responsavel,'var(--azul3)')}
+        ${campo('Advogado auxiliar',p.advogado_auxiliar)}
+        ${campo('Secretária responsável',p.secretaria_responsavel)}
         ${campo('Tribunal',p.tribunal)}
         ${campo('Comarca',p.comarca)}
         ${campo('Vara',p.vara)}
@@ -3131,12 +3133,20 @@ async function abrirProcesso(id){
     <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🔄 Últimas movimentações</h4><div id="proc-movs">Carregando...</div></div>
     <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">⏰ Prazos</h4><div id="proc-prazos">Carregando...</div></div>
   </div>
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🏛️ Audiências</h4><div id="proc-audiencias">Carregando...</div></div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">📄 Documentos & íntegra</h4><div id="proc-docs">Carregando...</div></div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🏭 Produção Jurídica</h4><div id="proc-producao">Carregando...</div></div>`;
   carregarMovsProcesso(id);
   carregarPrazosProcesso(id);
+  carregarAudienciasProcesso(id);
   carregarDocsProcesso(id);
   carregarProducaoProcesso(id);
+}
+async function carregarAudienciasProcesso(id){
+  const el=document.getElementById('proc-audiencias');if(!el)return;
+  const{data}=await supa.from('audiencias').select('*,processos(numero,clientes(nome))').eq('processo_id',id).order('data').limit(30);
+  if(!data?.length){el.innerHTML='<div class="empty-state" style="padding:16px"><p style="font-size:13px">Nenhuma audiência designada neste processo.</p></div>';return;}
+  el.innerHTML=`<div class="card"><div class="card-body">${renderAudienciasLista(data)}</div></div>`;
 }
 async function carregarMovsProcesso(id){
   const el=document.getElementById('proc-movs');if(!el)return;
@@ -3314,7 +3324,7 @@ async function pNovosNegocios(){
   c.innerHTML='<p style="text-align:center;padding:40px;color:#64748b">Carregando novos negócios...</p>';
   const{data,error}=await supa.from('novos_negocios')
     .select('*,nn_itens(id,documento,obrigatorio,presente,observacao)')
-    .eq('status','aberto').order('created_at',{ascending:true});
+    .in('status',['aberto','repassado']).order('created_at',{ascending:true});
   if(error){c.innerHTML=`<div class="card"><div class="card-body">Erro ao carregar: ${_nnEsc(error.message)}</div></div>`;return;}
   _nnCache=data||[];
   const{count:concl}=await supa.from('novos_negocios').select('id',{count:'exact'}).eq('status','concluido').limit(1);
@@ -3334,7 +3344,7 @@ function renderNovosNegocios(){
     <div style="font-size:12px;color:#64748b;margin-top:2px">${rotulo}</div></div>`;
   let html=`
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
-    ${card('📋',total,'Em triagem (abertos)','todos','var(--texto)')}
+    ${card('📋',total,'Em triagem','todos','var(--texto)')}
     ${card('🟢',completos,'Documentação completa','completos','#16a34a')}
     ${card('🟡',faltando,'Faltam documentos','faltando','#d97706')}
     ${card('🔴',semPasta,'Sem pasta / vazio','sempasta','#dc2626')}
@@ -3368,6 +3378,7 @@ function renderNovosNegociosLista(){
         <div style="font-weight:600;color:var(--texto);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.cliente_nome)}</div>
         <div style="font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.acao||'—')}</div>
       </div>
+      ${n.status==='repassado'?`<span class="tag" style="background:rgba(37,99,235,.12);color:#1d4ed8;font-size:11px;flex-shrink:0" title="Repassado para ${_nnEsc(n.responsavel||'')}">📨 ${_nnEsc(n.responsavel||'repassado')}</span>`:''}
       <span class="tag" style="background:rgba(148,163,184,.12);color:#334155;font-size:11px;flex-shrink:0">${NN_LABEL[n.categoria]||n.categoria}</span>
       <span style="font-size:12px;font-weight:700;color:${s.cor};min-width:96px;text-align:right;flex-shrink:0">${s.emoji} ${s.rotulo}</span>
     </div>`).join('');
@@ -3662,9 +3673,9 @@ function repassarNN(id){
         descricao:desc,responsavel:resp,cliente_id:n.cliente_id||null,prazo,prioridade:(s.faltam>0?'media':'alta'),status:'pendente'};
       const{data:t,error:e1}=await supa.from('tarefas').insert(tarefa).single();
       if(e1){toast('Erro ao criar tarefa: '+e1.message,'erro');return false;}
-      const{error:e2}=await supa.from('novos_negocios').update({responsavel:resp,tarefa_id:t?.id||null}).eq('id',id);
+      const{error:e2}=await supa.from('novos_negocios').update({responsavel:resp,tarefa_id:t?.id||null,status:'repassado'}).eq('id',id);
       if(e2){toast('Tarefa criada, mas houve erro ao vincular.','erro');}
-      n.responsavel=resp;
+      n.responsavel=resp;n.status='repassado';
       toast('✅ Tarefa criada e repassada para '+resp,'ok');
       abrirNovoNegocio(id);
     },'Criar tarefa e repassar');
@@ -3955,6 +3966,23 @@ function _classPrazo(p){
   if(dt<hoje)return'vencido';
   return'aberto';
 }
+// Dias corridos até o prazo (negativo = já passou). null se sem data.
+function _diasAte(p){
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  const dt=new Date((p.data||'')+'T12:00:00');dt.setHours(0,0,0,0);
+  if(isNaN(dt))return null;
+  return Math.round((dt.getTime()-hoje.getTime())/86400000);
+}
+// Contagem regressiva colorida — combate o "só agir no último dia".
+function _chipDias(p){
+  const d=_diasAte(p); if(d===null)return'';
+  if(d<0) return`<span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:800;background:#fbbf2422;color:#b45309">venceu há ${-d} dia${-d>1?'s':''}</span>`;
+  if(d===0) return`<span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:800;background:#ef444422;color:#dc2626">⏰ VENCE HOJE</span>`;
+  if(d===1) return`<span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:800;background:#ef444422;color:#dc2626">⏳ falta 1 dia</span>`;
+  const cor=d<=3?'#dc2626':d<=7?'#d97706':'#0891b2';
+  const bg =d<=3?'#ef444422':d<=7?'#f59e0b22':'#06b6d422';
+  return`<span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:800;background:${bg};color:${cor}">⏳ faltam ${d} dias</span>`;
+}
 async function pPrazos(filtroInicial='ativos'){
   const mapa={pendentes:'ativos',todos:'todos',cumpridos:'cumprido',audiencias:'audiencias'};
   prazoBucket=mapa[filtroInicial]||filtroInicial||'ativos';
@@ -3974,8 +4002,8 @@ async function carregarPrazos(){
   // hoje/em aberto pra fora da tela (já aconteceu de verdade, ver commit que limpou
   // 2.347 prazos "estimado" vencidos que estavam escondendo os prazos atuais).
   const[ativos,cumpridos]=await Promise.all([
-    supa.from('prazos').select('*,processos(numero,advogado_responsavel)').eq('cumprido',false).order('data').limit(3000),
-    supa.from('prazos').select('*,processos(numero,advogado_responsavel)').eq('cumprido',true).order('data',{ascending:false}).limit(200)
+    supa.from('prazos').select('*,processos(numero,advogado_responsavel,clientes(nome))').eq('cumprido',false).order('data').limit(3000),
+    supa.from('prazos').select('*,processos(numero,advogado_responsavel,clientes(nome))').eq('cumprido',true).order('data',{ascending:false}).limit(200)
   ]);
   prazosCache=[...(ativos.data||[]),...(cumpridos.data||[])];
   renderPrazos();
@@ -3984,12 +4012,16 @@ async function carregarPrazos(){
 function filtrarPrazos(f){ if(f){const m={pendentes:'ativos',todos:'todos',cumpridos:'cumprido',audiencias:'audiencias'};prazoBucket=m[f]||f;} carregarPrazos(); }
 function renderPrazos(){
   const advDe=p=>(p.processos?.advogado_responsavel||'');
-  const base=prazoAdv?prazosCache.filter(p=>advDe(p)===prazoAdv):prazosCache;
-  // chips de advogado
+  // Compara por nome normalizado (MAIÚSCULO/trim); '__SEM__' = prazo sem responsável no processo.
+  const _advKey=s=>{const t=(s||'').trim().toUpperCase();return t?t:'__SEM__';};
+  const _advMatch=(p,v)=>{if(!v)return true;const k=_advKey(advDe(p));return v==='__SEM__'?k==='__SEM__':k.includes(v);};
+  const base=prazoAdv?prazosCache.filter(p=>_advMatch(p,prazoAdv)):prazosCache;
+  // chips de advogado (inclui Cibele e "Sem responsável" pra nenhum prazo ficar escondido)
   const advBox=document.getElementById('prazos-adv');
   if(advBox){
-    const chips=[['','Todos'],['LUANA FERNANDES MIRANDA','Luana'],['SAMAIRA LEITE DA SILVA','Samaira'],['ALANA PAIS LEMOS','Alana'],['MARIA HELENA','Maria Helena']];
-    advBox.innerHTML=chips.map(([v,l])=>{const n=v?prazosCache.filter(p=>advDe(p)===v&&!p.cumprido&&p.data>=new Date().toISOString().split('T')[0]).length:'';const on=prazoAdv===v;return `<button onclick="prazoAdv='${v.replace(/'/g,"\\'")}';renderPrazos()" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">👤 ${l}${v!==''?` (${n})`:''}</button>`;}).join('');
+    const hojeIso=new Date().toISOString().split('T')[0];
+    const chips=[['','Todos'],['LUANA','Luana'],['SAMAIRA','Samaira'],['ALANA','Alana'],['MARIA HELENA','Maria Helena'],['CIBELE','Cibele'],['__SEM__','Sem responsável']];
+    advBox.innerHTML=chips.map(([v,l])=>{const n=v?prazosCache.filter(p=>_advMatch(p,v)&&!p.cumprido&&p.data>=hojeIso).length:'';const on=prazoAdv===v;const ico=v==='__SEM__'?'⚠️':'👤';return `<button onclick="prazoAdv='${v.replace(/'/g,"\\'")}';renderPrazos()" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">${ico} ${l}${v!==''?` (${n})`:''}</button>`;}).join('');
   }
   const g={hoje:[],vencido:[],aberto:[],cumprido:[]};
   base.forEach(p=>g[_classPrazo(p)].push(p));
@@ -4035,6 +4067,15 @@ function renderPrazosLista(lista,comAcoes=false){
   return lista.map(p=>{
     const dt=new Date((p.data||'')+'T12:00:00');
     const cls=_classPrazo(p);const[bl,bc]=badge[cls];
+    const dRest=_diasAte(p);
+    // prazo em aberto mas a ≤3 dias já entra no visual de urgência (não espera "vencer hoje")
+    const boxK=(cls==='aberto'&&dRest!==null&&dRest<=3)?'urgente':boxCls[cls];
+    const chip=(cls!=='cumprido')?_chipDias(p):'';
+    // Sugestão da IA (só quando ainda não confirmada por humano e a categoria está em aberto/geral)
+    const semCat=(!p.categoria||p.categoria==='geral');
+    const sug=(!p.cumprido&&semCat&&p.categoria_fonte!=='humano'&&(p.categoria_sugerida==='custas'||p.categoria_sugerida==='documentos'))?p.categoria_sugerida:'';
+    const cliNome=p.processos?.clientes?.nome||'';
+    const mostrarCli=cliNome&&!(p.descricao||'').includes(cliNome);
     const est=(p.status==='estimado');
     const estIA=(p.status==='estimado_ia');
     const naoConfirmado=est||estIA;
@@ -4042,15 +4083,17 @@ function renderPrazosLista(lista,comAcoes=false){
       :estIA?` <span title="Data estimada por IA (Infinitum/Publijus, leu o documento). Confira e confirme." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#0ea5e922;color:#0369a1">🤖 Estimado por IA</span>`:'';
     const seloFonte=p.fonte==='infinitum'?` <span title="Origem: Infinitum/Publijus" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#8b5cf622;color:#7c3aed">via Infinitum</span>`:'';
     return`<div class="prazo-item"${naoConfirmado?' style="background:rgba(245,158,11,.05)"':''}>
-      <div class="prazo-data-box ${boxCls[cls]}">
+      <div class="prazo-data-box ${boxK}">
         <div class="dia">${isNaN(dt)?'--':dt.getDate().toString().padStart(2,'0')}</div>
         <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
-        <h4>${p.descricao||'Prazo'} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}</h4>
-        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${naoConfirmado?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
+        <h4>${p.descricao||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}</h4>
+        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${mostrarCli?`🧑 ${cliNome} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:' · <span style="color:#dc2626">⚠️ sem responsável</span>'}${p.classe?` · <span style="color:#64748b">${p.classe}</span>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${naoConfirmado?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
+        ${sug?`<p style="margin:4px 0 0"><span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:${sug==='custas'?'#d9770622':'#7c3aed22'};color:${sug==='custas'?'#b45309':'#6d28d9'}">🤖 IA sugere: ${sug==='custas'?'💰 Custas':'📎 Documentos'}${p.categoria_confianca?` · confiança ${p.categoria_confianca}`:''}</span>${p.categoria_motivo?` <span style="color:#94a3b8;font-size:11px">— ${p.categoria_motivo}</span>`:''}</p>`:''}
       </div>
-      ${comAcoes?`<div style="display:flex;gap:6px;align-items:center">
+      ${comAcoes?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        ${sug?`<button class="btn btn-sm" style="background:${sug==='custas'?'#fef3c7':'#ede9fe'};color:${sug==='custas'?'#b45309':'#6d28d9'};font-weight:700" title="Confirmar a sugestão da IA" onclick="setCatPrazo('${p.id}','${sug}')">✓ Confirmar ${sug==='custas'?'💰':'📎'}</button>`:''}
         ${!p.cumprido?`<button class="btn-icon" title="Marcar: recolher custas" style="opacity:${p.categoria==='custas'?1:.4}" onclick="setCatPrazo('${p.id}','custas')">💰</button>
         <button class="btn-icon" title="Marcar: apresentar documento" style="opacity:${p.categoria==='documentos'?1:.4}" onclick="setCatPrazo('${p.id}','documentos')">📎</button>`:''}
         ${naoConfirmado&&!p.cumprido?`<button class="btn btn-sm" style="background:#fef3c7;color:#b45309" onclick="confirmarPrazo('${p.id}','${p.data||''}')">✎ Confirmar data</button>`:''}
@@ -4068,6 +4111,9 @@ async function novoPrazo(){
     <div class="form-field"><label>Tipo</label>
       <select name="tipo"><option>Processual</option><option>Recursal</option><option>Administrativo</option><option>Audiência</option><option>Reunião</option><option>Outro</option></select>
     </div>
+    <div class="form-field"><label>Categoria</label>
+      <select name="categoria"><option value="geral">Geral</option><option value="custas">💰 Recolher custas</option><option value="documentos">📎 Apresentar documento</option></select>
+    </div>
     <div class="form-field"><label>Processo Relacionado</label>
       <select name="processo_id"><option value="">—</option>${(procs||[]).map(p=>`<option value="${p.id}">${p.numero||'Sem nº'}</option>`).join('')}</select>
     </div>
@@ -4075,7 +4121,9 @@ async function novoPrazo(){
   </form>`,async()=>{
     const d=coletarForm('form-prazo');
     if(!d.data||!d.descricao){toast('Preencha data e descrição.','erro');return false;}
-    d.cumprido=false;if(!d.processo_id)delete d.processo_id;
+    d.cumprido=false;d.status='pendente';if(!d.processo_id)delete d.processo_id;
+    // categoria escolhida à mão já entra como decisão humana (trava contra a IA)
+    if(d.categoria&&d.categoria!=='geral')d.categoria_fonte='humano';
     const{error}=await supa.from('prazos').insert([d]);
     if(error){toast('Erro: '+error.message,'erro');return false;}
     toast('Prazo cadastrado!','ok');carregarPrazos();
@@ -4086,12 +4134,13 @@ async function cumprir(id){
   toast('Prazo cumprido!','ok');carregarPrazos();
 }
 // Marca/desmarca a categoria do prazo (custas / documentos). Clicar de novo tira.
+// Grava categoria_fonte='humano': trava contra o classificador de IA sobrescrever a decisão da pessoa.
 async function setCatPrazo(id,cat){
   const atual=(prazosCache.find(x=>String(x.id)===String(id))||{}).categoria;
   const nova=(atual===cat)?'geral':cat;
-  const{error}=await supa.from('prazos').update({categoria:nova}).eq('id',id);
+  const{error}=await supa.from('prazos').update({categoria:nova,categoria_fonte:'humano'}).eq('id',id);
   if(error){toast('Erro: '+error.message,'erro');return;}
-  const p=prazosCache.find(x=>String(x.id)===String(id)); if(p)p.categoria=nova;
+  const p=prazosCache.find(x=>String(x.id)===String(id)); if(p){p.categoria=nova;p.categoria_fonte='humano';}
   renderPrazos();
 }
 // Confirma a data real de um prazo ESTIMADO. Ao confirmar, status vira 'confirmado'
@@ -5014,36 +5063,82 @@ function pModuloSimples(pagina){
   </div>`;
 }
 
-// ---- AUDIÊNCIAS ----
-function pAudiencias(){pPrazos('audiencias');}
+// ---- AUDIÊNCIAS (tabela `audiencias` — alimentada pelo Legal Mail + manual) ----
+let _audFiltro='proximas';
+function pAudiencias(){
+  document.getElementById('conteudo').innerHTML=`
+  <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0">← Voltar</button>
+  <div class="toolbar" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div id="aud-filtros" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+    <button class="btn btn-primary" onclick="novaAudiencia()">+ Nova Audiência</button>
+  </div>
+  <div id="aud-lista">Carregando...</div>`;
+  filtrarAudiencias(_audFiltro);
+}
+function _audChips(){
+  const box=document.getElementById('aud-filtros');if(!box)return;
+  const chips=[['proximas','Próximas'],['realizadas','Realizadas'],['todas','Todas']];
+  box.innerHTML=chips.map(([v,l])=>{const on=_audFiltro===v;return `<button onclick="filtrarAudiencias('${v}')" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">🏛️ ${l}</button>`;}).join('');
+}
 async function filtrarAudiencias(f){
+  _audFiltro=f||'proximas';_audChips();
   const hoje=new Date().toISOString().split('T')[0];
-  let q=supa.from('prazos').select('*,processos(numero)').eq('tipo','Audiência').order('data');
-  if(f==='proximas')q=q.gte('data',hoje);
-  if(f==='realizadas')q=q.lt('data',hoje);
-  const{data,error}=await q.limit(50);
+  let q=supa.from('audiencias').select('*,processos(numero,clientes(nome))').order('data');
+  if(_audFiltro==='proximas')q=q.gte('data',hoje);
+  if(_audFiltro==='realizadas')q=q.lt('data',hoje);
+  const{data,error}=await q.limit(200);
   const el=document.getElementById('aud-lista');if(!el)return;
-  if(error||!data?.length){el.innerHTML='<div class="empty-state"><div class="icon">🏛️</div><p>Nenhuma audiência encontrada.</p></div>';return;}
-  el.innerHTML=`<div class="card"><div class="card-body">${renderPrazosLista(data,true)}</div></div>`;
+  if(error||!data?.length){el.innerHTML='<div class="empty-state"><div class="icon">🏛️</div><p>Nenhuma audiência nesta categoria.</p></div>';return;}
+  el.innerHTML=`<div class="card"><div class="card-body">${renderAudienciasLista(data)}</div></div>`;
+}
+function renderAudienciasLista(lista){
+  return lista.map(a=>{
+    const dt=new Date((a.data||'')+'T12:00:00');
+    const passou=a.data&&a.data<new Date().toISOString().split('T')[0];
+    const hora=(a.hora||'').slice(0,5);
+    const cli=a.processos?.clientes?.nome||'';
+    return`<div class="prazo-item">
+      <div class="prazo-data-box ${passou?'ok':'proximo'}">
+        <div class="dia">${isNaN(dt)?'--':dt.getDate().toString().padStart(2,'0')}</div>
+        <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
+      </div>
+      <div class="prazo-info">
+        <h4>${a.tipo||'Audiência'}${hora?` · ${hora}`:''} ${passou?'<span style="font-size:10px;color:#94a3b8">realizada</span>':'<span style="font-size:10px;color:#60a5fa;font-weight:700">próxima</span>'}</h4>
+        <p>${a.processos?.numero?`Proc. ${a.processos.numero} · `:''}${cli?`🧑 ${cli} · `:''}${a.local?`📍 ${a.local} · `:''}${a.advogado_responsavel?`👤 ${_advCurto(a.advogado_responsavel)}`:''}</p>
+        ${a.observacoes?`<p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${a.observacoes}</p>`:''}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn-icon" onclick="excluirAudiencia('${a.id}')">🗑️</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 async function novaAudiencia(){
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
-  abrirModal('Nova Audiência',`<form id="form-prazo">
+  abrirModal('Nova Audiência',`<form id="form-aud">
     <div class="form-field"><label>Data *</label><input type="date" name="data"></div>
-    <div class="form-field"><label>Descrição *</label><input name="descricao" placeholder="Ex: Audiência de instrução e julgamento"></div>
-    <input type="hidden" name="tipo" value="Audiência">
+    <div class="form-field"><label>Hora</label><input type="time" name="hora"></div>
+    <div class="form-field"><label>Tipo</label>
+      <select name="tipo"><option>Audiência de Instrução</option><option>Audiência de Conciliação</option><option>Audiência Una</option><option>Sessão de Julgamento</option><option>Outra</option></select>
+    </div>
+    <div class="form-field"><label>Local</label><input name="local" placeholder="Ex: Fórum de Blumenau, sala 3 / videoconferência"></div>
     <div class="form-field"><label>Processo</label>
       <select name="processo_id"><option value="">—</option>${(procs||[]).map(p=>`<option value="${p.id}">${p.numero||'Sem nº'}</option>`).join('')}</select>
     </div>
-    <div class="form-field"><label>Observação</label><textarea name="observacao"></textarea></div>
+    <div class="form-field"><label>Observação</label><textarea name="observacoes"></textarea></div>
   </form>`,async()=>{
-    const d=coletarForm('form-prazo');
-    if(!d.data||!d.descricao){toast('Preencha data e descrição.','erro');return false;}
-    d.cumprido=false;if(!d.processo_id)delete d.processo_id;
-    const{error}=await supa.from('prazos').insert([d]);
+    const d=coletarForm('form-aud');
+    if(!d.data){toast('Preencha a data.','erro');return false;}
+    if(!d.hora)delete d.hora;if(!d.processo_id)delete d.processo_id;
+    const{error}=await supa.from('audiencias').insert([d]);
     if(error){toast('Erro: '+error.message,'erro');return false;}
     toast('Audiência cadastrada!','ok');filtrarAudiencias('proximas');
   });
+}
+async function excluirAudiencia(id){
+  if(!confirm('Excluir audiência?'))return;
+  await supa.from('audiencias').delete().eq('id',id);
+  toast('Removida.','ok');filtrarAudiencias(_audFiltro);
 }
 
 // ---- RELATÓRIOS ----

@@ -1,18 +1,18 @@
 // Edge Function `legalmail-reconcile` — sincroniza "de hoje pra frente".
 // "pendente" é puxado por inteiro (sem filtro de data de captura) a cada rodada, pois o Legal
 // Mail pode preencher a data-limite dias depois da captura — sem isso, uma intimação capturada
-// há mais de `dias` dias nunca seria revisitada e ficaria presa em "ESTIMADO" para sempre mesmo
-// com a data real já disponível na API. "cumprido"/"excedido" continuam só na janela recente
+// há mais de `dias` dias nunca seria revisitada e ficaria presa sem prazo mesmo com a "Data final"
+// do tribunal já disponível na API. "cumprido"/"excedido" continuam só na janela recente
 // (padrão: últimos 7 dias por data de captura; ?dias=N muda a janela). limit<=50 com paginação.
 // O workspace pode ter milhares de "pendente" (backlog histórico) — a RPC lm_reconcile é chamada
 // UMA VEZ POR PÁGINA (50 registros) em vez de acumular tudo num array e mandar de uma vez, senão
 // o Postgres cancela a chamada por statement timeout e NADA é salvo daquela rodada.
 // ?debug=1 mostra diagnóstico.
 //
-// Estratégia (definida com a Luana):
-//   - pendente sem data-limite -> prazo ESTIMADO (disponibilização + 15 dias úteis), marcado "⚠ ESTIMADO (conferir)".
-//   - pendente com data-limite -> usa a data real.
-//   - cumprido/excedido        -> só atualiza prazo já existente (não cria histórico).
+// Estratégia (definida com a Luana — SEM chute de data):
+//   - o prazo só é criado quando a intimação traz a "Data final" calculada pelo tribunal
+//     (feriados forenses já embutidos). Sem "Data final" no texto -> não vira prazo.
+//   - cumprido/excedido -> só atualiza prazo já existente (não cria histórico).
 //   - a RPC lm_reconcile NÃO sobrescreve prazo já corrigido/concluído por humano.
 //
 // Segredos: LEGALMAIL_API_KEY (token do painel), LEGALMAIL_WEBHOOK_KEY (protege o gatilho).
@@ -84,10 +84,9 @@ Deno.serve(async (req: Request) => {
   let puxados = 0;
   const agg: Record<string, number> = { publicacoes: 0, prazos: 0, cumpridos: 0, excedidos: 0 };
   const erros: string[] = [];
-  // "pendente" sem filtro de captura: precisa reconsultar TODO pendente em aberto (não só os
-  // capturados na janela recente), porque a data-limite pode ser preenchida pelo tribunal/Legal Mail
+  // capturados na janela recente), porque a "Data final" pode ser preenchida pelo tribunal/Legal Mail
   // dias depois da captura — se filtrássemos por data_captura_inicio, uma intimação capturada há mais
-  // de `dias` dias nunca mais seria revisitada e ficaria presa em "ESTIMADO" mesmo com a data real disponível.
+  // de `dias` dias nunca mais seria revisitada e ficaria sem prazo mesmo com a data real disponível.
   // "cumprido"/"excedido" são transições recentes: a janela de dias é suficiente aqui.
   for (const [st, s] of [["pendente", null], ["cumprido", since], ["excedido", since]] as [string, string|null][]) {
     try {
