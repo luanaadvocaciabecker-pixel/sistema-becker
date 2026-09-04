@@ -79,6 +79,9 @@ Deno.serve(async (req: Request) => {
   let puxados = 0;
   const agg: Record<string, number> = { publicacoes: 0, prazos: 0, cumpridos: 0, excedidos: 0 };
   const erros: string[] = [];
+  // "pendente" sem janela (since=null) porque a "Data final" pode ser preenchida pelo tribunal/Legal Mail
+  // dias depois da captura; "cumprido"/"excedido" são transições recentes e a janela de dias basta.
+  // maxPages por status evita estourar o timeout com o backlog.
   const plano: [string, string|null, number][] = [
     ["pendente", null, MAX_PAGES_PENDENTE],
     ["cumprido", since, MAX_PAGES_FECHADOS],

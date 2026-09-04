@@ -200,8 +200,9 @@ grant execute on function public.lm_reconcile(jsonb) to service_role;
 --   * cumprido/excedido -> só atualiza prazo existente (não cria passado).
 --   * NÃO sobrescreve prazo cujo status saiu de estimado/pendente ou já cumprido
 --     (protege correção/conclusão feita por humano).
--- A Edge Function legalmail-reconcile puxa /notices (limit<=50, paginado) só da
--- janela recente (?dias, padrão 7) e chama esta função. Agendada 07:30 BRT.
+-- A Edge Function legalmail-reconcile puxa /notices (limit<=50, paginado) e chama esta
+-- função; "pendente" é puxado por inteiro (sem filtro de data), "cumprido"/"excedido" só
+-- da janela recente (?dias, padrão 7). Agendada 07:30 BRT.
 
 -- ============================================================================
 -- 6) v3 dos prazos — LER a data do tribunal (sem chutar). Aplicado via execute_sql.
