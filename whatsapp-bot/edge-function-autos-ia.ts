@@ -110,13 +110,23 @@ async function uploadPdf(bytes: Uint8Array): Promise<string | null> {
 }
 
 const PROMPT = [
-  "Estes são os autos completos de um processo judicial brasileiro (documentos em ordem do mais recente para o mais antigo).",
-  "Analise o ÚLTIMO ato decisório (despacho/decisão/sentença/acórdão) e o que ele exige do escritório de advocacia.",
-  "Responda SOMENTE em JSON:",
-  '{"providencia":"custas|documentos|geral","prazo_dias":<inteiro ou null>,"data_final":"DD/MM/AAAA ou null",',
-  '"ultimo_ato":"título curto do último ato","resumo":"3-4 frases: em que pé está o processo e o que o escritório precisa fazer agora"}',
+  "Você é advogado(a) analisando os autos COMPLETOS de um processo judicial brasileiro (documentos do mais recente ao mais antigo).",
+  "Produza um resumo executivo ÚTIL para a equipe do escritório. Foque no último ato decisório, mas também recupere a trajetória do processo.",
+  "Responda SOMENTE em JSON, com estas chaves:",
+  '{',
+  '"providencia":"custas|documentos|geral",',
+  '"prazo_dias":<inteiro ou null>,',
+  '"data_final":"DD/MM/AAAA ou null",',
+  '"ultimo_ato":"título curto do último ato",',
+  '"resumo":"1-2 frases de visão geral (em que pé está o processo)",',
+  '"situacao_atual":"a fase atual do processo em 1 frase",',
+  '"historico":["marcos/decisões relevantes do mais recente ao mais antigo, frases curtas"],',
+  '"o_que_fazer":["providências concretas que o escritório precisa tomar agora, frases curtas"],',
+  '"pontos_atencao":["riscos, prazos, custas, valores ou detalhes que exigem atenção"],',
+  '"estrategia":"1-3 frases de recomendação estratégica (teses, recursos cabíveis, próximo passo sugerido) — só se houver base nos autos"',
+  '}',
   "'custas' = precisa recolher custas/preparo/porte/GRU/taxa. 'documentos' = precisa juntar/apresentar documento/procuração/comprovante. 'geral' = qualquer outra.",
-  "Se o ato não fixa prazo para o escritório, use prazo_dias e data_final null. Escreva o resumo em português claro, sem juridiquês desnecessário.",
+  "REGRAS: não invente fatos, números de processo, valores, datas ou jurisprudência. Se algo não estiver nos autos, omita o item (não preencha com suposição). Se o ato não fixa prazo para o escritório, use prazo_dias e data_final null. Português claro, sem juridiquês desnecessário. Cada lista com no máximo 6 itens.",
 ].join(" ");
 
 async function lerComIA(pdfUrl: string): Promise<{ ok: boolean, mb: number, obj: any, err?: string }> {
@@ -130,7 +140,7 @@ async function lerComIA(pdfUrl: string): Promise<{ ok: boolean, mb: number, obj:
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ fileData: { fileUri: uri, mimeType: "application/pdf" } }, { text: PROMPT }] }],
-      generationConfig: { temperature: 0, maxOutputTokens: 2000, responseMimeType: "application/json" },
+      generationConfig: { temperature: 0, maxOutputTokens: 3200, responseMimeType: "application/json" },
     }),
   });
   if (!g.ok) return { ok: false, mb, obj: null, err: `gemini http ${g.status}` };
@@ -282,7 +292,30 @@ Deno.serve(async (req) => {
       return json({ estado: atual.status, resumo: atual.ia_resumo, ia: atual.ia_json, documentos: atual.n_autos, pdf: atual.status === "pronto" ? await urlAssinada(atual.pdf_path) : null, erro: atual.erro });
     }
 
-    return json({ erro: "action invalida (preview|request|status|get)" }, 400);
+    if (action === "regerar_resumo") {
+      // reprocessa a IA em cima do PDF já guardado — GRÁTIS (não baixa de novo do Legal Mail)
+      if (!atual || !atual.pdf_path) return json({ erro: "não há PDF guardado para este processo" }, 400);
+      const signed = await urlAssinada(atual.pdf_path);
+      if (!signed) return json({ erro: "falha ao acessar o PDF guardado" }, 502);
+      const ia = await lerComIA(signed);
+      if (!ia.ok) return json({ erro: ia.err || "falha da IA" }, 502);
+      await sb(`processo_autos?id=eq.${atual.id}`, {
+        method: "PATCH", headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ ia_resumo: ia.obj?.resumo || null, ia_json: ia.obj || null, ia_em: new Date().toISOString(), atualizado_em: new Date().toISOString() }),
+      });
+      const cat = ia.obj?.providencia;
+      if (cat === "custas" || cat === "documentos") {
+        try {
+          await sb(`prazos?processo_id=eq.${processoId}&cumprido=eq.false&or=(categoria_fonte.is.null,categoria_fonte.neq.humano)`, {
+            method: "PATCH", headers: { Prefer: "return=minimal" },
+            body: JSON.stringify({ categoria_sugerida: cat, categoria_confianca: "alta", categoria_motivo: ("autos IA: " + (ia.obj?.ultimo_ato || "")).slice(0, 120), categoria_ia_em: new Date().toISOString() }),
+          });
+        } catch { /* bônus */ }
+      }
+      return json({ ok: true, estado: "pronto", resumo: ia.obj?.resumo, ia: ia.obj, documentos: atual.n_autos, pdf: signed });
+    }
+
+    return json({ erro: "action invalida (preview|request|status|get|regerar_resumo)" }, 400);
   } catch (e) {
     return json({ erro: String(e).slice(0, 400) }, 500);
   }
