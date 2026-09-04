@@ -3134,13 +3134,13 @@ async function abrirProcesso(id){
     </div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start" id="proc-cols">
-    <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🔄 Últimas movimentações</h4><div id="proc-movs">Carregando...</div></div>
-    <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">⏰ Prazos</h4><div id="proc-prazos">Carregando...</div></div>
+    <div><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">🔄 Últimas movimentações</h4><div id="proc-movs">Carregando...</div></div>
+    <div><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">⏰ Prazos</h4><div id="proc-prazos">Carregando...</div></div>
   </div>
-  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🏛️ Audiências</h4><div id="proc-audiencias">Carregando...</div></div>
-  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🤖 Autos + Inteligência</h4><div id="proc-autosia">Carregando...</div></div>
-  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">📄 Documentos & íntegra</h4><div id="proc-docs">Carregando...</div></div>
-  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🏭 Produção Jurídica</h4><div id="proc-producao">Carregando...</div></div>`;
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">🏛️ Audiências</h4><div id="proc-audiencias">Carregando...</div></div>
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">🤖 Autos + Inteligência</h4><div id="proc-autosia">Carregando...</div></div>
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">📄 Documentos & íntegra</h4><div id="proc-docs">Carregando...</div></div>
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">🏭 Produção Jurídica</h4><div id="proc-producao">Carregando...</div></div>`;
   carregarMovsProcesso(id);
   carregarPrazosProcesso(id);
   carregarAudienciasProcesso(id);
@@ -3173,7 +3173,7 @@ function renderAutosIA(id,r){
     return;
   }
   el.innerHTML=`<div class="card"><div class="card-body">
-    <p style="font-size:13px;color:#cbd5e1;margin:0 0 10px">Baixa a <strong>íntegra do processo</strong> (todas as peças) e a IA lê o <strong>último despacho</strong> pra te dizer o que precisa ser feito e se o prazo é de 💰 custas ou 📎 documentos.</p>
+    <p style="font-size:13px;color:var(--texto);margin:0 0 10px">Baixa a <strong>íntegra do processo</strong> (todas as peças) e a IA lê o <strong>último despacho</strong> pra te dizer o que precisa ser feito e se o prazo é de 💰 custas ou 📎 documentos.</p>
     <p style="font-size:12px;color:#94a3b8;margin:0 0 12px">💡 Custa R$ 0,02 por documento. Você vê a contagem e o valor <strong>antes</strong> de confirmar — nada é cobrado sem o seu OK.</p>
     <button class="btn btn-primary btn-sm" onclick="autosIApreview('${id}')">🤖 Puxar autos + resumo por IA</button>
   </div></div>`;
@@ -3182,15 +3182,33 @@ function cardAutosPronto(id,r){
   const ia=r.ia||{};
   const prov=ia.providencia;
   const selo=prov==='custas'?'<span class="tag" style="background:#7c2d12;color:#fed7aa">💰 Custas</span>':prov==='documentos'?'<span class="tag" style="background:#1e3a8a;color:#bfdbfe">📎 Documentos</span>':'<span class="tag">Geral</span>';
-  const prazo=ia.data_final&&ia.data_final!=='null'?`<div style="font-size:12px;color:#fbbf24;margin-top:6px">⏰ Prazo indicado: ${ia.prazo_dias&&ia.prazo_dias!=='null'?ia.prazo_dias+' dias · ':''}${ia.data_final}</div>`:'';
+  const prazo=ia.data_final&&ia.data_final!=='null'?`<div style="font-size:12px;color:#b45309;font-weight:600;margin-top:8px">⏰ Prazo indicado: ${ia.prazo_dias&&ia.prazo_dias!=='null'?ia.prazo_dias+' dias · ':''}${ia.data_final}</div>`:'';
+  const sec=(titulo,cor,arr)=>Array.isArray(arr)&&arr.length?`<div style="margin-top:12px"><div style="font-size:11px;font-weight:700;color:${cor};text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${titulo}</div><ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7;color:var(--texto)">${arr.map(x=>`<li>${escHtml(x)}</li>`).join('')}</ul></div>`:'';
+  const linha=(titulo,cor,txt)=>txt&&txt!=='null'?`<div style="margin-top:12px"><div style="font-size:11px;font-weight:700;color:${cor};text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${titulo}</div><div style="font-size:13px;line-height:1.6;color:var(--texto)">${escHtml(txt)}</div></div>`:'';
   return `<div class="card"><div class="card-body">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">${selo}<span style="font-size:11px;color:#64748b">${r.documentos||'?'} documentos · resumo por IA</span></div>
-    <div style="font-size:13px;line-height:1.6;color:#e2e8f0">${r.resumo||'—'}</div>
+    <div style="font-size:13px;line-height:1.6;color:var(--texto)">${escHtml(r.resumo||ia.resumo||'—')}</div>
+    ${linha('Situação atual','var(--azul3)',ia.situacao_atual)}
     ${prazo}
-    ${ia.ultimo_ato&&ia.ultimo_ato!=='null'?`<div style="font-size:11px;color:#64748b;margin-top:6px">Último ato: ${ia.ultimo_ato}</div>`:''}
-    ${r.pdf?`<div style="margin-top:12px"><a class="btn btn-secondary btn-sm" href="${r.pdf}" target="_blank" rel="noopener">📄 Abrir íntegra (PDF)</a></div>`:''}
+    ${sec('Histórico','#64748b',ia.historico)}
+    ${sec('O que fazer','#15803d',ia.o_que_fazer)}
+    ${sec('Pontos de atenção','#b45309',ia.pontos_atencao)}
+    ${linha('Estratégia','#1e3a8a',ia.estrategia)}
+    ${ia.ultimo_ato&&ia.ultimo_ato!=='null'?`<div style="font-size:11px;color:#64748b;margin-top:10px">Último ato: ${escHtml(ia.ultimo_ato)}</div>`:''}
+    <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+      ${r.pdf?`<a class="btn btn-secondary btn-sm" href="${r.pdf}" target="_blank" rel="noopener">📄 Abrir íntegra (PDF)</a>`:''}
+      <button class="btn btn-secondary btn-sm" onclick="autosIARegerar('${id}')">🔄 Atualizar resumo</button>
+    </div>
     <div style="font-size:11px;color:#64748b;margin-top:10px">⚠️ Resumo gerado por IA — confira sempre com os autos antes de agir.</div>
   </div></div>`;
+}
+async function autosIARegerar(id){
+  const el=document.getElementById('proc-autosia');
+  if(el)el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;margin:0">🔄 Atualizando o resumo com a IA... (grátis, alguns segundos)</p></div></div>`;
+  const r=await chamarFuncao('autos-ia',{action:'regerar_resumo',processo_id:id});
+  if(!r||r.erro){toast('Erro: '+((r&&r.erro)||'falha'),'erro');carregarAutosIA(id);return;}
+  renderAutosIA(id,{estado:'pronto',...r});
+  toast('✅ Resumo atualizado!','ok');
 }
 async function autosIApreview(id){
   toast('Consultando quantidade de documentos...','');
@@ -4416,11 +4434,11 @@ async function verParcelas(honId,nome){
   abrirModal(`Parcelas — ${nome}`,
     !data?.length?'<div class="empty-state"><div class="icon">💰</div><p>Sem parcelas.</p></div>':
     `<table style="width:100%;border-collapse:collapse">
-      <thead><tr><th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid #e2e8f0">Nº</th>
-        <th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid #e2e8f0">Vencimento</th>
-        <th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid #e2e8f0">Valor</th>
-        <th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid #e2e8f0">Status</th>
-        <th style="padding:8px;border-bottom:1px solid #e2e8f0"></th></tr></thead>
+      <thead><tr><th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid var(--texto)">Nº</th>
+        <th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid var(--texto)">Vencimento</th>
+        <th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid var(--texto)">Valor</th>
+        <th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid var(--texto)">Status</th>
+        <th style="padding:8px;border-bottom:1px solid var(--texto)"></th></tr></thead>
       <tbody>${data.map(p=>`<tr>
         <td style="padding:8px;font-size:13px">${p.numero||'—'}</td>
         <td style="padding:8px;font-size:13px">${p.vencimento?new Date(p.vencimento+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
@@ -4661,7 +4679,7 @@ function pConfig(){
   <div class="config-section">
     <h3>👥 Usuários do Sistema</h3>
     <table style="max-width:500px;width:100%;border-collapse:collapse">
-      <thead><tr><th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid #e2e8f0">E-mail</th><th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid #e2e8f0">Papel</th></tr></thead>
+      <thead><tr><th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid var(--texto)">E-mail</th><th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid var(--texto)">Papel</th></tr></thead>
       <tbody>
         <tr><td style="padding:8px;font-size:13px">juridico1@advocaciabecker.com</td><td style="padding:8px"><span class="tag ativo">Admin</span></td></tr>
         <tr><td style="padding:8px;font-size:13px">cibele@advocaciabecker.com</td><td style="padding:8px"><span class="tag andamento">Advogada</span></td></tr>
