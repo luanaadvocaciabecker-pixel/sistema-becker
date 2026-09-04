@@ -2298,9 +2298,9 @@ async function pDashboard(){
     <div><p class="dash-kpi-title">${titulo}</p><p class="dash-kpi-value">${valor}</p><div class="dash-kpi-sub">${sub}</div></div>
     <div class="dash-go">›</div>
   </div>`;
-  const alertCard=(icon,titulo,valor,label,pagina,cor='#D4AF37',bg='rgba(212,175,55,.12)')=>`<div class="dash-alert" onclick="ir('${pagina}')">
+  const alertCard=(icon,titulo,valor,label,pagina,cor='#D4AF37',bg='rgba(212,175,55,.12)',extra='')=>`<div class="dash-alert" onclick="ir('${pagina}')">
     <div class="dash-alert-bubble" style="background:${bg};color:${cor}">${iconeMenu(icon)}</div>
-    <div><p class="dash-alert-title">${titulo}</p><span class="dash-alert-value" style="color:${cor}">${valor}</span><span class="dash-alert-word">${label}</span></div>
+    <div><p class="dash-alert-title">${titulo}</p><span class="dash-alert-value" style="color:${cor}">${valor}</span><span class="dash-alert-word">${label}</span>${extra?`<div style="font-size:11px;color:#64748b;margin-top:3px;font-weight:600">${extra}</div>`:''}</div>
     <div class="dash-go">›</div>
   </div>`;
   const action=(icon,linha1,linha2,acao)=>`<div class="dash-action" onclick="${acao}">
@@ -2311,7 +2311,7 @@ async function pDashboard(){
 
   const [
     clientes, judiciais, adm, extra, prazosHoje, prazos7, audHoje, audProx,
-    movs, honorarios, alvaras, docs
+    movs, honorarios, alvaras, docs, prazosAbertos, audFuturas
   ]=await Promise.all([
     safe(supa.from('clientes').select('id',{count:'exact'})),
     safe(somenteProcessosPrincipais(supa.from('processos').select('id,situacao',{count:'exact'}))),
@@ -2324,7 +2324,9 @@ async function pDashboard(){
     safe(supa.from('movimentacoes').select('id,data,descricao,tipo,processos(numero,clientes(nome))').in('tipo',TIPOS_MOVIMENTACAO_PROCESSUAL).order('data',{ascending:false}).limit(5)),
     safe(supa.from('honorarios').select('id,valor_total,status').limit(500)),
     safe(supa.from('alvaras').select('id,valor,etapa,status').limit(500)),
-    safe(supa.from('documentos').select('id',{count:'exact'}))
+    safe(supa.from('documentos').select('id',{count:'exact'})),
+    safe(supa.from('prazos').select('id',{count:'exact'}).eq('cumprido',false)),
+    safe(supa.from('audiencias').select('id',{count:'exact'}).gte('data',hojeIso))
   ]);
 
   const totalClientes=countOf(clientes);
@@ -2333,6 +2335,8 @@ async function pDashboard(){
   const totalExtra=countOf(extra);
   const totalPrazosHoje=countOf(prazosHoje);
   const totalAudHoje=countOf(audHoje);
+  const totalPrazosAbertos=countOf(prazosAbertos);
+  const totalAudFuturas=countOf(audFuturas);
   const alvRows=alvaras.data||[];
   const alvarasAguardando=alvRows.filter(a=>/aguardando/i.test(a.etapa||a.status||'')).length||alvRows.filter(a=>!/finalizado|repassado|sacado/i.test(a.etapa||a.status||'')).length;
   const valorAlvaras=alvRows.reduce((s,a)=>s+(Number(a.valor)||0),0);
@@ -2372,8 +2376,8 @@ async function pDashboard(){
     </div>
 
     <div class="dash-alert-row">
-      ${alertCard('clock','Prazos vencem hoje',totalPrazosHoje,'prazos','prazos','#EF3340','rgba(239,51,64,.10)')}
-      ${alertCard('usuarios','Audiências hoje',totalAudHoje,'audiências','audiencias','#EA580C','rgba(234,88,12,.10)')}
+      ${alertCard('clock','Prazos vencem hoje',totalPrazosHoje,'prazos','prazos','#EF3340','rgba(239,51,64,.10)',`Total em aberto: ${totalPrazosAbertos.toLocaleString('pt-BR')}`)}
+      ${alertCard('usuarios','Audiências hoje',totalAudHoje,'audiências','audiencias','#EA580C','rgba(234,88,12,.10)',`Próximas agendadas: ${totalAudFuturas.toLocaleString('pt-BR')}`)}
       ${/* alerta DJEN pendente oculto (redundante com o Legal Mail) */ ''}
       ${alertCard('money','Alvarás aguardando saque',alvarasAguardando,'alvarás','alvaras','#15803D','rgba(21,128,61,.10)')}
     </div>
