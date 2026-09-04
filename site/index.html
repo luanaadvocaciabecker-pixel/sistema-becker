@@ -3130,7 +3130,7 @@ async function abrirProcesso(id){
         ${campo('Valor da causa',p.valor_causa!=null?fmtMoeda(p.valor_causa):'')}
         ${campo('Atualizado em',atualizado)}
       </div>
-      ${p.observacoes?`<div style="margin-top:14px;padding:12px;background:rgba(13,27,42,0.8);border-radius:8px;font-size:13px;color:#A1A1AA;line-height:1.6;border-left:3px solid var(--azul3)">${p.observacoes}</div>`:''}
+      ${p.observacoes?(function(){const at=/distrato|⚠️|aten[cç][aã]o/i.test(p.observacoes||'');return `<div style="margin-top:14px;padding:12px;background:${at?'rgba(239,68,68,0.10)':'var(--card)'};border-radius:8px;font-size:13px;color:${at?'#b91c1c':'var(--texto)'};font-weight:${at?'600':'400'};line-height:1.6;border-left:3px solid ${at?'#ef4444':'var(--azul3)'};white-space:pre-wrap">${p.observacoes}</div>`;})():''}
     </div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start" id="proc-cols">
