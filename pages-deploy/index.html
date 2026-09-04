@@ -1677,6 +1677,19 @@ async function fetchAuth(url,opts){
   }
   return res;
 }
+// Chama uma Edge Function com o token do usuário logado. Devolve o JSON (ou {erro}).
+async function chamarFuncao(nome,corpo){
+  try{
+    const r=await fetchAuth(`${SUPA_URL}/functions/v1/${nome}`,{
+      method:'POST',
+      headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Content-Type':'application/json'},
+      body:JSON.stringify(corpo||{})
+    });
+    const t=await r.text();let j=null;try{j=t?JSON.parse(t):null;}catch(_){j={raw:t};}
+    if(!r.ok)return {erro:(j&&j.erro)||('http '+r.status)};
+    return j||{};
+  }catch(e){return {erro:String(e)};}
+}
 let usuarioAtual=null,modalAcao=null,clientesCache=[];
 let processosFiltro={busca:'',situacao:'',cliente:'',resp:'',meus:false,off:0};
 function pagProc(dir){const total=window._prCount||0;let off=(processosFiltro.off||0)+dir*50;if(off<0)off=0;if(off>=total)return;processosFiltro.off=off;buscarProcessos(true);window.scrollTo({top:0,behavior:'smooth'});}
@@ -3134,11 +3147,91 @@ async function abrirProcesso(id){
     <div><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">⏰ Prazos</h4><div id="proc-prazos">Carregando...</div></div>
   </div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🏛️ Audiências</h4><div id="proc-audiencias">Carregando...</div></div>
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">🤖 Autos + Inteligência</h4><div id="proc-autosia">Carregando...</div></div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:#cbd5e1">📄 Documentos & íntegra</h4><div id="proc-docs">Carregando...</div></div>`;
   carregarMovsProcesso(id);
   carregarPrazosProcesso(id);
   carregarAudienciasProcesso(id);
+  carregarAutosIA(id);
   carregarDocsProcesso(id);
+}
+// ─── AUTOS + IA (sob demanda, com custo controlado) ──────────────────────────
+async function carregarAutosIA(id){
+  const el=document.getElementById('proc-autosia');if(!el)return;
+  const r=await chamarFuncao('autos-ia',{action:'get',processo_id:id});
+  renderAutosIA(id,r);
+  if(r&&(r.estado==='processando'||r.estado==='processando_ia'||r.estado==='baixando'))autosIApoll(id);
+}
+function renderAutosIA(id,r){
+  const el=document.getElementById('proc-autosia');if(!el)return;
+  if(r&&r.erro){
+    const semVinc=/vínculo|vinculo|Legal Mail/i.test(r.erro||'');
+    el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;color:#94a3b8;margin:0">${semVinc?'Este processo não está vinculado ao Legal Mail — a íntegra não está disponível para puxar automaticamente.':('Não foi possível carregar os autos. '+(r.erro||''))}</p></div></div>`;
+    return;
+  }
+  const est=r?r.estado:'nenhum';
+  if(est==='pronto'){el.innerHTML=cardAutosPronto(id,r);return;}
+  if(est==='processando'||est==='processando_ia'||est==='baixando'){
+    el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;margin:0">⏳ Baixando a íntegra e lendo com a IA... pode levar alguns minutos. Pode continuar usando o sistema — o resumo aparece aqui quando ficar pronto.</p></div></div>`;
+    return;
+  }
+  if(est==='erro'||est==='erro_ia'){
+    el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;color:#f87171;margin:0 0 10px">Falha ao processar os autos${r&&r.erro?': '+r.erro:''}.</p><button class="btn btn-secondary btn-sm" onclick="autosIApreview('${id}')">Tentar de novo</button></div></div>`;
+    return;
+  }
+  el.innerHTML=`<div class="card"><div class="card-body">
+    <p style="font-size:13px;color:#cbd5e1;margin:0 0 10px">Baixa a <strong>íntegra do processo</strong> (todas as peças) e a IA lê o <strong>último despacho</strong> pra te dizer o que precisa ser feito e se o prazo é de 💰 custas ou 📎 documentos.</p>
+    <p style="font-size:12px;color:#94a3b8;margin:0 0 12px">💡 Custa R$ 0,02 por documento. Você vê a contagem e o valor <strong>antes</strong> de confirmar — nada é cobrado sem o seu OK.</p>
+    <button class="btn btn-primary btn-sm" onclick="autosIApreview('${id}')">🤖 Puxar autos + resumo por IA</button>
+  </div></div>`;
+}
+function cardAutosPronto(id,r){
+  const ia=r.ia||{};
+  const prov=ia.providencia;
+  const selo=prov==='custas'?'<span class="tag" style="background:#7c2d12;color:#fed7aa">💰 Custas</span>':prov==='documentos'?'<span class="tag" style="background:#1e3a8a;color:#bfdbfe">📎 Documentos</span>':'<span class="tag">Geral</span>';
+  const prazo=ia.data_final&&ia.data_final!=='null'?`<div style="font-size:12px;color:#fbbf24;margin-top:6px">⏰ Prazo indicado: ${ia.prazo_dias&&ia.prazo_dias!=='null'?ia.prazo_dias+' dias · ':''}${ia.data_final}</div>`:'';
+  return `<div class="card"><div class="card-body">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">${selo}<span style="font-size:11px;color:#64748b">${r.documentos||'?'} documentos · resumo por IA</span></div>
+    <div style="font-size:13px;line-height:1.6;color:#e2e8f0">${r.resumo||'—'}</div>
+    ${prazo}
+    ${ia.ultimo_ato&&ia.ultimo_ato!=='null'?`<div style="font-size:11px;color:#64748b;margin-top:6px">Último ato: ${ia.ultimo_ato}</div>`:''}
+    ${r.pdf?`<div style="margin-top:12px"><a class="btn btn-secondary btn-sm" href="${r.pdf}" target="_blank" rel="noopener">📄 Abrir íntegra (PDF)</a></div>`:''}
+    <div style="font-size:11px;color:#64748b;margin-top:10px">⚠️ Resumo gerado por IA — confira sempre com os autos antes de agir.</div>
+  </div></div>`;
+}
+async function autosIApreview(id){
+  toast('Consultando quantidade de documentos...','');
+  const r=await chamarFuncao('autos-ia',{action:'preview',processo_id:id});
+  if(!r||r.erro){toast('Erro: '+((r&&r.erro)||'falha'),'erro');return;}
+  if(r.ja_baixado){carregarAutosIA(id);return;}
+  const n=r.documentos||0;const custo=(r.custo||0).toFixed(2).replace('.',',');
+  if(!n){toast('Nenhum documento disponível para este processo.','erro');return;}
+  if(!confirm(`Este processo tem ${n} documento(s).\n\nBaixar a íntegra e gerar o resumo por IA vai custar aproximadamente R$ ${custo} (R$ 0,02 por documento).\n\nConfirmar?`))return;
+  autosIArequest(id);
+}
+async function autosIArequest(id){
+  const el=document.getElementById('proc-autosia');
+  if(el)el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;margin:0">⏳ Solicitando os autos...</p></div></div>`;
+  const r=await chamarFuncao('autos-ia',{action:'request',processo_id:id});
+  if(!r||r.erro){toast('Erro ao solicitar: '+((r&&r.erro)||''),'erro');carregarAutosIA(id);return;}
+  toast('Download iniciado. O resumo aparece aqui quando ficar pronto.','ok');
+  renderAutosIA(id,{estado:'processando',documentos:r.documentos});
+  autosIApoll(id);
+}
+function autosIApoll(id){
+  window._autosPoll=window._autosPoll||{};
+  if(window._autosPoll[id])return;
+  window._autosPoll[id]=true;
+  let n=0;
+  const tick=async()=>{
+    n++;
+    const r=await chamarFuncao('autos-ia',{action:'status',processo_id:id});
+    if(r&&r.estado==='pronto'){window._autosPoll[id]=false;carregarAutosIA(id);toast('✅ Resumo dos autos pronto!','ok');return;}
+    if(r&&(r.estado==='erro'||r.estado==='erro_ia')){window._autosPoll[id]=false;carregarAutosIA(id);return;}
+    if(n>=40){window._autosPoll[id]=false;return;}
+    setTimeout(tick,15000);
+  };
+  setTimeout(tick,15000);
 }
 async function carregarAudienciasProcesso(id){
   const el=document.getElementById('proc-audiencias');if(!el)return;
