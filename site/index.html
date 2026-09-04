@@ -5512,7 +5512,14 @@ function pBeckerIA(modo){
     corpo=`<div style="max-width:600px;margin:0 auto"><div class="card"><div class="card-body" style="text-align:center;padding:40px">
       <div style="font-size:48px;margin-bottom:16px">📋</div>
       <h3 style="color:var(--azul3);margin-bottom:12px">Resumo de Atendimento</h3>
-      <p style="color:rgba(255,255,255,.5);font-size:13px;line-height:1.8;margin-bottom:20px">Cole o texto de um atendimento para gerar um resumo estruturado.</p>
+      <p style="color:rgba(255,255,255,.5);font-size:13px;line-height:1.8;margin-bottom:16px">Cole o texto de um atendimento — ou carregue um atendimento já cadastrado.</p>
+      <div class="form-field" style="text-align:left;margin-bottom:10px">
+        <div style="display:flex;gap:8px">
+          <input id="ia-atend-busca" placeholder="Buscar cliente para carregar um atendimento..." style="flex:1;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:10px;padding:9px 12px;color:var(--texto);font-family:inherit;font-size:13px" onkeydown="if(event.key==='Enter'){event.preventDefault();beckerIABuscarAtend()}">
+          <button class="btn btn-secondary" onclick="beckerIABuscarAtend()">Buscar</button>
+        </div>
+        <div id="ia-atend-lista" style="margin-top:8px"></div>
+      </div>
       <div class="form-field" style="text-align:left;margin-bottom:16px">
         <textarea id="ia-texto-atend" rows="6" style="width:100%;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:13px;resize:vertical" placeholder="Cole aqui o texto do atendimento..."></textarea>
       </div>
@@ -5635,7 +5642,49 @@ async function beckerIABuscar(){
 
 
 
-// Resumo de atendimento (Gemini)
+// estado da tela Becker IA
+window._iaAtendId=null; window._iaUltimoResumo=''; window._iaTransc=''; window._iaTranscResumo='';
+window._iaDocProcId=null; window._iaDocCliId=null;
+function beckerIAResumoTexto(r){
+  const L=(t,a)=>Array.isArray(a)&&a.length?`\n\n${t}:\n- `+a.join('\n- '):'';
+  return (r.resumo||'')+L('Pontos principais',r.pontos)+L('Pendências',r.pendencias)+L('Próximos passos',r.proximos_passos);
+}
+// salva um arquivo de texto em documentos-clientes + linha em documentos
+async function beckerIASalvarTextoDoc(nome,texto,procId,cliId){
+  if(!procId&&!cliId){toast('Vincule a um processo ou cliente primeiro.','erro');return false;}
+  const path=`ia/${procId?('proc'+procId):('cli'+cliId)}/${Date.now()}_${nome.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+  const up=await fetch(`${SUPA_URL}/storage/v1/object/documentos-clientes/${path}`,{method:'POST',headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Content-Type':'text/markdown','x-upsert':'true'},body:new Blob([texto],{type:'text/markdown'})});
+  if(!up.ok){toast('Erro ao salvar arquivo.','erro');return false;}
+  const url=`${SUPA_URL}/storage/v1/object/public/documentos-clientes/${path}`;
+  const row={nome,tipo:'text/markdown',url,tamanho:texto.length}; if(procId)row.processo_id=procId; if(cliId)row.cliente_id=cliId;
+  const sv=await fetch(`${SUPA_URL}/rest/v1/documentos`,{method:'POST',headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Prefer':'return=minimal'},body:JSON.stringify(row)});
+  if(!sv.ok){toast('Arquivo salvo, mas erro no registro.','erro');return false;}
+  toast('✅ Salvo no processo/cliente!','ok');return true;
+}
+
+// ---- Resumo de atendimento (Gemini) ----
+async function beckerIABuscarAtend(){
+  const q=(document.getElementById('ia-atend-busca')?.value||'').trim();
+  const el=document.getElementById('ia-atend-lista'); if(!el)return;
+  if(q.length<2){el.innerHTML='<p style="font-size:12px;color:#64748b">Digite ao menos 2 letras.</p>';return;}
+  el.innerHTML='<p style="font-size:12px;color:#64748b">Buscando...</p>';
+  const{data}=await supa.from('clientes').select('id,nome').ilike('nome','%'+q+'%').order('nome').limit(8);
+  if(!data?.length){el.innerHTML='<p style="font-size:12px;color:#64748b">Nenhum cliente encontrado.</p>';return;}
+  el.innerHTML=data.map(c=>`<div style="padding:7px 10px;border:1px solid rgba(255,255,255,.08);border-radius:8px;margin-bottom:4px;cursor:pointer;font-size:13px" onclick="beckerIAListarAtend('${c.id}')">👤 ${escHtml(c.nome)}</div>`).join('');
+}
+async function beckerIAListarAtend(clienteId){
+  const el=document.getElementById('ia-atend-lista');
+  el.innerHTML='<p style="font-size:12px;color:#64748b">Carregando atendimentos...</p>';
+  const{data}=await supa.from('atendimentos').select('id,data_atendimento,tipo,descricao').eq('cliente_id',clienteId).order('data_atendimento',{ascending:false}).limit(15);
+  if(!data?.length){el.innerHTML='<p style="font-size:12px;color:#64748b">Cliente sem atendimentos registrados. Cole o texto manualmente abaixo.</p>';return;}
+  el.innerHTML=data.map(a=>`<div style="padding:7px 10px;border:1px solid rgba(255,255,255,.08);border-radius:8px;margin-bottom:4px;cursor:pointer;font-size:12px" onclick="beckerIACarregarAtend('${a.id}')"><b>${a.data_atendimento?new Date(a.data_atendimento+'T12:00:00').toLocaleDateString('pt-BR'):''}</b> · ${escHtml(a.tipo||'')} — ${escHtml((a.descricao||'').slice(0,70))}${(a.descricao||'').length>70?'...':''}</div>`).join('');
+}
+async function beckerIACarregarAtend(id){
+  const{data}=await supa.from('atendimentos').select('descricao').eq('id',id).single();
+  const ta=document.getElementById('ia-texto-atend'); if(ta)ta.value=(data&&data.descricao)||'';
+  window._iaAtendId=id;
+  document.getElementById('ia-atend-lista').innerHTML='<p style="font-size:12px;color:#4ade80">✓ Atendimento carregado abaixo. Clique em “Gerar Resumo”.</p>';
+}
 async function beckerIAResumoAtend(){
   const texto=(document.getElementById('ia-texto-atend')?.value||'').trim();
   const res=document.getElementById('ia-resumo-atend-resultado');
@@ -5643,16 +5692,24 @@ async function beckerIAResumoAtend(){
   res.innerHTML='<div style="text-align:center;padding:24px;color:rgba(255,255,255,.4)">✨ Resumindo...</div>';
   const r=await chamarFuncao('becker-ia',{action:'resumo_atendimento',texto});
   if(!r||r.erro){res.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;color:#f87171">Erro: ${(r&&r.erro)||'falha'}</p></div></div>`;return;}
+  window._iaUltimoResumo=beckerIAResumoTexto(r);
   const lista=(arr)=>Array.isArray(arr)&&arr.length?('<ul style="margin:6px 0 0;padding-left:18px;font-size:13px;line-height:1.7">'+arr.map(x=>`<li>${escHtml(x)}</li>`).join('')+'</ul>'):'<p style="font-size:12px;color:#64748b;margin:4px 0 0">—</p>';
+  const btnSalvar=window._iaAtendId?`<button class="btn btn-primary btn-sm" style="margin-top:14px;margin-right:6px" onclick="beckerIASalvarResumoAtend()">💾 Salvar no atendimento</button>`:'';
   res.innerHTML=`<div class="card"><div class="card-body">
     <div style="font-size:13px;line-height:1.7;margin-bottom:12px">${escHtml(r.resumo||'')}</div>
     <div style="font-size:11px;font-weight:700;color:var(--azul3);text-transform:uppercase;letter-spacing:.5px">Pontos principais</div>${lista(r.pontos)}
     <div style="font-size:11px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:.5px;margin-top:12px">Pendências</div>${lista(r.pendencias)}
     <div style="font-size:11px;font-weight:700;color:#4ade80;text-transform:uppercase;letter-spacing:.5px;margin-top:12px">Próximos passos</div>${lista(r.proximos_passos)}
-    <button class="btn btn-secondary btn-sm" style="margin-top:14px" onclick="navigator.clipboard.writeText(this.parentElement.innerText).then(()=>toast('Copiado!','ok'))">📋 Copiar</button>
+    ${btnSalvar}<button class="btn btn-secondary btn-sm" style="margin-top:14px" onclick="navigator.clipboard.writeText(${JSON.stringify(window._iaUltimoResumo)}).then(()=>toast('Copiado!','ok'))">📋 Copiar</button>
   </div></div>`;
 }
-// Transcrição de áudio (Gemini) — lê o arquivo como base64 e envia
+async function beckerIASalvarResumoAtend(){
+  if(!window._iaAtendId){toast('Carregue um atendimento cadastrado primeiro.','erro');return;}
+  const{error}=await supa.from('atendimentos').update({resumo:window._iaUltimoResumo||''}).eq('id',window._iaAtendId);
+  toast(error?'Erro ao salvar.':'✅ Resumo salvo no atendimento!',error?'erro':'ok');
+}
+
+// ---- Transcrição de áudio (Gemini) ----
 async function beckerIATranscricao(input){
   const f=input&&input.files&&input.files[0];
   const res=document.getElementById('ia-transc-resultado');
@@ -5663,24 +5720,90 @@ async function beckerIATranscricao(input){
     const b64=await new Promise((ok,err)=>{const fr=new FileReader();fr.onload=()=>ok(String(fr.result));fr.onerror=err;fr.readAsDataURL(f);});
     const r=await chamarFuncao('becker-ia',{action:'transcricao',audio_b64:b64,mime:f.type||'audio/mpeg'});
     if(!r||r.erro){res.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;color:#f87171">Erro: ${(r&&r.erro)||'falha'}</p></div></div>`;return;}
+    window._iaTransc=r.texto||''; window._iaTranscResumo='';
     res.innerHTML=`<div class="card"><div class="card-body">
       <div style="font-size:11px;font-weight:700;color:var(--azul3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Transcrição — ${escHtml(f.name)}</div>
       <div style="white-space:pre-wrap;font-size:13px;line-height:1.6">${escHtml(r.texto||'(vazio)')}</div>
-      <button class="btn btn-secondary btn-sm" style="margin-top:12px" onclick="navigator.clipboard.writeText(${JSON.stringify(r.texto||'')}).then(()=>toast('Copiado!','ok'))">📋 Copiar</button>
+      <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText(${JSON.stringify(r.texto||'')}).then(()=>toast('Copiado!','ok'))">📋 Copiar</button>
+        <button class="btn btn-secondary btn-sm" onclick="beckerIATranscResumir()">✨ Gerar resumo</button>
+        <button class="btn btn-primary btn-sm" onclick="beckerIATranscSalvar()">💾 Salvar como atendimento</button>
+      </div>
+      <div id="ia-transc-resumo" style="margin-top:12px"></div>
+      <div id="ia-transc-save" style="margin-top:8px"></div>
     </div></div>`;
   }catch(e){res.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;color:#f87171">Erro ao ler o áudio.</p></div></div>`;}
 }
-// Geração de documentos (Gemini) — abre form de contexto e gera rascunho
+async function beckerIATranscResumir(){
+  const el=document.getElementById('ia-transc-resumo'); if(!window._iaTransc){return;}
+  el.innerHTML='<p style="font-size:12px;color:#64748b">✨ Resumindo a transcrição...</p>';
+  const r=await chamarFuncao('becker-ia',{action:'resumo_atendimento',texto:window._iaTransc});
+  if(!r||r.erro){el.innerHTML=`<p style="font-size:12px;color:#f87171">Erro: ${(r&&r.erro)||'falha'}</p>`;return;}
+  window._iaTranscResumo=beckerIAResumoTexto(r);
+  el.innerHTML=`<div style="padding:12px;background:rgba(13,27,42,.6);border-radius:8px;border-left:3px solid var(--azul3);white-space:pre-wrap;font-size:13px;line-height:1.6">${escHtml(window._iaTranscResumo)}</div>`;
+}
+function beckerIATranscSalvar(){
+  const el=document.getElementById('ia-transc-save');
+  el.innerHTML=`<div style="display:flex;gap:8px;margin-top:6px">
+    <input id="ia-transc-cli" placeholder="Cliente para vincular..." style="flex:1;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 10px;color:var(--texto);font-family:inherit;font-size:13px" onkeydown="if(event.key==='Enter'){event.preventDefault();beckerIATranscBuscarCli()}">
+    <button class="btn btn-secondary btn-sm" onclick="beckerIATranscBuscarCli()">Buscar</button>
+  </div><div id="ia-transc-cli-lista" style="margin-top:6px"></div>`;
+}
+async function beckerIATranscBuscarCli(){
+  const q=(document.getElementById('ia-transc-cli')?.value||'').trim();
+  const el=document.getElementById('ia-transc-cli-lista'); if(q.length<2){el.innerHTML='<p style="font-size:12px;color:#64748b">Digite ao menos 2 letras.</p>';return;}
+  const{data}=await supa.from('clientes').select('id,nome').ilike('nome','%'+q+'%').order('nome').limit(8);
+  if(!data?.length){el.innerHTML='<p style="font-size:12px;color:#64748b">Nenhum cliente.</p>';return;}
+  el.innerHTML=data.map(c=>`<div style="padding:6px 10px;border:1px solid rgba(255,255,255,.08);border-radius:8px;margin-bottom:4px;cursor:pointer;font-size:13px" onclick="beckerIATranscCriar('${c.id}')">👤 ${escHtml(c.nome)}</div>`).join('');
+}
+async function beckerIATranscCriar(clienteId){
+  const hoje=new Date().toISOString().slice(0,10);
+  const row={cliente_id:clienteId,data_atendimento:hoje,tipo:'Áudio',descricao:window._iaTransc||'',resumo:window._iaTranscResumo||null};
+  const{error}=await supa.from('atendimentos').insert(row);
+  toast(error?'Erro ao salvar atendimento.':'✅ Atendimento criado a partir do áudio!',error?'erro':'ok');
+  if(!error)document.getElementById('ia-transc-save').innerHTML='<p style="font-size:12px;color:#4ade80">✓ Atendimento salvo.</p>';
+}
+
+// ---- Geração de documentos (Gemini) ----
 function beckerIADocEscolher(tipo){
   const form=document.getElementById('ia-doc-form');
   document.getElementById('ia-doc-resultado').innerHTML='';
+  window._iaDocProcId=null; window._iaDocCliId=null;
   form.innerHTML=`<div class="card"><div class="card-body">
     <div style="font-size:13px;font-weight:600;color:var(--azul3);margin-bottom:10px">📄 ${escHtml(tipo)}</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <input id="ia-doc-proc" placeholder="Nº do processo (CNJ) — opcional, puxa os dados" style="flex:1;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 10px;color:var(--texto);font-family:inherit;font-size:13px" onkeydown="if(event.key==='Enter'){event.preventDefault();beckerIADocPuxar()}">
+      <button class="btn btn-secondary btn-sm" onclick="beckerIADocPuxar()">⤵️ Puxar dados</button>
+    </div>
+    <div id="ia-doc-vinculo" style="font-size:12px;color:#64748b;margin-bottom:8px"></div>
     <div class="form-field" style="margin-bottom:12px">
-      <textarea id="ia-doc-contexto" rows="5" style="width:100%;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:13px;resize:vertical" placeholder="Descreva o caso e os dados: partes, fatos, pedido, valores, prazos... (o que faltar a IA marca como [PREENCHER])"></textarea>
+      <textarea id="ia-doc-contexto" rows="6" style="width:100%;background:rgba(7,18,32,.8);border:1.5px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:13px;resize:vertical" placeholder="Descreva o caso e os dados: partes, fatos, pedido, valores, prazos... (o que faltar a IA marca como [PREENCHER])"></textarea>
     </div>
     <button class="btn btn-primary" onclick="beckerIAGerarDoc('${tipo.replace(/'/g,'')}')">✨ Gerar rascunho</button>
   </div></div>`;
+}
+async function beckerIADocPuxar(){
+  const num=(document.getElementById('ia-doc-proc')?.value||'').trim();
+  const vin=document.getElementById('ia-doc-vinculo');
+  if(!num){toast('Digite o número do processo.','erro');return;}
+  vin.innerHTML='Buscando processo...';
+  const{data}=await supa.from('processos').select('numero,tribunal,vara,comarca,classe_processual,parte_contraria,cliente_id,clientes(id,nome,cpf_cnpj,rua,cep)').ilike('numero','%'+num+'%').limit(1);
+  const p=data&&data[0];
+  if(!p){vin.innerHTML='<span style="color:#fbbf24">Processo não encontrado — pode digitar o contexto manualmente.</span>';return;}
+  window._iaDocProcId=null; window._iaDocCliId=p.clientes?.id||p.cliente_id||null;
+  // pega o id do processo p/ salvar
+  const{data:pid}=await supa.from('processos').select('id').eq('numero',p.numero).limit(1);
+  window._iaDocProcId=pid&&pid[0]?pid[0].id:null;
+  const cli=p.clientes||{};
+  const bloco=[
+    `Processo nº ${p.numero||''} — ${p.tribunal||''} ${p.vara?('/ '+p.vara):''} ${p.comarca?('/ '+p.comarca):''}`.trim(),
+    p.classe_processual?`Classe: ${p.classe_processual}`:'',
+    `Cliente (parte representada): ${cli.nome||'[PREENCHER]'}${cli.cpf_cnpj?(', CPF/CNPJ '+cli.cpf_cnpj):''}${cli.rua?(', end. '+cli.rua):''}${cli.cep?(', CEP '+cli.cep):''}`,
+    p.parte_contraria?`Parte contrária: ${p.parte_contraria}`:'',
+    '','FATOS / PEDIDO (completar):',''
+  ].filter(x=>x!=='' || true).join('\n');
+  const ta=document.getElementById('ia-doc-contexto'); ta.value=bloco+(ta.value?('\n'+ta.value):'');
+  vin.innerHTML=`<span style="color:#4ade80">✓ Dados puxados de ${escHtml(p.numero)} — o rascunho poderá ser salvo neste processo.</span>`;
 }
 async function beckerIAGerarDoc(tipo){
   const contexto=(document.getElementById('ia-doc-contexto')?.value||'').trim();
@@ -5689,10 +5812,16 @@ async function beckerIAGerarDoc(tipo){
   res.innerHTML='<div style="text-align:center;padding:24px;color:rgba(255,255,255,.4)">✨ Gerando rascunho...</div>';
   const r=await chamarFuncao('becker-ia',{action:'gerar_documento',tipo,contexto});
   if(!r||r.erro){res.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;color:#f87171">Erro: ${(r&&r.erro)||'falha'}</p></div></div>`;return;}
+  window._iaUltimoDoc=r.documento||''; window._iaUltimoDocTipo=tipo;
+  const btnSalvar=(window._iaDocProcId||window._iaDocCliId)?`<button class="btn btn-primary btn-sm" style="margin-top:12px;margin-right:6px" onclick="beckerIASalvarDoc()">💾 Salvar no processo</button>`:'';
   res.innerHTML=`<div class="card"><div class="card-body">
     <div style="white-space:pre-wrap;font-size:13px;line-height:1.6;font-family:Georgia,serif">${escHtml(r.documento||'')}</div>
-    <button class="btn btn-secondary btn-sm" style="margin-top:12px" onclick="navigator.clipboard.writeText(${JSON.stringify(r.documento||'')}).then(()=>toast('Copiado!','ok'))">📋 Copiar</button>
+    ${btnSalvar}<button class="btn btn-secondary btn-sm" style="margin-top:12px" onclick="navigator.clipboard.writeText(${JSON.stringify(r.documento||'')}).then(()=>toast('Copiado!','ok'))">📋 Copiar</button>
   </div></div>`;
+}
+async function beckerIASalvarDoc(){
+  const nome=`${window._iaUltimoDocTipo||'Documento'} (IA) ${new Date().toLocaleDateString('pt-BR')}.md`;
+  await beckerIASalvarTextoDoc(nome, window._iaUltimoDoc||'', window._iaDocProcId, window._iaDocCliId);
 }
 // ---- TAREFAS INTERNAS ----
 let tarefasFiltro={status:'',responsavel:''};
