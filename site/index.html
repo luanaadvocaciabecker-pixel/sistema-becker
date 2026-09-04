@@ -1986,18 +1986,11 @@ function renderSidebarMenu(){
       ['judiciais','judicial','Todos os Processos'],['movimentacoes','refresh','Movimentações'],['prazos','clock','Prazos'],['audiencias','court','Audiências'],['documentos','folder','Documentos'],['datajud','zap','Atualização Processual']
     ])}
     <div class="nav-item" data-page="novos-negocios" data-leaf="true" onclick="ir('novos-negocios')"><span class="nav-emoji">${iconeMenu('handshake')}</span>Novos Negócios</div>
-    ${grupoMenu('administrativos','folder','Processos Administrativos','administrativos',[
-      ['administrativos','folder','Todos os Administrativos'],['movimentacoes','refresh','Movimentações'],['cartorio','file','Protocolos'],['tarefas','alert','Exigências'],['documentos','folder','Documentos']
-    ])}
+    ${/* Processos Administrativos ocultos do menu (0 cadastros, sem uso). Tabela/páginas preservadas — reativar: restaurar este grupoMenu. */ ''}
     ${grupoMenu('extrajudiciais','handshake','Extrajudiciais','extrajudiciais',[
       ['extrajudiciais','handshake','Todos os Extrajudiciais'],['cartorio','bell','Notificações'],['cartorio','chat','Negociações'],['contratos','handshake','Acordos'],['documentos','folder','Documentos']
     ])}
-    ${grupoMenu('djen','bell','DJEN','djen',[
-      ['djen','file','Publicações Novas',"ir('djen');setTimeout(()=>pDjen&&pDjen('nova'),300)"],
-      ['djen','clock','Pendentes',"ir('djen');setTimeout(()=>pDjen&&pDjen('pendente'),300)"],
-      ['djen','check','Lidas',"ir('djen');setTimeout(()=>pDjen&&pDjen('lida'),300)"],
-      ['djen','link','Vinculadas',"ir('djen');setTimeout(()=>pDjen&&pDjen('vinculada'),300)"]
-    ])}
+    ${/* DJEN oculto do menu (redundante com o Legal Mail; 10.905 publicações não lidas e 0 prazos gerados). Robô/tabela/páginas preservados — reativar: restaurar este grupoMenu. */ ''}
     ${grupoMenu('alvaras','alvara','Alvarás','alvaras',[
       ['novo-alvara','plus','Novos Alvarás',"ir('alvaras');setTimeout(()=>novoAlvara&&novoAlvara(),250)"],['alvaras','clock','Aguardando Saque'],['alvaras','bank','Sacados'],['alvaras','money','Repassados'],['alvaras','check','Finalizados']
     ])}
@@ -2373,7 +2366,7 @@ async function pDashboard(){
     <div class="dash-kpi-grid">
       ${kpi('clientes','Clientes',totalClientes.toLocaleString('pt-BR'),'Clientes ativos','clientes')}
       ${kpi('judicial','Judiciais',totalJudiciais.toLocaleString('pt-BR'),'Processos ativos','processos')}
-      ${kpi('folder','Administrativos',totalAdm.toLocaleString('pt-BR'),'Procedimentos ativos','administrativos')}
+      ${/* KPI Administrativos oculto (módulo sem uso) */ ''}
       ${kpi('handshake','Extrajudiciais',totalExtra.toLocaleString('pt-BR'),'Casos ativos','extrajudiciais')}
       ${kpi('alvara','Alvarás',fmtMoeda(valorAlvaras),'Pendentes de finalização','alvaras')}
     </div>
@@ -2381,7 +2374,7 @@ async function pDashboard(){
     <div class="dash-alert-row">
       ${alertCard('clock','Prazos vencem hoje',totalPrazosHoje,'prazos','prazos','#EF3340','rgba(239,51,64,.10)')}
       ${alertCard('usuarios','Audiências hoje',totalAudHoje,'audiências','audiencias','#EA580C','rgba(234,88,12,.10)')}
-      ${alertCard('bell','DJEN pendente',djenPendentes,'publicações','djen','#C69625','rgba(212,175,55,.13)')}
+      ${/* alerta DJEN pendente oculto (redundante com o Legal Mail) */ ''}
       ${alertCard('money','Alvarás aguardando saque',alvarasAguardando,'alvarás','alvaras','#15803D','rgba(21,128,61,.10)')}
     </div>
 
@@ -2389,20 +2382,13 @@ async function pDashboard(){
       ${action('atendimento','Novo','Atendimento',"ir('atendimento')")}
       ${action('clientes','Novo','Cliente','novoCliente()')}
       ${action('judicial','Novo','Processo',"ir('processos');setTimeout(()=>novoProcesso&&novoProcesso(),800)")}
-      ${action('folder','Novo','Administrativo',"ir('administrativos')")}
+      ${/* ação Novo Administrativo oculta (módulo sem uso) */ ''}
       ${action('handshake','Novo','Extrajudicial',"ir('extrajudiciais')")}
       ${action('alvara','Novo','Alvará',"ir('alvaras');setTimeout(()=>novoAlvara&&novoAlvara(),250)")}
     </div>
 
     <div class="dash-panel-grid">
-      <div class="dash-panel">
-        <div class="dash-panel-head">
-          <div class="dash-panel-title"><div class="dash-panel-icon">${iconeMenu('bell')}</div><div><h3>DJEN</h3><p>Publicações recentes</p></div></div>
-          <button class="dash-small-btn" onclick="ir('djen')">Ver todas</button>
-        </div>
-        ${djenRows?`<table class="dash-mini-table"><thead><tr><th>Processo</th><th>Cliente</th><th>Data</th><th></th></tr></thead><tbody>${djenRows}</tbody></table>`:empty}
-      </div>
-
+      ${/* painel DJEN oculto (redundante com o Legal Mail; publicações não trabalhadas) */ ''}
       <div class="dash-panel">
         <div class="dash-panel-head">
           <div class="dash-panel-title"><div class="dash-panel-icon">${iconeMenu('clock')}</div><div><h3>Prazos</h3><p>Próximos 7 dias</p></div></div>
