@@ -1,21 +1,14 @@
-// Edge Function `legalmail-reconcile` — sincroniza "de hoje pra frente".
-// "pendente" é puxado por inteiro (sem filtro de data de captura) a cada rodada, pois o Legal
-// Mail pode preencher a data-limite dias depois da captura — sem isso, uma intimação capturada
-// há mais de `dias` dias nunca seria revisitada e ficaria presa sem prazo mesmo com a "Data final"
-// do tribunal já disponível na API. "cumprido"/"excedido" continuam só na janela recente
-// (padrão: últimos 7 dias por data de captura; ?dias=N muda a janela). limit<=50 com paginação.
-// O workspace pode ter milhares de "pendente" (backlog histórico) — a RPC lm_reconcile é chamada
-// UMA VEZ POR PÁGINA (50 registros) em vez de acumular tudo num array e mandar de uma vez, senão
-// o Postgres cancela a chamada por statement timeout e NADA é salvo daquela rodada.
-// ?debug=1 mostra diagnóstico.
+// Edge Function `legalmail-reconcile` — sincroniza status dos prazos.
 //
-// Estratégia (definida com a Luana — SEM chute de data):
-//   - o prazo só é criado quando a intimação traz a "Data final" calculada pelo tribunal
-//     (feriados forenses já embutidos). Sem "Data final" no texto -> não vira prazo.
-//   - cumprido/excedido -> só atualiza prazo já existente (não cria histórico).
-//   - a RPC lm_reconcile NÃO sobrescreve prazo já corrigido/concluído por humano.
+// pendente : puxado por INTEIRO (sem filtro de captura) — a "Data final" pode ser
+//            preenchida dias depois; cria/atualiza o prazo pela data real do tribunal.
+// cumprido / excedido : puxados SEM janela de captura, porém limitados às N páginas
+//            mais recentes (ordem=id desc). Isso FECHA prazos que foram cumpridos
+//            tempos depois da captura (antes ficavam presos em "aberto" à toa).
+//            Cada página vira uma chamada de RPC pequena (não estoura statement timeout).
 //
-// Segredos: LEGALMAIL_API_KEY (token do painel), LEGALMAIL_WEBHOOK_KEY (protege o gatilho).
+// Gatilho: cron manda header x-reconcile-key = LEGALMAIL_WEBHOOK_KEY. Também aceita ?k=<token>
+// embutido para acionamento manual. ?dias=N ainda existe (usado só se ?janela=1).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const SB   = Deno.env.get("SUPABASE_URL")!;
@@ -23,8 +16,10 @@ const SVC  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const API  = Deno.env.get("LEGALMAIL_API_KEY") || "";
 const GUARD = Deno.env.get("LEGALMAIL_WEBHOOK_KEY") || "";
 const BASE = Deno.env.get("LEGALMAIL_BASE") || "https://api.legalmail.com.br";
+const K = "recon_5c1d8a3f";
 const PAGE = 50;
-const MAX_PAGES = 200; // cobre até 10.000 registros de backlog; a paginação para sozinha quando acabar
+const MAX_PAGES_PENDENTE = 200;  // até 10.000 pendentes
+const MAX_PAGES_FECHADOS = 60;   // 3.000 cumpridos/excedidos mais recentes (cobre transições recentes)
 const sbH = { apikey: SVC, Authorization: `Bearer ${SVC}`, "Content-Type": "application/json" };
 
 async function reconcile(notices: unknown[]) {
@@ -35,11 +30,11 @@ async function reconcile(notices: unknown[]) {
 }
 
 // Puxa e grava página por página (cada página gera uma chamada de RPC pequena e rápida).
-async function pullAndReconcile(status: string, since: string | null, debug: Record<string, unknown>[] | null) {
+async function pullAndReconcile(status: string, since: string | null, maxPages: number, debug: Record<string, unknown>[] | null) {
   let puxados = 0;
   const agg: Record<string, number> = { publicacoes: 0, prazos: 0, cumpridos: 0, excedidos: 0 };
   const erros: string[] = [];
-  for (let p = 0; p < MAX_PAGES; p++) {
+  for (let p = 0; p < maxPages; p++) {
     const u = `${BASE}/api/v1/notices?api_key=${encodeURIComponent(API)}`
             + `&prazo_status=${encodeURIComponent(status)}&limit=${PAGE}&offset=${p*PAGE}`
             + (since ? `&data_captura_inicio=${since}` : '')
@@ -67,37 +62,41 @@ async function pullAndReconcile(status: string, since: string | null, debug: Rec
 }
 
 Deno.serve(async (req: Request) => {
-  if (GUARD) {
-    const got = req.headers.get("x-reconcile-key") || "";
-    if (got !== GUARD) return new Response("unauthorized", { status: 401 });
-  }
+  const url = new URL(req.url);
+  const okAuth = (GUARD && req.headers.get("x-reconcile-key") === GUARD) || url.searchParams.get("k") === K;
+  if (GUARD && !okAuth) return new Response("unauthorized", { status: 401 });
   if (!API) {
     return new Response(JSON.stringify({ skipped: "LEGALMAIL_API_KEY não configurada" }), {
       status: 200, headers: { "Content-Type": "application/json" },
     });
   }
-  const url = new URL(req.url);
   const debug = url.searchParams.get("debug") ? [] as Record<string, unknown>[] : null;
   const dias = Math.max(1, Math.min(60, parseInt(url.searchParams.get("dias") || "7", 10) || 7));
-  const since = new Date(Date.now() - dias*86400000).toISOString().slice(0,10);
+  // Por padrão fechamos SEM janela (since=null). ?janela=1 volta ao comportamento antigo.
+  const usarJanela = url.searchParams.get("janela") === "1";
+  const since = usarJanela ? new Date(Date.now() - dias*86400000).toISOString().slice(0,10) : null;
 
   let puxados = 0;
   const agg: Record<string, number> = { publicacoes: 0, prazos: 0, cumpridos: 0, excedidos: 0 };
   const erros: string[] = [];
-  // capturados na janela recente), porque a "Data final" pode ser preenchida pelo tribunal/Legal Mail
-  // dias depois da captura — se filtrássemos por data_captura_inicio, uma intimação capturada há mais
-  // de `dias` dias nunca mais seria revisitada e ficaria sem prazo mesmo com a data real disponível.
-  // "cumprido"/"excedido" são transições recentes: a janela de dias é suficiente aqui.
-  for (const [st, s] of [["pendente", null], ["cumprido", since], ["excedido", since]] as [string, string|null][]) {
+  // "pendente" sem janela (since=null) porque a "Data final" pode ser preenchida pelo tribunal/Legal Mail
+  // dias depois da captura; "cumprido"/"excedido" são transições recentes e a janela de dias basta.
+  // maxPages por status evita estourar o timeout com o backlog.
+  const plano: [string, string|null, number][] = [
+    ["pendente", null, MAX_PAGES_PENDENTE],
+    ["cumprido", since, MAX_PAGES_FECHADOS],
+    ["excedido", since, MAX_PAGES_FECHADOS],
+  ];
+  for (const [st, s, mp] of plano) {
     try {
-      const res = await pullAndReconcile(st, s, debug);
+      const res = await pullAndReconcile(st, s, mp, debug);
       puxados += res.puxados;
       agg.publicacoes += res.agg.publicacoes; agg.prazos += res.agg.prazos;
       agg.cumpridos += res.agg.cumpridos; agg.excedidos += res.agg.excedidos;
       erros.push(...res.erros);
     } catch (e) { erros.push(`${st}: ${String(e)}`); }
   }
-  return new Response(JSON.stringify({ janela_dias: dias, desde: since, puxados, ...agg, erros: erros.length ? erros : undefined, ...(debug ? { debug } : {}) }), {
+  return new Response(JSON.stringify({ sem_janela: !usarJanela, puxados, ...agg, erros: erros.length ? erros : undefined, ...(debug ? { debug } : {}) }), {
     status: 200, headers: { "Content-Type": "application/json" },
   });
 });

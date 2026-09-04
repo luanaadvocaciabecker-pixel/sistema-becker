@@ -1,27 +1,23 @@
-// Edge Function `whatsapp` — deployada no Supabase (cópia para versionamento).
-// Recebe o webhook do WhatsApp, identifica o cliente e responde o status do
-// processo com trava de LGPD + camada de IA (tom formal-humano).
-//
-// Suporta 3 formatos de entrada (detecta sozinho):
-//   1) Meta Cloud API (oficial)  -> GET (verificação) + POST entry[].changes[].value.messages[]
-//   2) Evolution API (backup)    -> POST { data.key.remoteJid, data.message... }
-//   3) Teste manual              -> POST { test:true, from, text }
+// Edge Function `whatsapp` — recebe o webhook do WhatsApp, identifica o cliente e responde o
+// status do processo com trava de LGPD + camada de IA (Gemini, tom formal-humano).
+// Formatos de entrada: Meta Cloud API, Evolution API, WATI, e teste manual {test,from,text}.
+// Segredos: GEMINI_API_KEY (+ GEMINI_MODEL, padrão gemini-flash-lite-latest), WHATSAPP_TOKEN,
+//   e (opcionais, por canal) META_TOKEN/META_PHONE_ID, WATI_URL/WATI_TOKEN, EVOLUTION_*.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const SB = Deno.env.get("SUPABASE_URL")!;
 const SVC = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const WTOKEN = Deno.env.get("WHATSAPP_TOKEN") || ""; // tb é o verify_token do webhook Meta (GET)
-// Meta Cloud API (oficial)
-const META_TOKEN = Deno.env.get("META_TOKEN") || "";       // token permanente do WABA
-const META_PHONE_ID = Deno.env.get("META_PHONE_ID") || ""; // Phone number ID
+const WTOKEN = Deno.env.get("WHATSAPP_TOKEN") || "";
+const META_TOKEN = Deno.env.get("META_TOKEN") || "";
+const META_PHONE_ID = Deno.env.get("META_PHONE_ID") || "";
 const META_VER = Deno.env.get("META_GRAPH_VER") || "v21.0";
-// Evolution (backup)
 const EVO_URL = Deno.env.get("EVOLUTION_URL") || "";
 const EVO_KEY = Deno.env.get("EVOLUTION_KEY") || "";
 const EVO_INST = Deno.env.get("EVOLUTION_INSTANCE") || "";
-// IA
-const AI_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
-const AI_MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-haiku-4-5";
+const WATI_URL = Deno.env.get("WATI_URL") || "";
+const WATI_TOKEN = Deno.env.get("WATI_TOKEN") || "";
+const GKEY = Deno.env.get("GEMINI_API_KEY") || "";
+const GMODEL = Deno.env.get("GEMINI_MODEL") || "gemini-flash-lite-latest";
 const sbH = { apikey: SVC, Authorization: `Bearer ${SVC}`, "Content-Type": "application/json" };
 
 async function rpc(fn: string, args: unknown) {
@@ -33,13 +29,19 @@ async function logar(row: Record<string, unknown>) {
   await fetch(`${SB}/rest/v1/whatsapp_log`, { method: "POST", headers: { ...sbH, Prefer: "return=minimal" }, body: JSON.stringify(row) }).catch(() => {});
 }
 
-// Envia a resposta pelo canal configurado. Prioriza Meta; cai pro Evolution; senão modo teste.
+// Envia pela ordem de prioridade: Meta -> WATI -> Evolution. Senão modo teste (só devolve no HTTP).
 async function enviar(numero: string, texto: string): Promise<boolean> {
   if (META_TOKEN && META_PHONE_ID) {
     const r = await fetch(`https://graph.facebook.com/${META_VER}/${META_PHONE_ID}/messages`, {
       method: "POST",
       headers: { Authorization: `Bearer ${META_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({ messaging_product: "whatsapp", to: numero, type: "text", text: { body: texto } }),
+    });
+    return r.ok;
+  }
+  if (WATI_URL && WATI_TOKEN) {
+    const r = await fetch(`${WATI_URL}/api/v1/sendSessionMessage/${encodeURIComponent(numero)}?messageText=${encodeURIComponent(texto)}`, {
+      method: "POST", headers: { Authorization: WATI_TOKEN.startsWith("Bearer")?WATI_TOKEN:`Bearer ${WATI_TOKEN}`, "Content-Type": "application/json" },
     });
     return r.ok;
   }
@@ -50,7 +52,7 @@ async function enviar(numero: string, texto: string): Promise<boolean> {
     });
     return r.ok;
   }
-  return false; // modo teste: só devolve o texto na resposta HTTP
+  return false;
 }
 
 const SYSTEM_IA = [
@@ -65,17 +67,21 @@ const SYSTEM_IA = [
 ].join(" ");
 
 async function explicar(nome: string, dossie: string, pergunta: string): Promise<string | null> {
-  if (!AI_KEY) return null;
+  if (!GKEY) return null;
   const user = `Nome do cliente: ${nome}\nPergunta/mensagem do cliente: "${pergunta}"\n\nDados reais do(s) processo(s) (use apenas isto):\n${dossie}`;
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GMODEL}:generateContent?key=${encodeURIComponent(GKEY)}`, {
       method: "POST",
-      headers: { "x-api-key": AI_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-      body: JSON.stringify({ model: AI_MODEL, max_tokens: 600, system: SYSTEM_IA, messages: [{ role: "user", content: user }] })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYSTEM_IA }] },
+        contents: [{ role: "user", parts: [{ text: user }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 1200 }
+      })
     });
     if (!r.ok) return null;
     const j = await r.json();
-    const txt = (j?.content || []).map((c: any) => c?.text || "").join("").trim();
+    const txt = (j?.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("").trim();
     return txt || null;
   } catch { return null; }
 }
@@ -134,27 +140,25 @@ async function responder(telefone: string, texto: string) {
   return { texto: PEDIR_CPF, cliente_id: null, status: "pediu_cpf" };
 }
 
-// Extrai { telefone, texto } dos 3 formatos. Retorna null se não for msg de texto de cliente.
+// Extrai { telefone, texto } dos formatos: teste, Meta Cloud, WATI, Evolution.
 function extrair(body: any): { telefone: string; texto: string } | null {
-  // 1) teste manual
   if (body?.test) return { telefone: String(body.from || ""), texto: String(body.text || "") };
-
-  // 2) Meta Cloud API
   const val = body?.entry?.[0]?.changes?.[0]?.value;
   if (val) {
     const m = val.messages?.[0];
-    if (!m) return null; // status de entrega/leitura — ignora
+    if (!m) return null;
     const telefone = String(m.from || "");
-    const texto = m.text?.body
-      || m.button?.text
-      || m.interactive?.button_reply?.title
-      || m.interactive?.list_reply?.title
-      || "";
+    const texto = m.text?.body || m.button?.text || m.interactive?.button_reply?.title || m.interactive?.list_reply?.title || "";
     if (!telefone) return null;
     return { telefone, texto: String(texto) };
   }
-
-  // 3) Evolution
+  // WATI: { waId, text } ou { data:{ waId, text } }; ignora mensagens do próprio dono (owner=true)
+  const w = body?.waId ? body : (body?.data?.waId ? body.data : null);
+  if (w && (w.type ? w.type === "text" : true) && !w.owner) {
+    const telefone = String(w.waId || "");
+    const texto = String(w.text || w.textData?.text || "");
+    if (telefone && texto) return { telefone, texto };
+  }
   const d = body?.data;
   if (d) {
     if (d.key?.fromMe) return null;
@@ -164,14 +168,11 @@ function extrair(body: any): { telefone: string; texto: string } | null {
     const texto = d.message?.conversation || d.message?.extendedTextMessage?.text || d.message?.ephemeralMessage?.message?.extendedTextMessage?.text || "";
     return { telefone, texto: String(texto) };
   }
-
   return null;
 }
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
-
-  // Verificação do webhook da Meta (GET com hub.challenge)
   if (req.method === "GET") {
     const mode = url.searchParams.get("hub.mode");
     const token = url.searchParams.get("hub.verify_token");
@@ -181,17 +182,13 @@ Deno.serve(async (req) => {
     }
     return new Response("forbidden", { status: 403 });
   }
-
   try {
     const body = await req.json().catch(() => ({}));
-    // Guarda opcional só para POSTs que NÃO sejam da Meta (teste/Evolution).
-    // A Meta não manda x-webhook-token; ela é validada no GET (verify_token) acima.
     const isMeta = !!body?.entry;
     if (WTOKEN && !isMeta && !body?.test) {
       const t = req.headers.get("x-webhook-token") || url.searchParams.get("token") || "";
       if (t !== WTOKEN) return new Response("unauthorized", { status: 401 });
     }
-
     const ex = extrair(body);
     if (!ex || !ex.telefone) return new Response(JSON.stringify({ ok: true, ignored: true }), { headers: { "Content-Type": "application/json" } });
     const r = await responder(ex.telefone, ex.texto);

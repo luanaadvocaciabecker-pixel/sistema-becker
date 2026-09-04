@@ -264,3 +264,18 @@ alter table public.prazos add column if not exists categoria_fonte      text;
 -- vinculados os prazos/publicações/audiências por CNJ. Operação idempotente:
 -- reexecutar só afeta órfãos que ainda existirem.
 -- (Script executado via CTE: cnj_src -> insert processos -> update prazos/publicacoes/audiencias.)
+
+-- =====================================================================
+-- 10) Fechamento robusto de prazos (set/2026)
+-- =====================================================================
+-- legalmail-reconcile v12: cumprido/excedido puxados SEM janela de captura
+-- (limitados às 60 páginas mais recentes) — fecha prazos cumpridos tempos
+-- depois da captura, que antes ficavam presos em "aberto".
+-- IMPORTANTE: o "excedido" do Legal Mail é amplo (marca toda data vencida,
+-- ~1.608), NÃO significa "perdido". Por isso NÃO usamos o excedido do LM como
+-- "perdido" na tela. O sinal de "perdido/conferir" é o nosso: data < hoje e
+-- cumprido=false (bucket "Vencidos" da tela de Prazos).
+-- Observado: rodada completa fechou poucos prazos porque a maioria dos "vence
+-- hoje" segue como PENDENTE no próprio Legal Mail (atraso de detecção do
+-- peticionamento). Fechamento imediato desses depende de: (a) botão "✓ Cumprir"
+-- manual (já existe), ou (b) wiring do webhook peticao_status (próximo passo).
