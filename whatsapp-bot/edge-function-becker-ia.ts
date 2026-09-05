@@ -76,6 +76,14 @@ const SYS_RESUMO = [
   "Não invente fatos que não estão no texto. Linguagem clara, sem juridiquês desnecessário.",
 ].join(" ");
 
+const SYS_ASSIST = [
+  "Você é a Becker IA, assistente jurídica do escritório Becker Advogados (Brasil).",
+  "Responde perguntas de direito e de organização do escritório de forma prática, direta e em português claro (pode usar tópicos).",
+  "NUNCA invente jurisprudência, número de súmula, artigo de lei específico, valor ou prazo legal exato do qual não tenha certeza:",
+  "quando não tiver certeza, diga isso com franqueza e recomende conferir na fonte oficial ou usar a aba de Jurisprudência verificada do sistema.",
+  "Trate tudo como orientação a ser conferida por um(a) advogado(a) — não como parecer definitivo. Respeite a LGPD: não peça nem exponha dados pessoais sensíveis sem necessidade.",
+].join(" ");
+
 const SYS_DOC = [
   "Você é advogado(a) brasileiro(a) redigindo a MINUTA de um documento jurídico.",
   "Use linguagem formal e a estrutura usual do tipo de peça pedido. Onde faltar dado, marque com [PREENCHER: ...].",
@@ -131,7 +139,32 @@ Deno.serve(async (req) => {
       return json({ ok: true, texto });
     }
 
-    return json({ erro: "action inválida (resumo_atendimento|transcricao|gerar_documento)" }, 400);
+    if (action === "assistente") {
+      const pergunta = String(body.pergunta || "").trim();
+      if (pergunta.length < 2) return json({ erro: "faça uma pergunta" }, 400);
+      const hist = Array.isArray(body.historico) ? body.historico.slice(-6) : [];
+      const contents: any[] = [];
+      for (const h of hist) {
+        const role = h?.role === "assistant" ? "model" : "user";
+        const t = String(h?.texto || h?.text || "").slice(0, 3000);
+        if (t) contents.push({ role, parts: [{ text: t }] });
+      }
+      contents.push({ role: "user", parts: [{ text: pergunta.slice(0, 4000) }] });
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GMODEL}:generateContent?key=${encodeURIComponent(GKEY)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: SYS_ASSIST }] },
+          contents,
+          generationConfig: { temperature: 0.4, maxOutputTokens: 1800 },
+        }),
+      });
+      if (!r.ok) return json({ erro: `gemini ${r.status}` }, 502);
+      const j = await r.json();
+      const resposta = (j?.candidates?.[0]?.content?.parts || []).map((p: any) => p?.text || "").join("").trim();
+      return resposta ? json({ ok: true, resposta }) : json({ erro: "sem resposta" }, 502);
+    }
+
+    return json({ erro: "action inválida (assistente|resumo_atendimento|transcricao|gerar_documento)" }, 400);
   } catch (e) {
     return json({ erro: String(e).slice(0, 400) }, 500);
   }
