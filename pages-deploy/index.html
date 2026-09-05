@@ -5943,6 +5943,7 @@ function beckerIADocEscolher(tipo){
     <div class="form-field" style="margin-bottom:12px">
       <textarea id="ia-doc-contexto" rows="6" style="width:100%;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:13px;resize:vertical" placeholder="Descreva o caso e os dados: partes, fatos, pedido, valores, prazos... (o que faltar a IA marca como [PREENCHER])"></textarea>
     </div>
+    <div id="ia-doc-autos" style="margin-bottom:12px"></div>
     <button class="btn btn-primary" onclick="beckerIAGerarDoc('${tipo.replace(/'/g,'')}')">✨ Gerar rascunho</button>
   </div></div>`;
 }
@@ -5984,6 +5985,85 @@ async function beckerIADocPuxar(){
   ].filter(x=>x!=='').join('\n');
   const ta=document.getElementById('ia-doc-contexto'); ta.value=bloco+(ta.value?('\n'+ta.value):'');
   vin.innerHTML=`<span style="color:#4ade80">✓ Dados puxados de ${escHtml(p.numero)}${lm?' (partes do Legal Mail)':''} — o rascunho poderá ser salvo neste processo.</span>`;
+  window._iaDocLm=!!p.lm_idprocessos;
+  beckerIADocAutosCheck(p.id);
+}
+// ─── Geração de Documentos: usar o conteúdo da íntegra (autos) como contexto ──
+// Reaproveita a edge function autos-ia (mesmo fluxo cost-safe do detalhe do processo).
+async function beckerIADocAutosCheck(procId){
+  const el=document.getElementById('ia-doc-autos');if(!el)return;
+  if(!procId||!window._iaDocLm){el.innerHTML='';return;}
+  el.innerHTML='<p style="font-size:12px;color:#94a3b8;margin:0">Verificando os autos…</p>';
+  const r=await chamarFuncao('autos-ia',{action:'get',processo_id:procId});
+  const est=r?r.estado:'nenhum';
+  if(r&&r.erro&&/vínculo|vinculo|Legal Mail/i.test(r.erro)){el.innerHTML='';return;}
+  if(est==='pronto'){
+    el.innerHTML=`<div style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:12px">
+      <div style="font-size:13px;color:var(--texto);margin-bottom:8px">📄 A íntegra deste processo já foi analisada pela IA.</div>
+      <button class="btn btn-secondary btn-sm" onclick="beckerIADocAutosIncluir('${procId}')">➕ Incluir conteúdo dos autos no rascunho (grátis)</button>
+    </div>`;
+  } else if(est==='processando'||est==='baixando'||est==='processando_ia'){
+    el.innerHTML='<p style="font-size:12px;color:#64748b;margin:0">⏳ Baixando a íntegra e lendo com a IA… o conteúdo entra no rascunho quando ficar pronto.</p>';
+    beckerIADocAutosPoll(procId);
+  } else if(est==='erro'||est==='erro_ia'){
+    el.innerHTML=`<div style="font-size:12px;color:#f87171;margin-bottom:6px">Falha ao processar os autos.</div><button class="btn btn-secondary btn-sm" onclick="beckerIADocAutosPuxar('${procId}')">Tentar de novo</button>`;
+  } else {
+    el.innerHTML=`<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px">
+      <div style="font-size:13px;color:var(--texto);margin-bottom:4px">Quer que a IA escreva com base no <strong>conteúdo real dos autos</strong>?</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:8px">💡 Baixa a íntegra do Legal Mail — custa R$ 0,02 por documento. Você vê a contagem e o valor <strong>antes</strong> de confirmar.</div>
+      <button class="btn btn-secondary btn-sm" onclick="beckerIADocAutosPuxar('${procId}')">📄 Puxar a íntegra p/ a IA usar</button>
+    </div>`;
+  }
+}
+async function beckerIADocAutosPuxar(procId){
+  toast('Consultando quantidade de documentos...','');
+  const r=await chamarFuncao('autos-ia',{action:'preview',processo_id:procId});
+  if(!r||r.erro){toast('Erro: '+((r&&r.erro)||'falha'),'erro');return;}
+  if(r.ja_baixado){beckerIADocAutosIncluir(procId);return;}
+  const n=r.documentos||0;const custo=(r.custo||0).toFixed(2).replace('.',',');
+  if(!n){toast('Nenhum documento disponível para este processo.','erro');return;}
+  if(!confirm(`Este processo tem ${n} documento(s).\n\nBaixar a íntegra e a IA ler vai custar aproximadamente R$ ${custo} (R$ 0,02 por documento).\n\nConfirmar?`))return;
+  const el=document.getElementById('ia-doc-autos');
+  if(el)el.innerHTML='<p style="font-size:12px;color:#64748b;margin:0">⏳ Solicitando a íntegra… o conteúdo entra no rascunho quando ficar pronto.</p>';
+  const rr=await chamarFuncao('autos-ia',{action:'request',processo_id:procId});
+  if(!rr||rr.erro){toast('Erro ao solicitar: '+((rr&&rr.erro)||''),'erro');beckerIADocAutosCheck(procId);return;}
+  toast('Download iniciado. O conteúdo dos autos entra no rascunho quando ficar pronto.','ok');
+  beckerIADocAutosPoll(procId);
+}
+function beckerIADocAutosPoll(procId){
+  window._autosDocPoll=window._autosDocPoll||{};
+  if(window._autosDocPoll[procId])return;
+  window._autosDocPoll[procId]=true;
+  let n=0;
+  const tick=async()=>{
+    n++;
+    const r=await chamarFuncao('autos-ia',{action:'status',processo_id:procId});
+    if(r&&r.estado==='pronto'){window._autosDocPoll[procId]=false;beckerIADocAutosIncluir(procId);toast('✅ Conteúdo dos autos incluído no rascunho!','ok');return;}
+    if(r&&(r.estado==='erro'||r.estado==='erro_ia')){window._autosDocPoll[procId]=false;beckerIADocAutosCheck(procId);return;}
+    if(n>=40){window._autosDocPoll[procId]=false;return;}
+    setTimeout(tick,15000);
+  };
+  setTimeout(tick,15000);
+}
+async function beckerIADocAutosIncluir(procId){
+  const r=await chamarFuncao('autos-ia',{action:'get',processo_id:procId});
+  const ia=(r&&r.ia)||{};
+  const partes=[];
+  const add=(rot,v)=>{if(v&&v!=='null')partes.push(rot+': '+v);};
+  const addL=(rot,arr)=>{if(Array.isArray(arr)&&arr.length)partes.push(rot+':\n- '+arr.join('\n- '));};
+  add('Visão geral',ia.resumo||r?.resumo);
+  add('Situação atual',ia.situacao_atual);
+  add('Último ato',ia.ultimo_ato);
+  addL('Histórico',ia.historico);
+  addL('O que fazer',ia.o_que_fazer);
+  addL('Pontos de atenção',ia.pontos_atencao);
+  add('Estratégia',ia.estrategia);
+  if(!partes.length){toast('Os autos ainda não têm resumo disponível.','erro');return;}
+  const bloco='\n\nCONTEÚDO DOS AUTOS (resumo da IA a partir da íntegra):\n'+partes.join('\n');
+  const ta=document.getElementById('ia-doc-contexto');
+  if(ta && ta.value.indexOf('CONTEÚDO DOS AUTOS')===-1) ta.value=ta.value+bloco;
+  const el=document.getElementById('ia-doc-autos');
+  if(el)el.innerHTML='<div style="font-size:12px;color:#4ade80">✓ Conteúdo dos autos incluído no contexto — pode gerar o rascunho.</div>';
 }
 async function beckerIAGerarDoc(tipo){
   const contexto=(document.getElementById('ia-doc-contexto')?.value||'').trim();
