@@ -5951,23 +5951,39 @@ async function beckerIADocPuxar(){
   const vin=document.getElementById('ia-doc-vinculo');
   if(!num){toast('Digite o número do processo.','erro');return;}
   vin.innerHTML='Buscando processo...';
-  const{data}=await supa.from('processos').select('numero,tribunal,vara,comarca,classe_processual,parte_contraria,cliente_id,clientes(id,nome,cpf_cnpj,rua,cep)').ilike('numero','%'+num+'%').limit(1);
+  const{data}=await supa.from('processos').select('id,numero,tribunal,vara,comarca,classe_processual,assunto,parte_contraria,cliente_id,lm_idprocessos,clientes(id,nome,cpf_cnpj,rua,cep)').ilike('numero','%'+num+'%').limit(1);
   const p=data&&data[0];
   if(!p){vin.innerHTML='<span style="color:#fbbf24">Processo não encontrado — pode digitar o contexto manualmente.</span>';return;}
-  window._iaDocProcId=null; window._iaDocCliId=p.clientes?.id||p.cliente_id||null;
-  // pega o id do processo p/ salvar
-  const{data:pid}=await supa.from('processos').select('id').eq('numero',p.numero).limit(1);
-  window._iaDocProcId=pid&&pid[0]?pid[0].id:null;
+  window._iaDocProcId=p.id||null; window._iaDocCliId=p.clientes?.id||p.cliente_id||null;
   const cli=p.clientes||{};
+  // Puxa as partes completas direto do Legal Mail (grátis), se o processo tiver vínculo.
+  let lm=null;
+  if(p.lm_idprocessos){
+    vin.innerHTML='Puxando partes do Legal Mail...';
+    const r=await chamarFuncao('legalmail-partes',{processo_id:p.id});
+    if(r&&r.ok)lm=r;
+  }
+  const linhaPartes=[];
+  if(lm&&lm.partes){
+    if(lm.partes.ativo?.length)linhaPartes.push(`Parte(s) autora(s) / polo ativo: ${lm.partes.ativo.join('; ')}`);
+    if(lm.partes.passivo?.length)linhaPartes.push(`Parte(s) ré(s) / polo passivo: ${lm.partes.passivo.join('; ')}`);
+    if(lm.partes.outros?.length)linhaPartes.push(`Outras partes: ${lm.partes.outros.join('; ')}`);
+  }
+  const classe=p.classe_processual||lm?.classe||'';
+  const vara=p.vara||lm?.vara||'';
+  const assunto=p.assunto||lm?.assunto||'';
   const bloco=[
-    `Processo nº ${p.numero||''} — ${p.tribunal||''} ${p.vara?('/ '+p.vara):''} ${p.comarca?('/ '+p.comarca):''}`.trim(),
-    p.classe_processual?`Classe: ${p.classe_processual}`:'',
-    `Cliente (parte representada): ${cli.nome||'[PREENCHER]'}${cli.cpf_cnpj?(', CPF/CNPJ '+cli.cpf_cnpj):''}${cli.rua?(', end. '+cli.rua):''}${cli.cep?(', CEP '+cli.cep):''}`,
-    p.parte_contraria?`Parte contrária: ${p.parte_contraria}`:'',
+    `Processo nº ${p.numero||''} — ${p.tribunal||lm?.tribunal||''} ${vara?('/ '+vara):''} ${p.comarca?('/ '+p.comarca):''}`.trim(),
+    classe?`Classe: ${classe}`:'',
+    assunto?`Assunto: ${assunto}`:'',
+    lm?.valor_causa?`Valor da causa: R$ ${lm.valor_causa}`:'',
+    ...linhaPartes,
+    `Cliente do escritório (parte representada): ${cli.nome||'[PREENCHER]'}${cli.cpf_cnpj?(', CPF/CNPJ '+cli.cpf_cnpj):''}${cli.rua?(', end. '+cli.rua):''}${cli.cep?(', CEP '+cli.cep):''}`,
+    (!linhaPartes.length&&p.parte_contraria)?`Parte contrária: ${p.parte_contraria}`:'',
     '','FATOS / PEDIDO (completar):',''
-  ].filter(x=>x!=='' || true).join('\n');
+  ].filter(x=>x!=='').join('\n');
   const ta=document.getElementById('ia-doc-contexto'); ta.value=bloco+(ta.value?('\n'+ta.value):'');
-  vin.innerHTML=`<span style="color:#4ade80">✓ Dados puxados de ${escHtml(p.numero)} — o rascunho poderá ser salvo neste processo.</span>`;
+  vin.innerHTML=`<span style="color:#4ade80">✓ Dados puxados de ${escHtml(p.numero)}${lm?' (partes do Legal Mail)':''} — o rascunho poderá ser salvo neste processo.</span>`;
 }
 async function beckerIAGerarDoc(tipo){
   const contexto=(document.getElementById('ia-doc-contexto')?.value||'').trim();
