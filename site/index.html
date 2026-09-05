@@ -115,6 +115,22 @@ nav{flex:1;padding:8px 0}
 
 /* ── MAIN / TOPBAR ───────────────────────────── */
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+#btn-menu{display:none;background:none;border:1px solid var(--border);border-radius:8px;color:var(--gold);font-size:20px;line-height:1;width:40px;height:40px;cursor:pointer;flex-shrink:0}
+#menu-backdrop{display:none}
+@media(max-width:768px){
+  #btn-menu{display:flex;align-items:center;justify-content:center}
+  #sidebar{position:fixed;left:0;top:0;bottom:0;z-index:1000;width:min(82vw,300px);transform:translateX(-100%);transition:transform .25s ease}
+  #app.menu-aberto #sidebar{transform:translateX(0)}
+  #app.menu-aberto #menu-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999}
+  #main{width:100%}
+  #topbar{padding:0 12px;gap:8px;height:60px}
+  .topbar-title h1{font-size:15px}
+  .topbar-title .sub{display:none}
+  .topbar-search{display:none}
+  .topbar-date{display:none}
+  #conteudo{padding:14px 12px}
+  .card-body{overflow-x:auto}
+}
 #topbar{
   background:rgba(10,24,48,0.92);backdrop-filter:blur(12px);
   border-bottom:1px solid rgba(255,255,255,.05);
@@ -1586,8 +1602,10 @@ tbody tr:hover td{
       <button class="btn-sair" onclick="sair()"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg> Sair do sistema</button>
     </div>
   </div>
+  <div id="menu-backdrop" onclick="fecharMenu()"></div>
   <div id="main">
     <div id="topbar">
+      <button id="btn-menu" onclick="toggleMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div class="topbar-title">
         <h1 id="topbar-titulo">Dashboard</h1>
         <div class="sub" id="topbar-sub">Visão geral do escritório</div>
@@ -2222,7 +2240,10 @@ async function salvarAtendimento(e) {
 }
 
 
+function toggleMenu(){document.getElementById('app')?.classList.toggle('menu-aberto');}
+function fecharMenu(){document.getElementById('app')?.classList.remove('menu-aberto');}
 function ir(pagina){
+  fecharMenu();
   document.querySelectorAll('.nav-item,.nav-subitem').forEach(n=>n.classList.remove('ativo'));
   document.querySelectorAll(`.nav-item[data-page="${pagina}"],.nav-subitem[data-page="${pagina}"]`).forEach(n=>n.classList.add('ativo'));
   const grupo=GRUPO_POR_PAGINA[pagina];
