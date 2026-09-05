@@ -3160,14 +3160,63 @@ async function abrirProcesso(id){
   </div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">🏛️ Audiências</h4><div id="proc-audiencias">Carregando...</div></div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">🤖 Autos + Inteligência</h4><div id="proc-autosia">Carregando...</div></div>
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">💬 Perguntar à IA sobre este processo</h4><div id="proc-chat"></div></div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">📄 Documentos & íntegra</h4><div id="proc-docs">Carregando...</div></div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">🏭 Produção Jurídica</h4><div id="proc-producao">Carregando...</div></div>`;
   carregarMovsProcesso(id);
   carregarPrazosProcesso(id);
   carregarAudienciasProcesso(id);
   carregarAutosIA(id);
+  montarChatProcesso(id);
   carregarDocsProcesso(id);
   carregarProducaoProcesso(id);
+}
+// ─── CHAT do processo (pergunta → IA responde com o contexto do processo) ─────
+let procChatHist=[];
+function montarChatProcesso(id){
+  procChatHist=[];
+  const el=document.getElementById('proc-chat');if(!el)return;
+  el.innerHTML=`<div class="card"><div class="card-body">
+    <div id="chat-msgs" style="display:flex;flex-direction:column;gap:10px;max-height:420px;overflow-y:auto;margin-bottom:12px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="chat-input" placeholder="Ex.: qual o próximo passo? tem custas a pagar? do que se trata?" style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter'){event.preventDefault();perguntarProcessoIA('${id}')}">
+      <button class="btn btn-primary" id="chat-send" onclick="perguntarProcessoIA('${id}')">Perguntar</button>
+    </div>
+    <p style="font-size:11px;color:#94a3b8;margin:8px 0 0">⚠️ A IA responde com base no que está cadastrado (dados + resumo dos autos + movimentações + prazos). Confira sempre nos autos antes de agir.</p>
+  </div></div>`;
+  renderChatMsgs();
+}
+function renderChatMsgs(){
+  const box=document.getElementById('chat-msgs');if(!box)return;
+  if(!procChatHist.length){box.innerHTML='<p style="font-size:13px;color:#94a3b8;margin:0">Faça uma pergunta sobre este processo — ex.: "em que pé está?", "tem prazo correndo?", "qual a estratégia?"</p>';return;}
+  box.innerHTML=procChatHist.map(m=>{
+    const eu=m.role==='user';
+    return `<div style="align-self:${eu?'flex-end':'flex-start'};max-width:88%;background:${eu?'var(--azul3)':'var(--card)'};color:${eu?'#fff':'var(--texto)'};border:1px solid ${eu?'transparent':'var(--border)'};border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.5;white-space:pre-wrap">${escHtml(m.texto)}</div>`;
+  }).join('');
+  box.scrollTop=box.scrollHeight;
+}
+async function perguntarProcessoIA(id){
+  const inp=document.getElementById('chat-input');const btn=document.getElementById('chat-send');
+  const q=(inp?.value||'').trim();if(!q){return;}
+  procChatHist.push({role:'user',texto:q});
+  if(inp)inp.value='';
+  procChatHist.push({role:'assistant',texto:'⏳ pensando…'});
+  renderChatMsgs();
+  if(btn)btn.disabled=true;
+  try{
+    const hist=procChatHist.filter(m=>m.texto&&m.texto!=='⏳ pensando…');
+    const r=await chamarFuncao('processo-chat',{processo_id:id,pergunta:q,historico:hist});
+    procChatHist.pop(); // tira o "pensando"
+    if(r&&r.erro)throw new Error(r.erro);
+    procChatHist.push({role:'assistant',texto:r.resposta||'(sem resposta)'});
+  }catch(e){
+    procChatHist.pop();
+    procChatHist.push({role:'assistant',texto:'❌ Não consegui responder agora: '+(e.message||'erro')});
+  }finally{
+    if(btn)btn.disabled=false;
+    renderChatMsgs();
+    document.getElementById('chat-input')?.focus();
+  }
 }
 // ─── AUTOS + IA (sob demanda, com custo controlado) ──────────────────────────
 async function carregarAutosIA(id){
