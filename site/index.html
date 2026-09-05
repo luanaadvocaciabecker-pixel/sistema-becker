@@ -5678,12 +5678,56 @@ function pBeckerIA(modo){
   }
 
   c.innerHTML=`<div style="max-width:900px;margin:0 auto;padding:24px 16px">
-    <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap">
       <h2 style="margin:0;font-size:20px;font-weight:700">🤖 Becker IA</h2>
     </div>
+    <div class="card" style="margin-bottom:20px"><div class="card-body">
+      <div style="font-weight:700;font-size:15px;margin-bottom:8px">💬 Pergunte à Becker IA</div>
+      <div id="ia-ask-msgs" style="display:flex;flex-direction:column;gap:10px;max-height:380px;overflow-y:auto;margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="ia-ask-input" placeholder="Pergunte qualquer coisa — ex.: como dar entrada num inventário? o que pedir numa busca e apreensão?" style="flex:1;min-width:200px;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--texto);font-family:inherit;font-size:13px" onkeydown="if(event.key==='Enter'){event.preventDefault();beckerIAPerguntar()}">
+        <button class="btn btn-primary" id="ia-ask-send" onclick="beckerIAPerguntar()">Perguntar</button>
+      </div>
+      <p style="font-size:11px;color:#94a3b8;margin:8px 0 0">⚠️ Orientação geral — confira sempre. Para precedentes reais use a aba <b>Jurisprudência</b>; para um processo específico, o chat dentro do processo.</p>
+    </div></div>
     <div class="tabs" style="margin-bottom:24px;display:flex;gap:6px;flex-wrap:wrap">${tabs}</div>
     ${corpo}
   </div>`;
+  renderIaAsk();
+}
+// ─── Front-door: "Pergunte à Becker IA" (assistente geral, resposta inline) ────
+let iaAskHist=[];
+function renderIaAsk(){
+  const box=document.getElementById('ia-ask-msgs');if(!box)return;
+  if(!iaAskHist.length){box.innerHTML='<p style="font-size:12px;color:#94a3b8;margin:0">Digite sua pergunta e a resposta aparece aqui mesmo.</p>';return;}
+  box.innerHTML=iaAskHist.map(m=>{
+    const eu=m.role==='user';
+    return `<div style="align-self:${eu?'flex-end':'flex-start'};max-width:90%;background:${eu?'var(--azul3)':'var(--card)'};color:${eu?'#fff':'var(--texto)'};border:1px solid ${eu?'transparent':'var(--border)'};border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.5;white-space:pre-wrap">${escHtml(m.texto)}</div>`;
+  }).join('');
+  box.scrollTop=box.scrollHeight;
+}
+async function beckerIAPerguntar(){
+  const inp=document.getElementById('ia-ask-input');const btn=document.getElementById('ia-ask-send');
+  const q=(inp?.value||'').trim();if(!q)return;
+  iaAskHist.push({role:'user',texto:q});
+  if(inp)inp.value='';
+  iaAskHist.push({role:'assistant',texto:'⏳ pensando…'});
+  renderIaAsk();
+  if(btn)btn.disabled=true;
+  try{
+    const hist=iaAskHist.filter(m=>m.texto&&m.texto!=='⏳ pensando…');
+    const r=await chamarFuncao('becker-ia',{action:'assistente',pergunta:q,historico:hist});
+    iaAskHist.pop();
+    if(r&&r.erro)throw new Error(r.erro);
+    iaAskHist.push({role:'assistant',texto:r.resposta||'(sem resposta)'});
+  }catch(e){
+    iaAskHist.pop();
+    iaAskHist.push({role:'assistant',texto:'❌ Não consegui responder agora: '+(e.message||'erro')});
+  }finally{
+    if(btn)btn.disabled=false;
+    renderIaAsk();
+    document.getElementById('ia-ask-input')?.focus();
+  }
 }
 
 async function beckerIAResumoProcessual(){
