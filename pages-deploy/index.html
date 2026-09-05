@@ -5087,18 +5087,19 @@ async function pCibele(){
     supa.from('prazos').select('id,data,processo_id').eq('tipo','Audiência').gte('data',hojStr).lte('data',em7Str).limit(50)
   ]);
   const pr=rPr.data||[],tk=rTk.data||[],hon=rHon.data||[],alv=rAlv.data||[],aud=rAud.data||[];
-  const ativos=pr.filter(function(p){return p.situacao==='Ativo';}).length;
-  const semResp=pr.filter(function(p){return p.situacao==='Ativo'&&!p.advogado_responsavel;}).length;
-  const parados=pr.filter(function(p){return p.situacao==='Ativo'&&p.updated_at&&new Date(p.updated_at)<ha30d;}).length;
+  const ehAtivo=function(s){return s==='Ativo'||s==='Em andamento';};
+  const ativos=pr.filter(function(p){return ehAtivo(p.situacao);}).length;
+  const semResp=pr.filter(function(p){return ehAtivo(p.situacao)&&!p.advogado_responsavel;}).length;
+  const parados=pr.filter(function(p){return ehAtivo(p.situacao)&&p.updated_at&&new Date(p.updated_at)<ha30d;}).length;
   const pzVencidos=rPz.count||0;
   const tkAtrasadas=tk.filter(function(t){return t.prazo&&new Date(t.prazo+'T12:00:00')<=hoje;}).length;
   const honPend=hon.filter(function(h){return h.status==='Pendente'||h.status==='Atrasado';}).reduce(function(s,h){return s+(h.valor_total||0);},0);
   const alvPend=alv.reduce(function(s,a){return s+(a.valor||0);},0);
   // Grid por advogado
   const advStats=ADVS.map(function(adv){
-    const ap=pr.filter(function(p){return p.situacao==='Ativo'&&p.advogado_responsavel===adv;}).length;
+    const ap=pr.filter(function(p){return ehAtivo(p.situacao)&&p.advogado_responsavel===adv;}).length;
     const tt=tk.filter(function(t){return t.responsavel===adv;}).length;
-    const pa=pr.filter(function(p){return p.situacao==='Ativo'&&p.advogado_responsavel===adv&&p.updated_at&&new Date(p.updated_at)<ha30d;}).length;
+    const pa=pr.filter(function(p){return ehAtivo(p.situacao)&&p.advogado_responsavel===adv&&p.updated_at&&new Date(p.updated_at)<ha30d;}).length;
     return {adv:adv,ativos:ap,tarefas:tt,parados:pa};
   });
   const maxAtivos=Math.max(1,Math.max.apply(null,advStats.map(function(a){return a.ativos;})));
@@ -5192,7 +5193,7 @@ async function pDesempenho(){
   const pr=rPr.data||[],tk=rTk.data||[],pz=rPz.data||[],aud=rAud.data||[];
   const stats=ADVS.map(function(adv){
     const meus=pr.filter(function(p){return p.advogado_responsavel===adv;});
-    const ativos=meus.filter(function(p){return p.situacao==='Ativo';}).length;
+    const ativos=meus.filter(function(p){return p.situacao==='Ativo'||p.situacao==='Em andamento';}).length;
     const encerr=meus.filter(function(p){return p.situacao==='Encerrado'||p.situacao==='Arquivado';}).length;
     const ids=new Set(meus.map(function(p){return p.id;}));
     const pzTotal=pz.filter(function(p){return ids.has(p.processo_id);}).length;
