@@ -4543,20 +4543,11 @@ async function pDatajud(){
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
     <div class="card">
-      <div class="card-header"><h3>⚡ Consulta DataJud (CNJ)</h3></div>
+      <div class="card-header"><h3>🔍 Consultar processo no DataJud (CNJ)</h3></div>
       <div class="card-body">
-        <p style="color:#64748b;margin-bottom:16px;font-size:13px;line-height:1.6">Consulte o DataJud do CNJ para ver e importar movimentações automaticamente.</p>
+        <p style="color:#64748b;margin-bottom:16px;font-size:13px;line-height:1.6">Consulta grátis pela API pública do CNJ. O tribunal é detectado automaticamente pelo próprio número.</p>
         <div class="form-field"><label>Número CNJ do Processo</label>
           <input id="dj-num" placeholder="0000000-00.0000.0.00.0000" style="font-family:monospace">
-        </div>
-        <div class="form-field"><label>Tribunal</label>
-          <select id="dj-tribunal">
-            <option value="api_publica_tjsc">TJSC (Santa Catarina)</option>
-            <option value="api_publica_trt12">TRT 12ª Região (SC)</option>
-            <option value="api_publica_tjrs">TJRS</option>
-            <option value="api_publica_trf4">TRF 4ª Região</option>
-            <option value="api_publica_stj">STJ</option>
-          </select>
         </div>
         <button class="btn btn-primary" style="width:100%" onclick="consultarDJ()">🔍 Consultar</button>
         <div id="dj-resultado" style="margin-top:16px"></div>
@@ -4579,50 +4570,44 @@ async function pDatajud(){
     </div>
   </div>
   <div class="card">
-    <div class="card-header"><h3>🔄 Atualização em Lote — Processos Ativos</h3></div>
+    <div class="card-header"><h3>⚡ Preencher dados faltantes (classe · assunto · vara)</h3></div>
     <div class="card-body">
       <p style="color:#64748b;font-size:13px;margin-bottom:16px;line-height:1.6">
-        Verifica todos os processos com número CNJ cadastrado e importa as movimentações mais recentes do DataJud.
-        <strong style="color:#d97706">Importante:</strong> use esta função para confirmar se os processos estão realmente ativos — muitos podem já estar baixados.
+        Busca no DataJud público (<strong>grátis</strong>) e preenche <strong>somente campos vazios</strong> dos processos que ainda não têm classe ou assunto — nunca sobrescreve o que já está preenchido.
+        <br><strong style="color:#d97706">Observação:</strong> processos em segredo de justiça (família, menores) não constam no DataJud público e ficam de fora; processos muito recentes podem ainda não estar indexados.
       </p>
-      <button class="btn btn-primary" onclick="atualizarLote()">⚡ Atualizar Todos os Processos Ativos</button>
-      <div id="lote-resultado" style="margin-top:16px"></div>
+      <button class="btn btn-primary" onclick="datajudPreencher()">⚡ Preencher agora (DataJud)</button>
+      <div id="dj-lote" style="margin-top:16px"></div>
     </div>
   </div>`;
 }
 
 async function consultarDJ(){
   const num=document.getElementById('dj-num').value.trim();
-  const tribunal=document.getElementById('dj-tribunal').value;
   const el=document.getElementById('dj-resultado');
   if(!num){toast('Informe o número.','erro');return;}
   el.innerHTML='<p style="color:#64748b;font-size:13px">Consultando DataJud...</p>';
   try{
-    const r=await fetch('/api/datajud/consultar',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({numero:num,tribunal})
-    });
-    const json=await r.json();
-    if(!r.ok)throw new Error(json?.detalhe||json?.erro||`HTTP ${r.status}`);
-    if(!json.encontrado||!json.hit){el.innerHTML='<div class="empty-state" style="padding:20px"><div class="icon" style="font-size:32px">🔍</div><p>Processo não encontrado neste tribunal.</p></div>';return;}
+    const json=await chamarFuncao('datajud-enriquecer',{action:'consultar',numero:num});
+    if(json&&json.erro)throw new Error(json.erro);
+    if(!json||!json.encontrado||!json.hit){el.innerHTML='<div class="empty-state" style="padding:20px"><div class="icon" style="font-size:32px">🔍</div><p style="font-size:13px">Não encontrado no DataJud público. Pode estar em segredo de justiça (família/menores) ou ainda não indexado.</p></div>';return;}
     const proc=json.hit;
-    const movs=(proc.movimentos||[]).sort((a,b)=>new Date(b.dataHora)-new Date(a.dataHora));
+    const movs=(proc.movimentos||[]).slice().sort((a,b)=>new Date(b.dataHora)-new Date(a.dataHora));
     el.innerHTML=`
       <div style="background:#f0f9ff;border-radius:8px;padding:14px;margin-bottom:14px;font-size:13px">
-        <strong>${proc.classe?.nome||'—'}</strong>
-        <div style="color:#64748b;margin-top:4px">${proc.orgaoJulgador?.nome||'—'} · ${proc.tribunal||tribunal}</div>
-        <div style="margin-top:6px"><span class="tag ${proc.situacao==='Baixado'?'encerrado':'ativo'}">${proc.situacao||'—'}</span></div>
+        <strong>${escHtml(proc.classe?.nome||'—')}</strong>
+        <div style="color:#64748b;margin-top:4px">${escHtml(proc.orgaoJulgador?.nome||'—')}</div>
+        ${json.assunto?`<div style="color:#64748b;margin-top:4px">Assunto: ${escHtml(json.assunto)}</div>`:''}
       </div>
-      <p style="font-size:13px;font-weight:600;color:#002060;margin-bottom:10px">Últimas movimentações (${movs.length}):</p>
+      <p style="font-size:13px;font-weight:600;color:var(--texto);margin-bottom:10px">Últimas movimentações (${movs.length}):</p>
       <div class="timeline">
         ${movs.slice(0,10).map(m=>`<div class="tl-item">
-          <div class="tl-data">${new Date(m.dataHora).toLocaleDateString('pt-BR')}</div>
-          <div class="tl-texto">${m.nome||m.complemento||'Movimentação'}</div>
+          <div class="tl-data">${m.dataHora?new Date(m.dataHora).toLocaleDateString('pt-BR'):'—'}</div>
+          <div class="tl-texto">${escHtml(m.nome||'Movimentação')}</div>
         </div>`).join('')}
       </div>
-      ${movs.length?`<button class="btn btn-primary" style="width:100%;margin-top:14px" onclick='importarDJ(${JSON.stringify(movs)})'>⬇️ Importar ${movs.length} movimentações</button>`:''}`;
-  }catch(e){el.innerHTML='<div style="color:#dc2626;font-size:13px;padding:10px">Erro ao consultar. Verifique conexão ou tente outro tribunal.</div>';}
+      ${movs.length?`<button class="btn btn-primary" style="width:100%;margin-top:14px" onclick='importarDJ(${JSON.stringify(movs).replace(/'/g,"&#39;")})'>⬇️ Importar ${movs.length} movimentações</button>`:''}`;
+  }catch(e){el.innerHTML='<div style="color:#dc2626;font-size:13px;padding:10px">Erro ao consultar: '+escHtml(e.message||'falha')+'</div>';}
 }
 
 async function importarDJ(movs){
@@ -4642,37 +4627,29 @@ async function importarDJ(movs){
   toast(`✅ ${inserts.length} movimentações importadas!`,'ok');
 }
 
-async function atualizarLote(){
-  const el=document.getElementById('lote-resultado');
-  const btn=[...document.querySelectorAll('button')].find(b=>b.getAttribute('onclick')==='atualizarLote()');
+async function datajudPreencher(){
+  const el=document.getElementById('dj-lote');
+  const btn=[...document.querySelectorAll('button')].find(b=>b.getAttribute('onclick')==='datajudPreencher()');
   if(btn)btn.disabled=true;
-  el.innerHTML='<p style="color:#64748b;font-size:13px">Atualizando automaticamente...</p>';
-  let offset=0,consultados=0,encontrados=0,movs=0,situacoes=0,erros=0;
+  let proc=0,found=0,filled=0;
+  el.innerHTML='<p style="color:#64748b;font-size:13px">Consultando o DataJud… a API pública é lenta (~10-15s por processo), pode levar alguns minutos. Pode deixar rodando.</p>';
   try{
-    while(true){
-      const r=await fetch('/api/datajud/atualizar-lote',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({offset,limit:20})
-      });
-      const json=await r.json();
-      if(!r.ok)throw new Error(json?.detalhe||json?.erro||`HTTP ${r.status}`);
-      consultados+=json.consultados||0;
-      encontrados+=json.encontrados||0;
-      movs+=json.movimentacoes_importadas||0;
-      situacoes+=json.situacoes_atualizadas||0;
-      erros+=json.erros||0;
-      if(json.terminou)break;
-      offset=json.proximo_offset||offset+20;
-      await new Promise(resolve=>setTimeout(resolve,1200));
+    for(let round=0;round<40;round++){
+      const j=await chamarFuncao('datajud-enriquecer',{action:'lote',limit:20});
+      if(j&&j.erro)throw new Error(j.erro);
+      proc+=(j.processados||0); found+=(j.encontrados||0); filled+=(j.preenchidos||0);
+      el.innerHTML=`<div style="background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.22);border-radius:8px;padding:14px;font-size:13px">
+        Consultados: <strong>${proc}</strong> · encontrados no DataJud: <strong>${found}</strong> · preenchidos: <strong>${filled}</strong>${j.processados?' · continuando…':''}
+      </div>`;
+      if(!j.processados)break;
     }
-    el.innerHTML=`<div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.22);border-radius:8px;padding:14px;font-size:13px;color:#dff8e8">
-      <strong>ATUALIZAÇÃO COMPLETA</strong>
-      <div style="font-size:12px;color:#94a3b8;margin-top:6px">${consultados} consultados · ${encontrados} encontrados · ${movs} movimentações novas · ${situacoes} situações atualizadas · ${erros} erros</div>
+    el.innerHTML=`<div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.28);border-radius:8px;padding:14px;font-size:13px;color:var(--texto)">
+      <strong>✅ Concluído.</strong> ${proc} processos consultados · <strong>${filled}</strong> preenchidos com dados do DataJud.
+      <div style="font-size:12px;color:#64748b;margin-top:6px">Os não preenchidos não constam no DataJud público (segredo de justiça: família/menores) ou ainda não foram indexados.</div>
     </div>`;
   }catch(e){
-    el.innerHTML=`<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.22);border-radius:8px;padding:14px;font-size:13px;color:#fecaca">
-      Erro na atualização automática: ${escHtml(e.message||'falha desconhecida')}
+    el.innerHTML=`<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.22);border-radius:8px;padding:14px;font-size:13px;color:#dc2626">
+      Erro ao preencher: ${escHtml(e.message||'falha desconhecida')}
     </div>`;
   }finally{
     if(btn)btn.disabled=false;
