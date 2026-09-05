@@ -5652,7 +5652,7 @@ function pBeckerIA(modo){
       <div class="card"><div class="card-body" style="text-align:center;padding:32px">
         <div style="font-size:48px;margin-bottom:16px">⚖️</div>
         <h3 style="color:var(--azul3);margin-bottom:12px">Resumo Processual</h3>
-        <p style="color:#64748b;font-size:13px;line-height:1.8;margin-bottom:20px">Busca o que o Infinitum já tem registrado sobre o processo (resumo já calculado pela IA do Infinitum/Publijus e em que fase de produção ele está) — não gera nada novo, só reaproveita o que já foi processado lá.</p>
+        <p style="color:#64748b;font-size:13px;line-height:1.8;margin-bottom:20px">Monta o retrato do processo com o que o sistema já tem: dados do cadastro, <strong>resumo dos autos</strong> (quando a íntegra já foi puxada), movimentações recentes e prazos em aberto. Não gasta nada — só reaproveita o que já está registrado.</p>
         <div class="form-field" style="text-align:left;margin-bottom:16px">
           <input id="ia-num-proc" style="width:100%;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:13px" placeholder="Número do processo (CNJ)" onkeydown="if(event.key==='Enter')beckerIAResumoProcessual()">
         </div>
@@ -5739,20 +5739,64 @@ async function beckerIAResumoProcessual(){
   const{data:procs}=await supa.from('processos').select('id,numero').ilike('numero','%'+num+'%').limit(5);
   if(!procs?.length){res.innerHTML='<div class="empty-state" style="padding:20px"><p style="font-size:13px">Processo não encontrado no Sistema Becker.</p></div>';return;}
   const proc=procs[0];
-  const{data:cards}=await supa.from('infinitum_producao_juridica').select('*').eq('processo_id',proc.id).order('card_updated_at',{ascending:false});
-  if(!cards?.length){res.innerHTML='<div class="empty-state" style="padding:20px"><p style="font-size:13px">Nenhum resumo do Infinitum disponível para este processo ainda.</p></div>';return;}
-  res.innerHTML=cards.map(function(c){
-    const camposArr=Array.isArray(c.campos)?c.campos:[];
-    const resumoField=camposArr.find(function(f){return(f.field_label||'').toLowerCase().indexOf('resumo')>-1&&f.value;});
-    return'<div class="card" style="margin-bottom:12px"><div class="card-body">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">'+
-        '<span style="font-size:12px;font-weight:600;color:#60a5fa">'+escHtml(c.pop_name||'Infinitum')+(c.phase_name?' · '+escHtml(c.phase_name):'')+'</span>'+
-        '<span style="font-size:11px;color:#64748b">Proc. '+escHtml(proc.numero)+'</span>'+
-      '</div>'+
-      (resumoField?'<div style="white-space:pre-wrap;font-size:13px;line-height:1.5">'+escHtml(resumoField.value)+'</div>'
-        :'<p style="font-size:12px;color:#94a3b8">Este card ainda não tem um resumo preenchido.</p>')+
-    '</div></div>';
-  }).join('');
+  // Retrato do processo com os dados REAIS que o sistema já tem (Legal Mail/DataJud/autos).
+  const [rP,rAutos,rMovs,rPz] = await Promise.all([
+    supa.from('processos').select('*,clientes(nome,cpf_cnpj)').eq('id',proc.id).limit(1),
+    supa.from('processo_autos').select('ia_json,ia_resumo,n_autos,status').eq('processo_id',proc.id).order('criado_em',{ascending:false}).limit(1),
+    supa.from('movimentacoes').select('data,descricao,tipo').eq('processo_id',proc.id).order('data',{ascending:false}).limit(10),
+    supa.from('prazos').select('data,descricao,categoria,status').eq('processo_id',proc.id).eq('cumprido',false).order('data').limit(10)
+  ]);
+  const p=(rP.data&&rP.data[0])||{};
+  const au=(rAutos.data&&rAutos.data[0])||null;
+  const ia=(au&&au.ia_json)||null;
+  const movs=rMovs.data||[], pzs=rPz.data||[];
+  const linha=(rot,val)=>val?`<div style="margin-bottom:4px"><span style="color:#64748b">${rot}:</span> ${escHtml(String(val))}</div>`:'';
+  const sec=(titulo,cor,arr)=>Array.isArray(arr)&&arr.length?`<div style="margin-top:12px"><div style="font-size:11px;font-weight:700;color:${cor};text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${titulo}</div><ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">${arr.map(x=>`<li>${escHtml(x)}</li>`).join('')}</ul></div>`:'';
+  const bloco=(titulo,cor,txt)=>txt&&txt!=='null'?`<div style="margin-top:12px"><div style="font-size:11px;font-weight:700;color:${cor};text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${titulo}</div><div style="font-size:13px;line-height:1.6">${escHtml(txt)}</div></div>`:'';
+  let html=`<div class="card"><div class="card-body">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <span style="font-family:monospace;font-size:14px;font-weight:700;color:var(--azul3)">${escHtml(p.numero||proc.numero)}</span>
+      <button class="btn btn-secondary btn-sm" onclick="abrirProcesso('${proc.id}')">👁️ Abrir processo</button>
+    </div>
+    <div style="font-size:13px;line-height:1.6">
+      ${linha('Cliente',p.clientes?.nome)}
+      ${linha('Parte contrária',p.parte_contraria)}
+      ${linha('Classe',p.classe_processual)}
+      ${linha('Assunto',p.assunto)}
+      ${linha('Tribunal / Vara / Comarca',[p.tribunal,p.vara,p.comarca].filter(Boolean).join(' · '))}
+      ${linha('Responsável',p.advogado_responsavel)}
+      ${linha('Situação',p.situacao)}
+      ${linha('Valor da causa',p.valor_causa!=null?fmtMoeda(p.valor_causa):'')}
+    </div>`;
+  if(ia||au?.ia_resumo){
+    html+=`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:700;color:#4ade80;margin-bottom:6px">📄 Resumo dos autos (IA leu a íntegra${au?.n_autos?` · ${au.n_autos} documentos`:''})</div>
+      <div style="font-size:13px;line-height:1.6">${escHtml((ia&&ia.resumo)||au.ia_resumo||'')}</div>
+      ${bloco('Situação atual','var(--azul3)',ia&&ia.situacao_atual)}
+      ${sec('Histórico','#64748b',ia&&ia.historico)}
+      ${sec('O que fazer','#15803d',ia&&ia.o_que_fazer)}
+      ${sec('Pontos de atenção','#b45309',ia&&ia.pontos_atencao)}
+      ${bloco('Estratégia','#1e3a8a',ia&&ia.estrategia)}
+    </div>`;
+  } else {
+    html+=`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:#94a3b8">
+      A íntegra deste processo ainda não foi puxada — abra o processo e use "🤖 Autos + Inteligência" para a IA ler os autos (mostra o custo antes de confirmar).
+    </div>`;
+  }
+  html+=`</div></div>`;
+  if(pzs.length){
+    html+=`<div class="card" style="margin-top:12px"><div class="card-body">
+      <div style="font-size:12px;font-weight:700;color:#f87171;margin-bottom:8px">⏰ Prazos em aberto (${pzs.length})</div>
+      ${pzs.map(z=>`<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)"><b>${z.data?new Date(z.data+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</b> — ${escHtml(z.descricao||'')}${z.categoria&&z.categoria!=='geral'?` <span style="color:#64748b">[${escHtml(z.categoria)}]</span>`:''}</div>`).join('')}
+    </div></div>`;
+  }
+  if(movs.length){
+    html+=`<div class="card" style="margin-top:12px"><div class="card-body">
+      <div style="font-size:12px;font-weight:700;color:var(--azul3);margin-bottom:8px">🔄 Últimas movimentações</div>
+      ${movs.map(m=>`<div style="font-size:13px;padding:5px 0;border-bottom:1px solid var(--border)"><span style="color:#64748b;font-size:11px">${m.data?new Date(m.data+'T12:00:00').toLocaleDateString('pt-BR'):''}</span> ${escHtml(m.descricao||'')}</div>`).join('')}
+    </div></div>`;
+  }
+  res.innerHTML=html;
 }
 async function beckerIABuscar(){
   const query=(document.getElementById('ia-query')?.value||'').trim();
