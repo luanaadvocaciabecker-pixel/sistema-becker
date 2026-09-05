@@ -4089,6 +4089,8 @@ let prazosCache=[]; let prazoBucket='ativos'; let prazoVerCumpridos=false; let p
 const _advCurto=s=>{if(!s)return'';const w=s.trim().split(/\s+/)[0];return w?w[0].toUpperCase()+w.slice(1).toLowerCase():'';};
 function _classPrazo(p){
   if(p.cumprido)return'cumprido';
+  // Perdido: o tribunal marcou o prazo como excedido (não cumprido a tempo). Precisa de conferência.
+  if((p.status||'').toLowerCase()==='excedido')return'excedido';
   const hoje=new Date();hoje.setHours(0,0,0,0);
   const dt=new Date((p.data||'')+'T12:00:00');dt.setHours(0,0,0,0);
   if(isNaN(dt))return'aberto';
@@ -4120,11 +4122,26 @@ async function pPrazos(filtroInicial='ativos'){
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div id="prazos-stats" class="stat-cards-row" style="grid-template-columns:repeat(5,1fr)"></div>
   <div id="prazos-adv" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px"></div>
-  <div class="toolbar" style="justify-content:flex-end">
+  <div class="toolbar" style="justify-content:flex-end;gap:8px">
+    <button class="btn btn-secondary" id="btn-sync-prazos" onclick="sincronizarPrazos()" title="Fecha automaticamente os prazos já cumpridos/peticionados no Legal Mail">🔄 Sincronizar agora</button>
     <button class="btn btn-primary" onclick="novoPrazo()">+ Novo Prazo</button>
   </div>
   <div id="prazos-lista">Carregando...</div>`;
   await carregarPrazos();
+}
+// Botão "Sincronizar agora": chama a reconciliação do Legal Mail (fecha cumpridos/perdidos)
+// e recarrega a lista — para a advogada ver os prazos diminuírem sem esperar o cron diário.
+async function sincronizarPrazos(){
+  const b=document.getElementById('btn-sync-prazos');
+  if(b){b.disabled=true;b.textContent='⏳ Sincronizando…';}
+  try{
+    const r=await chamarFuncao('prazos-sync',{});
+    if(r&&r.erro)throw new Error(r.erro);
+    const fechados=(r&&r.cumpridos)||0, perdidos=(r&&r.excedidos)||0;
+    toast(`✅ Prazos sincronizados${fechados?` · ${fechados} fechados`:''}${perdidos?` · ${perdidos} marcados perdidos`:''}`,'ok');
+    await carregarPrazos();
+  }catch(e){ toast('Não deu para sincronizar: '+(e.message||'erro'),'erro'); }
+  finally{ if(b){b.disabled=false;b.textContent='🔄 Sincronizar agora';} }
 }
 async function carregarPrazos(){
   // Duas consultas separadas (não-cumprido x cumprido) em vez de uma só ordenada por
@@ -4153,7 +4170,7 @@ function renderPrazos(){
     const chips=[['','Todos'],['LUANA','Luana'],['SAMAIRA','Samaira'],['ALANA','Alana'],['MARIA HELENA','Maria Helena'],['CIBELE','Cibele'],['__SEM__','Sem responsável']];
     advBox.innerHTML=chips.map(([v,l])=>{const n=v?prazosCache.filter(p=>_advMatch(p,v)&&!p.cumprido&&p.data>=hojeIso).length:'';const on=prazoAdv===v;const ico=v==='__SEM__'?'⚠️':'👤';return `<button onclick="prazoAdv='${v.replace(/'/g,"\\'")}';renderPrazos()" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">${ico} ${l}${v!==''?` (${n})`:''}</button>`;}).join('');
   }
-  const g={hoje:[],vencido:[],aberto:[],cumprido:[]};
+  const g={hoje:[],vencido:[],aberto:[],cumprido:[],excedido:[]};
   base.forEach(p=>g[_classPrazo(p)].push(p));
   const stats=document.getElementById('prazos-stats');
   const ativos=[...g.hoje,...g.vencido,...g.aberto];
@@ -4174,10 +4191,17 @@ function renderPrazos(){
   else if(prazoBucket==='cumprido')lista=g.cumprido;
   else if(prazoBucket==='custas'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='custas');vazio='Nenhum prazo de custas em aberto. 💰';}
   else if(prazoBucket==='documentos'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='documentos');vazio='Nenhum prazo de documentos em aberto. 📎';}
+  else if(prazoBucket==='excedido'){lista=g.excedido;vazio='Nenhum prazo perdido. 👍';}
   else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
-  else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.cumprido];
+  else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.excedido,...g.cumprido];
   else lista=[...g.hoje,...g.aberto]; // 'ativos' (padrão): hoje + futuros. Vencidos saem daqui ("esquece o que já passou") e ficam só no card Vencidos.
-  let html = lista.length?`<div class="card"><div class="card-body">${renderPrazosLista(lista,true)}</div></div>`
+  // Alerta vermelho de perdidos (excedido) — sempre visível no topo (menos quando já se está vendo eles).
+  let html='';
+  if(g.excedido.length && prazoBucket!=='excedido'){
+    html += `<div onclick="prazoBucket='excedido';renderPrazos()" style="cursor:pointer;background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:12px 14px;margin-bottom:12px;color:#dc2626;font-size:13px;font-weight:700">
+      ⚠️ ${g.excedido.length} prazo(s) marcado(s) como PERDIDO pelo tribunal — clique para conferir se foram peticionados</div>`;
+  }
+  html += lista.length?`<div class="card"><div class="card-body">${renderPrazosLista(lista,true)}</div></div>`
     :`<div class="empty-state"><div class="icon">✅</div><p>${vazio}</p></div>`;
   // Na visão padrão (ativos), as cumpridas ficam numa seção recolhida (fechada) no fim
   if(prazoBucket==='ativos' && g.cumprido.length){
@@ -4192,8 +4216,8 @@ function renderPrazos(){
 }
 function renderPrazosLista(lista,comAcoes=false){
   if(!lista?.length)return'<div class="empty-state"><div class="icon">✅</div><p>Nenhum prazo.</p></div>';
-  const badge={hoje:['HOJE','#f87171'],vencido:['DECORRIDO','#fbbf24'],aberto:['EM ABERTO','#60a5fa'],cumprido:['CUMPRIDO','#4ade80']};
-  const boxCls={hoje:'urgente',vencido:'urgente',aberto:'proximo',cumprido:'ok'};
+  const badge={hoje:['HOJE','#f87171'],vencido:['DECORRIDO','#fbbf24'],aberto:['EM ABERTO','#60a5fa'],cumprido:['CUMPRIDO','#4ade80'],excedido:['⚠️ PERDIDO','#dc2626']};
+  const boxCls={hoje:'urgente',vencido:'urgente',aberto:'proximo',cumprido:'ok',excedido:'urgente'};
   return lista.map(p=>{
     const dt=new Date((p.data||'')+'T12:00:00');
     const cls=_classPrazo(p);const[bl,bc]=badge[cls];
@@ -4219,7 +4243,7 @@ function renderPrazosLista(lista,comAcoes=false){
       </div>
       <div class="prazo-info">
         <h4>${p.descricao||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}</h4>
-        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${mostrarCli?`🧑 ${cliNome} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:' · <span style="color:#dc2626">⚠️ sem responsável</span>'}${p.classe?` · <span style="color:#64748b">${p.classe}</span>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${naoConfirmado?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
+        <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${mostrarCli?`🧑 ${cliNome} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:' · <span style="color:#dc2626">⚠️ sem responsável</span>'}${p.classe?` · <span style="color:#64748b">${p.classe}</span>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${cls==='excedido'?' · <b style="color:#dc2626">PERDIDO — conferir se foi peticionado</b>':''}${naoConfirmado?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
         ${sug?`<p style="margin:4px 0 0"><span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:${sug==='custas'?'#d9770622':'#7c3aed22'};color:${sug==='custas'?'#b45309':'#6d28d9'}">🤖 IA sugere: ${sug==='custas'?'💰 Custas':'📎 Documentos'}${p.categoria_confianca?` · confiança ${p.categoria_confianca}`:''}</span>${p.categoria_motivo?` <span style="color:#94a3b8;font-size:11px">— ${p.categoria_motivo}</span>`:''}</p>`:''}
       </div>
       ${comAcoes?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
