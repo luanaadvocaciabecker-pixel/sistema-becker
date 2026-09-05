@@ -3030,21 +3030,50 @@ async function pJudiciais(){
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div class="toolbar">
     <div class="search-box"><input type="text" placeholder="Buscar número, cliente, assunto..." oninput="processosFiltro.busca=this.value;buscarProcessos()"></div>
-    <select class="filtro" onchange="processosFiltro.situacao=this.value;buscarProcessos()">
+    <select class="filtro" onchange="processosFiltro.situacao=this.value;buscarProcessos();carregarContagemAdv()">
       <option value="">Todos os processos</option><option>Ativo</option><option>Em andamento</option><option>Suspenso</option><option>Arquivado</option>
-    </select>
-    <select class="filtro" onchange="processosFiltro.resp=this.value;buscarProcessos()">
-      <option value="">Todos os responsáveis</option><option>Alana</option><option>Maria Helena</option><option>Luana</option><option>Samaira</option><option>Cibele</option>
     </select>
     <button id="btn-meus-proc" class="btn btn-secondary" onclick="toggleMeusProc()" style="white-space:nowrap">👤 Meus processos</button>
     <button class="btn btn-primary" onclick="novoProcesso()">+ Novo Processo</button>
   </div>
+  <div id="processos-adv" style="display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 12px"></div>
   <div class="card"><div class="table-wrap"><table>
     <thead><tr><th>Nº Processo / CNJ</th><th>Cliente</th><th>Assunto</th><th>Valor</th><th>Tribunal</th><th>Responsável</th><th>Situação</th><th></th></tr></thead>
     <tbody id="pr-tbody"><tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">Carregando...</td></tr></tbody>
   </table></div></div>
   <div id="pr-pag" style="text-align:center;padding:8px;color:#94a3b8;font-size:12px"></div>`;
   buscarProcessos();
+  carregarContagemAdv();
+}
+// Chips "quantos processos com cada advogado" (como na aba Prazos). Conta TODOS os
+// processos (respeitando só o filtro de situação, se houver), não só a página de 50.
+function _advKeyProc(s){const t=(s||'').trim().toUpperCase();return t?t:'__SEM__';}
+function _advNormProc(s){
+  const t=_advKeyProc(s);
+  if(t.startsWith('LUANA'))return 'LUANA';
+  if(t.startsWith('SAMAIRA'))return 'SAMAIRA';
+  if(t.startsWith('ALANA'))return 'ALANA';
+  if(t.startsWith('MARIA HELENA'))return 'MARIA HELENA';
+  if(t.startsWith('CIBELE'))return 'CIBELE';
+  return t;
+}
+async function carregarContagemAdv(){
+  const box=document.getElementById('processos-adv');if(!box)return;
+  let q=somenteProcessosPrincipais(supa.from('processos').select('advogado_responsavel'));
+  if(processosFiltro.situacao)q=q.eq('situacao',processosFiltro.situacao);
+  const{data}=await q.limit(3000);
+  const cont={};(data||[]).forEach(p=>{const k=_advNormProc(p.advogado_responsavel);cont[k]=(cont[k]||0)+1;});
+  const total=(data||[]).length;
+  const chips=[['','Todos',total],['LUANA','Luana',cont['LUANA']||0],['SAMAIRA','Samaira',cont['SAMAIRA']||0],['ALANA','Alana',cont['ALANA']||0],['MARIA HELENA','Maria Helena',cont['MARIA HELENA']||0],['CIBELE','Cibele',cont['CIBELE']||0],['__SEM__','Sem responsável',cont['__SEM__']||0]];
+  box.innerHTML=chips.map(([v,l,n])=>{
+    const on=(processosFiltro.resp||'')===v;const ico=v==='__SEM__'?'⚠️':v===''?'📋':'👤';
+    return `<button onclick="filtrarProcAdv('${v.replace(/'/g,"\\'")}')" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">${ico} ${l} (${n})</button>`;
+  }).join('');
+}
+function filtrarProcAdv(v){
+  processosFiltro.resp=v;
+  buscarProcessos();
+  carregarContagemAdv(); // re-render pra destacar o chip ativo
 }
 async function buscarProcessos(keepPage){
   if(!keepPage)processosFiltro.off=0;
@@ -3052,7 +3081,8 @@ async function buscarProcessos(keepPage){
   let q=somenteProcessosPrincipais(supa.from('processos').select('*,clientes(nome)',{count:'exact'})).order('created_at',{ascending:false});
   if(processosFiltro.busca)q=q.or(`numero.ilike.%${processosFiltro.busca}%,assunto.ilike.%${processosFiltro.busca}%,parte_contraria.ilike.%${processosFiltro.busca}%`);
   if(processosFiltro.situacao)q=q.eq('situacao',processosFiltro.situacao);
-  if(processosFiltro.resp)q=q.ilike('advogado_responsavel','%'+processosFiltro.resp+'%');
+  if(processosFiltro.resp==='__SEM__')q=q.or('advogado_responsavel.is.null,advogado_responsavel.eq.');
+  else if(processosFiltro.resp)q=q.ilike('advogado_responsavel','%'+processosFiltro.resp+'%');
   if(processosFiltro.cliente)q=q.eq('cliente_id',processosFiltro.cliente);
   if(processosFiltro.meus){const e=(usuarioAtual?.email||'').split('@')[0];if(e)q=q.ilike('advogado_responsavel','%'+e+'%');}
   const{data,count,error}=await q.range(_off,_off+49);
