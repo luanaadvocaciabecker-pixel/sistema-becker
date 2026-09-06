@@ -3036,7 +3036,8 @@ async function pJudiciais(){
     <button id="btn-meus-proc" class="btn btn-secondary" onclick="toggleMeusProc()" style="white-space:nowrap">👤 Meus processos</button>
     <button class="btn btn-primary" onclick="novoProcesso()">+ Novo Processo</button>
   </div>
-  <div id="processos-adv" style="display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 12px"></div>
+  <div id="processos-adv" style="display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 4px"></div>
+  <div style="font-size:11px;color:#94a3b8;margin:0 0 12px">Contagem = carga atual (Ativo + Em andamento). Arquivados e suspensos ficam de fora — filtre por situação para vê-los.</div>
   <div class="card"><div class="table-wrap"><table>
     <thead><tr><th>Nº Processo / CNJ</th><th>Cliente</th><th>Assunto</th><th>Valor</th><th>Tribunal</th><th>Responsável</th><th>Situação</th><th></th></tr></thead>
     <tbody id="pr-tbody"><tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">Carregando...</td></tr></tbody>
@@ -3059,12 +3060,16 @@ function _advNormProc(s){
 }
 async function carregarContagemAdv(){
   const box=document.getElementById('processos-adv');if(!box)return;
-  let q=somenteProcessosPrincipais(supa.from('processos').select('advogado_responsavel'));
+  // Sem filtro de situação, conta só a CARGA (Ativo + Em andamento) — arquivados e
+  // suspensos ficam de fora, senão o número engana (ex.: Samaira 203 com 28 arquivados).
+  let q=somenteProcessosPrincipais(supa.from('processos').select('advogado_responsavel,situacao'));
   if(processosFiltro.situacao)q=q.eq('situacao',processosFiltro.situacao);
   const{data}=await q.limit(3000);
-  const cont={};(data||[]).forEach(p=>{const k=_advNormProc(p.advogado_responsavel);cont[k]=(cont[k]||0)+1;});
-  const total=(data||[]).length;
-  const chips=[['','Todos',total],['LUANA','Luana',cont['LUANA']||0],['SAMAIRA','Samaira',cont['SAMAIRA']||0],['ALANA','Alana',cont['ALANA']||0],['MARIA HELENA','Maria Helena',cont['MARIA HELENA']||0],['CIBELE','Cibele',cont['CIBELE']||0],['__SEM__','Sem responsável',cont['__SEM__']||0]];
+  const base=processosFiltro.situacao?(data||[]):(data||[]).filter(p=>p.situacao==='Ativo'||p.situacao==='Em andamento');
+  const cont={};base.forEach(p=>{const k=_advNormProc(p.advogado_responsavel);cont[k]=(cont[k]||0)+1;});
+  const total=base.length;
+  const rotTodos=processosFiltro.situacao?('Todos '+processosFiltro.situacao):'Ativos';
+  const chips=[['',rotTodos,total],['LUANA','Luana',cont['LUANA']||0],['SAMAIRA','Samaira',cont['SAMAIRA']||0],['ALANA','Alana',cont['ALANA']||0],['MARIA HELENA','Maria Helena',cont['MARIA HELENA']||0],['CIBELE','Cibele',cont['CIBELE']||0],['__SEM__','Sem responsável',cont['__SEM__']||0]];
   box.innerHTML=chips.map(([v,l,n])=>{
     const on=(processosFiltro.resp||'')===v;const ico=v==='__SEM__'?'⚠️':v===''?'📋':'👤';
     return `<button onclick="filtrarProcAdv('${v.replace(/'/g,"\\'")}')" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">${ico} ${l} (${n})</button>`;
@@ -3189,6 +3194,7 @@ async function abrirProcesso(id){
     <div><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">⏰ Prazos</h4><div id="proc-prazos">Carregando...</div></div>
   </div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">🏛️ Audiências</h4><div id="proc-audiencias">Carregando...</div></div>
+  <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">📤 Petições protocoladas</h4><div id="proc-peticoes">Carregando...</div></div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">🤖 Autos + Inteligência</h4><div id="proc-autosia">Carregando...</div></div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">💬 Perguntar à IA sobre este processo</h4><div id="proc-chat"></div></div>
   <div style="margin-top:20px"><h4 style="margin:0 0 10px;font-size:14px;color:var(--texto)">📄 Documentos & íntegra</h4><div id="proc-docs">Carregando...</div></div>
@@ -3196,6 +3202,7 @@ async function abrirProcesso(id){
   carregarMovsProcesso(id);
   carregarPrazosProcesso(id);
   carregarAudienciasProcesso(id);
+  carregarPeticoesProcesso(id);
   carregarAutosIA(id);
   montarChatProcesso(id);
   carregarDocsProcesso(id);
@@ -3343,6 +3350,24 @@ function autosIApoll(id){
     setTimeout(tick,15000);
   };
   setTimeout(tick,15000);
+}
+// Petições protocoladas via Legal Mail (webhook peticao_status -> tabela peticoes).
+async function carregarPeticoesProcesso(id){
+  const el=document.getElementById('proc-peticoes');if(!el)return;
+  const{data}=await supa.from('peticoes').select('descricao,status,alterado_em,instancia,sistema_tribunal').eq('processo_id',id).order('alterado_em',{ascending:false}).limit(30);
+  if(!data?.length){el.innerHTML='<div class="empty-state" style="padding:16px"><p style="font-size:13px">Nenhuma petição protocolada pelo Legal Mail neste processo.</p></div>';return;}
+  const selo=s=>{const t=(s||'').toLowerCase();
+    if(t.indexOf('protocolad')>-1)return'<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#22c55e22;color:#15803d">✓ PROTOCOLADO</span>';
+    if(t.indexOf('protocoland')>-1)return'<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">⏳ PROTOCOLANDO</span>';
+    if(t.indexOf('erro')>-1||t.indexOf('falh')>-1)return'<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#ef444422;color:#dc2626">⚠️ '+escHtml(s||'')+'</span>';
+    return'<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#94a3b822;color:#64748b">'+escHtml(s||'—')+'</span>';};
+  el.innerHTML=`<div class="card"><div class="card-body">${data.map(x=>`
+    <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <strong style="font-size:13px">${escHtml(x.descricao||'Petição')}</strong>${selo(x.status)}
+      </div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">${x.alterado_em?new Date(x.alterado_em).toLocaleString('pt-BR'):''}${x.instancia?' · '+escHtml(x.instancia):''}${x.sistema_tribunal?' · '+escHtml(x.sistema_tribunal):''}</div>
+    </div>`).join('')}</div></div>`;
 }
 async function carregarAudienciasProcesso(id){
   const el=document.getElementById('proc-audiencias');if(!el)return;
