@@ -6256,14 +6256,26 @@ async function beckerIADocPuxar(){
   const classe=p.classe_processual||lm?.classe||'';
   const vara=p.vara||lm?.vara||'';
   const assunto=p.assunto||lm?.assunto||'';
+  // dd/mm/aaaa a partir do ISO, sem criar Date (não escorrega de fuso)
+  const dtBR=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||'');return m?`${m[3]}/${m[2]}/${m[1]}`:'';};
+  const distrib=dtBR(lm?.data_distribuicao);
+  // Valor da causa vem como "82205.56" — formata em real para a peça não sair com ponto.
+  const valorBR=(()=>{const n=Number(lm?.valor_causa);
+    return Number.isFinite(n)&&n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):(lm?.valor_causa||'');})();
+  // O lawsuit/detail NÃO devolve qualificação de parte (conferido em 30 processos): sem
+  // CPF/CNPJ, endereço, advogado ou OAB da parte contrária. Então esses itens continuam
+  // como [PREENCHER] — nunca inventados — e a IA sabe que tem de pedir.
   const bloco=[
     `Processo nº ${p.numero||''} — ${p.tribunal||lm?.tribunal||''} ${vara?('/ '+vara):''} ${p.comarca?('/ '+p.comarca):''}`.trim(),
-    classe?`Classe: ${classe}`:'',
+    lm?.sistema_tribunal?`Sistema do tribunal: ${lm.sistema_tribunal}`:'',
+    classe?`Classe: ${classe}${lm?.classe_sigla?` (${lm.classe_sigla})`:''}`:'',
     assunto?`Assunto: ${assunto}`:'',
-    lm?.valor_causa?`Valor da causa: R$ ${lm.valor_causa}`:'',
+    distrib?`Distribuído em: ${distrib}`:'',
+    valorBR?`Valor da causa: R$ ${valorBR}`:'',
     ...linhaPartes,
     `Cliente do escritório (parte representada): ${cli.nome||'[PREENCHER]'}${cli.cpf_cnpj?(', CPF/CNPJ '+cli.cpf_cnpj):''}${cli.rua?(', end. '+cli.rua):''}${cli.cep?(', CEP '+cli.cep):''}`,
     (!linhaPartes.length&&p.parte_contraria)?`Parte contrária: ${p.parte_contraria}`:'',
+    'Qualificação da parte contrária (CPF/CNPJ, endereço, advogado e OAB): [PREENCHER] — o Legal Mail não fornece esses dados; tire da inicial nos autos.',
     '','FATOS / PEDIDO (completar):',''
   ].filter(x=>x!=='').join('\n');
   const ta=document.getElementById('ia-doc-contexto'); ta.value=bloco+(ta.value?('\n'+ta.value):'');
