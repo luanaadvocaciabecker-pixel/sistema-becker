@@ -4190,6 +4190,26 @@ async function excluirMov(id){
 //   hoje = vence hoje e não cumprido | vencido = data passou e não cumprido (decorrido)
 //   aberto = futuro e não cumprido   | cumprido = marcado como cumprido
 let prazosCache=[]; let prazoBucket='ativos'; let prazoVerCumpridos=false; let prazoAdv='';
+// Filtro por data: prazoPeriodo é um dos presets ('hoje','7','15','30','mes') ou 'custom',
+// e aí valem prazoDe/prazoAte. Vazio = qualquer data.
+let prazoPeriodo=''; let prazoDe=''; let prazoAte='';
+const _hojeIso=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().split('T')[0];};
+// Janela [de,ate] em ISO para o período escolhido. null = sem filtro de data.
+function _janelaPrazo(){
+  if(!prazoPeriodo)return null;
+  const hoje=_hojeIso();
+  if(prazoPeriodo==='hoje')return[hoje,hoje];
+  if(prazoPeriodo==='mes'){const[a,m]=hoje.split('-');const fim=new Date(+a,+m,0);
+    return[`${a}-${m}-01`,`${a}-${m}-${String(fim.getDate()).padStart(2,'0')}`];}
+  if(prazoPeriodo==='custom')return(prazoDe||prazoAte)?[prazoDe||'0000-01-01',prazoAte||'9999-12-31']:null;
+  const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+Number(prazoPeriodo));
+  return[hoje,d.toISOString().split('T')[0]];
+}
+// Prazo sem data fica de fora quando há filtro de período (não dá para posicioná-lo).
+function _noPeriodo(p){
+  const j=_janelaPrazo(); if(!j)return true;
+  return !!p.data && p.data>=j[0] && p.data<=j[1];
+}
 const _advCurto=s=>{if(!s)return'';const w=s.trim().split(/\s+/)[0];return w?w[0].toUpperCase()+w.slice(1).toLowerCase():'';};
 function _classPrazo(p){
   if(p.cumprido)return'cumprido';
@@ -4222,11 +4242,28 @@ function _chipDias(p){
 async function pPrazos(filtroInicial='ativos'){
   const mapa={pendentes:'ativos',todos:'todos',cumpridos:'cumprido',audiencias:'audiencias'};
   prazoBucket=mapa[filtroInicial]||filtroInicial||'ativos';
+  // Filtros são estado global: zera ao entrar para não herdar a seleção da visita anterior.
+  prazoAdv='';prazoPeriodo='';prazoDe='';prazoAte='';
   document.getElementById('conteudo').innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div id="prazos-stats" class="stat-cards-row" style="grid-template-columns:repeat(5,1fr)"></div>
-  <div id="prazos-adv" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px"></div>
-  <div class="toolbar" style="justify-content:flex-end;gap:8px">
+  <div class="toolbar" style="gap:8px;margin-top:10px">
+    <select class="filtro" id="prazo-f-adv" style="min-width:150px" onchange="prazoAdv=this.value;renderPrazos()"></select>
+    <select class="filtro" id="prazo-f-per" style="min-width:150px" onchange="prazoPeriodo=this.value;renderPrazos()">
+      <option value="">Qualquer data</option>
+      <option value="hoje">Vence hoje</option>
+      <option value="7">Próximos 7 dias</option>
+      <option value="15">Próximos 15 dias</option>
+      <option value="30">Próximos 30 dias</option>
+      <option value="mes">Este mês</option>
+      <option value="custom">Período específico…</option>
+    </select>
+    <span id="prazo-f-datas" style="display:none;gap:6px;align-items:center">
+      <input type="date" class="filtro" id="prazo-de" title="De" onchange="prazoDe=this.value;renderPrazos()">
+      <span style="color:#94a3b8;font-size:12px">até</span>
+      <input type="date" class="filtro" id="prazo-ate" title="Até" onchange="prazoAte=this.value;renderPrazos()">
+    </span>
+    <span style="flex:1"></span>
     <button class="btn btn-secondary" id="btn-sync-prazos" onclick="sincronizarPrazos()" title="Fecha automaticamente os prazos já cumpridos/peticionados no Legal Mail">🔄 Sincronizar agora</button>
     <button class="btn btn-primary" onclick="novoPrazo()">+ Novo Prazo</button>
   </div>
@@ -4266,14 +4303,23 @@ function renderPrazos(){
   // Compara por nome normalizado (MAIÚSCULO/trim); '__SEM__' = prazo sem responsável no processo.
   const _advKey=s=>{const t=(s||'').trim().toUpperCase();return t?t:'__SEM__';};
   const _advMatch=(p,v)=>{if(!v)return true;const k=_advKey(advDe(p));return v==='__SEM__'?k==='__SEM__':k.includes(v);};
-  const base=prazoAdv?prazosCache.filter(p=>_advMatch(p,prazoAdv)):prazosCache;
-  // chips de advogado (inclui Cibele e "Sem responsável" pra nenhum prazo ficar escondido)
-  const advBox=document.getElementById('prazos-adv');
-  if(advBox){
-    const hojeIso=new Date().toISOString().split('T')[0];
-    const chips=[['','Todos'],['LUANA','Luana'],['SAMAIRA','Samaira'],['ALANA','Alana'],['MARIA HELENA','Maria Helena'],['CIBELE','Cibele'],['__SEM__','Sem responsável']];
-    advBox.innerHTML=chips.map(([v,l])=>{const n=v?prazosCache.filter(p=>_advMatch(p,v)&&!p.cumprido&&p.data>=hojeIso).length:'';const on=prazoAdv===v;const ico=v==='__SEM__'?'⚠️':'👤';return `<button onclick="prazoAdv='${v.replace(/'/g,"\\'")}';renderPrazos()" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">${ico} ${l}${v!==''?` (${n})`:''}</button>`;}).join('');
+  const base=prazosCache.filter(p=>_advMatch(p,prazoAdv)&&_noPeriodo(p));
+  // Seletor de responsável (inclui Cibele e "Sem responsável" pra nenhum prazo ficar
+  // escondido). A contagem entre parênteses é a mesma que os chips mostravam: em aberto
+  // daqui para frente.
+  const advSel=document.getElementById('prazo-f-adv');
+  if(advSel){
+    const hojeIso=_hojeIso();
+    const opcoes=[['','Todos os responsáveis'],['LUANA','Luana'],['SAMAIRA','Samaira'],['ALANA','Alana'],['MARIA HELENA','Maria Helena'],['CIBELE','Cibele'],['__SEM__','⚠️ Sem responsável']];
+    advSel.innerHTML=opcoes.map(([v,l])=>{
+      const n=prazosCache.filter(p=>_advMatch(p,v)&&!p.cumprido&&p.data>=hojeIso).length;
+      return `<option value="${v}">${l} (${n})</option>`;
+    }).join('');
+    advSel.value=prazoAdv;   // repintar o select não pode perder a escolha dela
   }
+  // Os campos de/até só aparecem em "Período específico…"
+  const dtBox=document.getElementById('prazo-f-datas');
+  if(dtBox)dtBox.style.display=prazoPeriodo==='custom'?'flex':'none';
   const g={hoje:[],vencido:[],aberto:[],cumprido:[],excedido:[]};
   base.forEach(p=>g[_classPrazo(p)].push(p));
   const stats=document.getElementById('prazos-stats');
