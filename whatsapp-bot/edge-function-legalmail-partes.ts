@@ -87,16 +87,37 @@ Deno.serve(async (req) => {
     if (http < 200 || http >= 300) return json({ erro: `legal mail detail http ${http}` }, 502);
     const src = (raw && typeof raw === "object") ? (Array.isArray(raw) ? raw[0] : (raw.lawsuit || raw.processo || raw.data || raw)) : {};
     const partes = extrairPartes(src);
+    // Inventário do `lawsuit/detail` feito em 07/09/2026 sobre 30 processos e 8 tribunais
+    // (eproc, projudi, pje). O endpoint devolve exatamente 20 campos, e o que importa saber:
+    //
+    //   NÃO EXISTE qualificação de parte. Nem CPF/CNPJ, nem endereço, nem advogado, nem OAB.
+    //   Quem precisar desse bloco para uma peça tem de tirar dos autos (caminho pago) ou do
+    //   cadastro do próprio cliente. Não gaste tempo procurando aqui de novo.
+    //
+    // Sempre preenchidos (30/30): idprocessos, numero_processo, tribunal, sistema_tribunal,
+    //   inbox_atual, hash_processo, last_import.
+    // Quase sempre: nome_classe, abreviatura_classe, juizo, poloativo_nome (29/30),
+    //   polopassivo_nome (28/30), processo_tema (29/30), valor_causa (23/30),
+    //   data_distribuicao (20/30).
+    // Existem no schema mas vêm SEMPRE nulos (0/30): area_processo, assuntos, data_prazo,
+    //   foro. Os fallbacks abaixo que apontam para eles ficam só por robustez.
+    // campos_personalizados: array, sempre vazio — o escritório nunca configurou nenhum.
     return json({
       ok: true, idprocessos: idp, numero,
       partes,
       classe: src?.nome_classe || src?.classe || src?.classe_processual || null,
+      classe_sigla: src?.abreviatura_classe || null,
       assunto: src?.processo_tema || src?.assuntos || src?.assunto || null,
       vara: src?.juizo || src?.vara || src?.orgao_julgador || null,
       comarca: src?.comarca || null,
       valor_causa: src?.valor_causa || null,
       tribunal: src?.tribunal || null,
+      sistema_tribunal: src?.sistema_tribunal || null,
       data_distribuicao: src?.data_distribuicao || null,
+      // Pasta do processo no Legal Mail ("Arquivados", etc.). Não entra na peça, mas é uma
+      // fonte independente sobre o processo estar ou não encerrado — serve para conferir a
+      // situação do cadastro, que foi justamente o que divergiu na planilha do escritório.
+      inbox_legalmail: src?.inbox_atual || null,
     });
   } catch (e) { return json({ erro: String(e).slice(0, 300) }, 500); }
 });
