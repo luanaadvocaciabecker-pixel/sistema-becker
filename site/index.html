@@ -4194,13 +4194,17 @@ let prazosCache=[]; let prazoBucket='ativos'; let prazoVerCumpridos=false; let p
 // e aí valem prazoDe/prazoAte. Vazio = qualquer data.
 let prazoPeriodo=''; let prazoDe=''; let prazoAte='';
 const _hojeIso=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().split('T')[0];};
+// Mês inteiro a partir de 'AAAA-MM' -> ['AAAA-MM-01','AAAA-MM-<último dia>']
+const _mesInteiro=am=>{const[a,m]=am.split('-');const fim=new Date(+a,+m,0).getDate();
+  return[`${a}-${m}-01`,`${a}-${m}-${String(fim).padStart(2,'0')}`];};
 // Janela [de,ate] em ISO para o período escolhido. null = sem filtro de data.
 function _janelaPrazo(){
   if(!prazoPeriodo)return null;
   const hoje=_hojeIso();
   if(prazoPeriodo==='hoje')return[hoje,hoje];
-  if(prazoPeriodo==='mes'){const[a,m]=hoje.split('-');const fim=new Date(+a,+m,0);
-    return[`${a}-${m}-01`,`${a}-${m}-${String(fim.getDate()).padStart(2,'0')}`];}
+  if(prazoPeriodo==='mes')return _mesInteiro(hoje.slice(0,7));
+  if(prazoPeriodo==='dia')return prazoDe?[prazoDe,prazoDe]:null;
+  if(prazoPeriodo==='mesano')return /^\d{4}-\d{2}$/.test(prazoDe)?_mesInteiro(prazoDe):null;
   if(prazoPeriodo==='custom')return(prazoDe||prazoAte)?[prazoDe||'0000-01-01',prazoAte||'9999-12-31']:null;
   const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+Number(prazoPeriodo));
   return[hoje,d.toISOString().split('T')[0]];
@@ -4249,15 +4253,23 @@ async function pPrazos(filtroInicial='ativos'){
   <div id="prazos-stats" class="stat-cards-row" style="grid-template-columns:repeat(5,1fr)"></div>
   <div class="toolbar" style="gap:8px;margin-top:10px">
     <select class="filtro" id="prazo-f-adv" style="min-width:150px" onchange="prazoAdv=this.value;renderPrazos()"></select>
-    <select class="filtro" id="prazo-f-per" style="min-width:150px" onchange="prazoPeriodo=this.value;renderPrazos()">
+    <select class="filtro" id="prazo-f-per" style="min-width:150px" onchange="prazoPeriodo=this.value;prazoDe='';prazoAte='';renderPrazos()">
       <option value="">Qualquer data</option>
       <option value="hoje">Vence hoje</option>
       <option value="7">Próximos 7 dias</option>
       <option value="15">Próximos 15 dias</option>
       <option value="30">Próximos 30 dias</option>
       <option value="mes">Este mês</option>
+      <option value="dia">Escolher o dia…</option>
+      <option value="mesano">Escolher mês/ano…</option>
       <option value="custom">Período específico…</option>
     </select>
+    <span id="prazo-f-dia" style="display:none;align-items:center">
+      <input type="date" class="filtro" id="prazo-dia-v" title="Dia" onchange="prazoDe=this.value;renderPrazos()">
+    </span>
+    <span id="prazo-f-mesano" style="display:none;align-items:center">
+      <input type="month" class="filtro" id="prazo-mesano-v" title="Mês e ano" onchange="prazoDe=this.value;renderPrazos()">
+    </span>
     <span id="prazo-f-datas" style="display:none;gap:6px;align-items:center">
       <input type="date" class="filtro" id="prazo-de" title="De" onchange="prazoDe=this.value;renderPrazos()">
       <span style="color:#94a3b8;font-size:12px">até</span>
@@ -4317,9 +4329,10 @@ function renderPrazos(){
     }).join('');
     advSel.value=prazoAdv;   // repintar o select não pode perder a escolha dela
   }
-  // Os campos de/até só aparecem em "Período específico…"
-  const dtBox=document.getElementById('prazo-f-datas');
-  if(dtBox)dtBox.style.display=prazoPeriodo==='custom'?'flex':'none';
+  // Cada modo mostra só o campo que lhe interessa (dia / mês+ano / de-até)
+  [['prazo-f-dia','dia'],['prazo-f-mesano','mesano'],['prazo-f-datas','custom']].forEach(([id,modo])=>{
+    const b=document.getElementById(id); if(b)b.style.display=prazoPeriodo===modo?'flex':'none';
+  });
   const g={hoje:[],vencido:[],aberto:[],cumprido:[],excedido:[]};
   base.forEach(p=>g[_classPrazo(p)].push(p));
   const stats=document.getElementById('prazos-stats');
@@ -4401,7 +4414,9 @@ function renderPrazosLista(lista,comAcoes=false){
         ${!p.cumprido?`<button class="btn-icon" title="Marcar: recolher custas" style="opacity:${p.categoria==='custas'?1:.4}" onclick="setCatPrazo('${p.id}','custas')">💰</button>
         <button class="btn-icon" title="Marcar: apresentar documento" style="opacity:${p.categoria==='documentos'?1:.4}" onclick="setCatPrazo('${p.id}','documentos')">📎</button>`:''}
         ${naoConfirmado&&!p.cumprido?`<button class="btn btn-sm" style="background:#fef3c7;color:#b45309" onclick="confirmarPrazo('${p.id}','${p.data||''}')">✎ Confirmar data</button>`:''}
-        ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d" onclick="cumprir('${p.id}')">✓ Cumprir</button>`:'<span style="color:#15803d;font-size:12px">✅ Cumprido</span>'}
+        ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d" onclick="cumprir('${p.id}')">✓ Cumprir</button>`
+          :`<span style="color:#15803d;font-size:12px">✅ Cumprido</span>
+            <button class="btn btn-sm" style="background:#e0e7ff;color:#3730a3" title="Marcou sem querer? Volta o prazo para em aberto" onclick="reabrirPrazo('${p.id}')">↩ Reabrir</button>`}
         <button class="btn-icon" onclick="excluirPrazo('${p.id}')">🗑️</button>
       </div>`:''}
     </div>`;
@@ -4436,6 +4451,17 @@ async function novoPrazo(){
 async function cumprir(id){
   await supa.from('prazos').update({cumprido:true}).eq('id',id);
   toast('Prazo cumprido!','ok');carregarPrazos();
+}
+// Desfaz o "Cumprir". Existe porque o clique é de um toque só e já houve prazo de
+// véspera marcado sem querer — sem isso a correção só saía no banco.
+// status volta para 'pendente': é o que o Legal Mail usa para prazo em aberto, e a
+// reconciliação torna a fechar sozinha se o tribunal disser que foi peticionado.
+async function reabrirPrazo(id){
+  const p=prazosCache.find(x=>String(x.id)===String(id));
+  if(!confirm(`Reabrir este prazo?\n\n${(p?.descricao||'').slice(0,120)}\n\nEle volta para a lista de prazos em aberto.`))return;
+  const{error}=await supa.from('prazos').update({cumprido:false,status:'pendente'}).eq('id',id);
+  if(error){toast('Não deu para reabrir: '+error.message,'erro');return;}
+  toast('Prazo reaberto — está de volta em aberto.','ok');carregarPrazos();
 }
 // Marca/desmarca a categoria do prazo (custas / documentos). Clicar de novo tira.
 // Grava categoria_fonte='humano': trava contra o classificador de IA sobrescrever a decisão da pessoa.
