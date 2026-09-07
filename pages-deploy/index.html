@@ -4190,6 +4190,30 @@ async function excluirMov(id){
 //   hoje = vence hoje e não cumprido | vencido = data passou e não cumprido (decorrido)
 //   aberto = futuro e não cumprido   | cumprido = marcado como cumprido
 let prazosCache=[]; let prazoBucket='ativos'; let prazoVerCumpridos=false; let prazoAdv='';
+// Filtro por data: prazoPeriodo é um dos presets ('hoje','7','15','30','mes') ou 'custom',
+// e aí valem prazoDe/prazoAte. Vazio = qualquer data.
+let prazoPeriodo=''; let prazoDe=''; let prazoAte='';
+const _hojeIso=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().split('T')[0];};
+// Mês inteiro a partir de 'AAAA-MM' -> ['AAAA-MM-01','AAAA-MM-<último dia>']
+const _mesInteiro=am=>{const[a,m]=am.split('-');const fim=new Date(+a,+m,0).getDate();
+  return[`${a}-${m}-01`,`${a}-${m}-${String(fim).padStart(2,'0')}`];};
+// Janela [de,ate] em ISO para o período escolhido. null = sem filtro de data.
+function _janelaPrazo(){
+  if(!prazoPeriodo)return null;
+  const hoje=_hojeIso();
+  if(prazoPeriodo==='hoje')return[hoje,hoje];
+  if(prazoPeriodo==='mes')return _mesInteiro(hoje.slice(0,7));
+  if(prazoPeriodo==='dia')return prazoDe?[prazoDe,prazoDe]:null;
+  if(prazoPeriodo==='mesano')return /^\d{4}-\d{2}$/.test(prazoDe)?_mesInteiro(prazoDe):null;
+  if(prazoPeriodo==='custom')return(prazoDe||prazoAte)?[prazoDe||'0000-01-01',prazoAte||'9999-12-31']:null;
+  const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+Number(prazoPeriodo));
+  return[hoje,d.toISOString().split('T')[0]];
+}
+// Prazo sem data fica de fora quando há filtro de período (não dá para posicioná-lo).
+function _noPeriodo(p){
+  const j=_janelaPrazo(); if(!j)return true;
+  return !!p.data && p.data>=j[0] && p.data<=j[1];
+}
 const _advCurto=s=>{if(!s)return'';const w=s.trim().split(/\s+/)[0];return w?w[0].toUpperCase()+w.slice(1).toLowerCase():'';};
 function _classPrazo(p){
   if(p.cumprido)return'cumprido';
@@ -4222,11 +4246,36 @@ function _chipDias(p){
 async function pPrazos(filtroInicial='ativos'){
   const mapa={pendentes:'ativos',todos:'todos',cumpridos:'cumprido',audiencias:'audiencias'};
   prazoBucket=mapa[filtroInicial]||filtroInicial||'ativos';
+  // Filtros são estado global: zera ao entrar para não herdar a seleção da visita anterior.
+  prazoAdv='';prazoPeriodo='';prazoDe='';prazoAte='';
   document.getElementById('conteudo').innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div id="prazos-stats" class="stat-cards-row" style="grid-template-columns:repeat(5,1fr)"></div>
-  <div id="prazos-adv" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px"></div>
-  <div class="toolbar" style="justify-content:flex-end;gap:8px">
+  <div class="toolbar" style="gap:8px;margin-top:10px">
+    <select class="filtro" id="prazo-f-adv" style="min-width:150px" onchange="prazoAdv=this.value;renderPrazos()"></select>
+    <select class="filtro" id="prazo-f-per" style="min-width:150px" onchange="prazoPeriodo=this.value;prazoDe='';prazoAte='';renderPrazos()">
+      <option value="">Qualquer data</option>
+      <option value="hoje">Vence hoje</option>
+      <option value="7">Próximos 7 dias</option>
+      <option value="15">Próximos 15 dias</option>
+      <option value="30">Próximos 30 dias</option>
+      <option value="mes">Este mês</option>
+      <option value="dia">Escolher o dia…</option>
+      <option value="mesano">Escolher mês/ano…</option>
+      <option value="custom">Período específico…</option>
+    </select>
+    <span id="prazo-f-dia" style="display:none;align-items:center">
+      <input type="date" class="filtro" id="prazo-dia-v" title="Dia" onchange="prazoDe=this.value;renderPrazos()">
+    </span>
+    <span id="prazo-f-mesano" style="display:none;align-items:center">
+      <input type="month" class="filtro" id="prazo-mesano-v" title="Mês e ano" onchange="prazoDe=this.value;renderPrazos()">
+    </span>
+    <span id="prazo-f-datas" style="display:none;gap:6px;align-items:center">
+      <input type="date" class="filtro" id="prazo-de" title="De" onchange="prazoDe=this.value;renderPrazos()">
+      <span style="color:#94a3b8;font-size:12px">até</span>
+      <input type="date" class="filtro" id="prazo-ate" title="Até" onchange="prazoAte=this.value;renderPrazos()">
+    </span>
+    <span style="flex:1"></span>
     <button class="btn btn-secondary" id="btn-sync-prazos" onclick="sincronizarPrazos()" title="Fecha automaticamente os prazos já cumpridos/peticionados no Legal Mail">🔄 Sincronizar agora</button>
     <button class="btn btn-primary" onclick="novoPrazo()">+ Novo Prazo</button>
   </div>
@@ -4266,14 +4315,24 @@ function renderPrazos(){
   // Compara por nome normalizado (MAIÚSCULO/trim); '__SEM__' = prazo sem responsável no processo.
   const _advKey=s=>{const t=(s||'').trim().toUpperCase();return t?t:'__SEM__';};
   const _advMatch=(p,v)=>{if(!v)return true;const k=_advKey(advDe(p));return v==='__SEM__'?k==='__SEM__':k.includes(v);};
-  const base=prazoAdv?prazosCache.filter(p=>_advMatch(p,prazoAdv)):prazosCache;
-  // chips de advogado (inclui Cibele e "Sem responsável" pra nenhum prazo ficar escondido)
-  const advBox=document.getElementById('prazos-adv');
-  if(advBox){
-    const hojeIso=new Date().toISOString().split('T')[0];
-    const chips=[['','Todos'],['LUANA','Luana'],['SAMAIRA','Samaira'],['ALANA','Alana'],['MARIA HELENA','Maria Helena'],['CIBELE','Cibele'],['__SEM__','Sem responsável']];
-    advBox.innerHTML=chips.map(([v,l])=>{const n=v?prazosCache.filter(p=>_advMatch(p,v)&&!p.cumprido&&p.data>=hojeIso).length:'';const on=prazoAdv===v;const ico=v==='__SEM__'?'⚠️':'👤';return `<button onclick="prazoAdv='${v.replace(/'/g,"\\'")}';renderPrazos()" style="border:1px solid ${on?'#2563eb':'var(--border)'};background:${on?'#2563eb':'#fff'};color:${on?'#fff':'#334155'};border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">${ico} ${l}${v!==''?` (${n})`:''}</button>`;}).join('');
+  const base=prazosCache.filter(p=>_advMatch(p,prazoAdv)&&_noPeriodo(p));
+  // Seletor de responsável (inclui Cibele e "Sem responsável" pra nenhum prazo ficar
+  // escondido). A contagem entre parênteses é a mesma que os chips mostravam: em aberto
+  // daqui para frente.
+  const advSel=document.getElementById('prazo-f-adv');
+  if(advSel){
+    const hojeIso=_hojeIso();
+    const opcoes=[['','Todos os responsáveis'],['LUANA','Luana'],['SAMAIRA','Samaira'],['ALANA','Alana'],['MARIA HELENA','Maria Helena'],['CIBELE','Cibele'],['__SEM__','⚠️ Sem responsável']];
+    advSel.innerHTML=opcoes.map(([v,l])=>{
+      const n=prazosCache.filter(p=>_advMatch(p,v)&&!p.cumprido&&p.data>=hojeIso).length;
+      return `<option value="${v}">${l} (${n})</option>`;
+    }).join('');
+    advSel.value=prazoAdv;   // repintar o select não pode perder a escolha dela
   }
+  // Cada modo mostra só o campo que lhe interessa (dia / mês+ano / de-até)
+  [['prazo-f-dia','dia'],['prazo-f-mesano','mesano'],['prazo-f-datas','custom']].forEach(([id,modo])=>{
+    const b=document.getElementById(id); if(b)b.style.display=prazoPeriodo===modo?'flex':'none';
+  });
   const g={hoje:[],vencido:[],aberto:[],cumprido:[],excedido:[]};
   base.forEach(p=>g[_classPrazo(p)].push(p));
   const stats=document.getElementById('prazos-stats');
@@ -4355,7 +4414,9 @@ function renderPrazosLista(lista,comAcoes=false){
         ${!p.cumprido?`<button class="btn-icon" title="Marcar: recolher custas" style="opacity:${p.categoria==='custas'?1:.4}" onclick="setCatPrazo('${p.id}','custas')">💰</button>
         <button class="btn-icon" title="Marcar: apresentar documento" style="opacity:${p.categoria==='documentos'?1:.4}" onclick="setCatPrazo('${p.id}','documentos')">📎</button>`:''}
         ${naoConfirmado&&!p.cumprido?`<button class="btn btn-sm" style="background:#fef3c7;color:#b45309" onclick="confirmarPrazo('${p.id}','${p.data||''}')">✎ Confirmar data</button>`:''}
-        ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d" onclick="cumprir('${p.id}')">✓ Cumprir</button>`:'<span style="color:#15803d;font-size:12px">✅ Cumprido</span>'}
+        ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d" onclick="cumprir('${p.id}')">✓ Cumprir</button>`
+          :`<span style="color:#15803d;font-size:12px">✅ Cumprido</span>
+            <button class="btn btn-sm" style="background:#e0e7ff;color:#3730a3" title="Marcou sem querer? Volta o prazo para em aberto" onclick="reabrirPrazo('${p.id}')">↩ Reabrir</button>`}
         <button class="btn-icon" onclick="excluirPrazo('${p.id}')">🗑️</button>
       </div>`:''}
     </div>`;
@@ -4390,6 +4451,17 @@ async function novoPrazo(){
 async function cumprir(id){
   await supa.from('prazos').update({cumprido:true}).eq('id',id);
   toast('Prazo cumprido!','ok');carregarPrazos();
+}
+// Desfaz o "Cumprir". Existe porque o clique é de um toque só e já houve prazo de
+// véspera marcado sem querer — sem isso a correção só saía no banco.
+// status volta para 'pendente': é o que o Legal Mail usa para prazo em aberto, e a
+// reconciliação torna a fechar sozinha se o tribunal disser que foi peticionado.
+async function reabrirPrazo(id){
+  const p=prazosCache.find(x=>String(x.id)===String(id));
+  if(!confirm(`Reabrir este prazo?\n\n${(p?.descricao||'').slice(0,120)}\n\nEle volta para a lista de prazos em aberto.`))return;
+  const{error}=await supa.from('prazos').update({cumprido:false,status:'pendente'}).eq('id',id);
+  if(error){toast('Não deu para reabrir: '+error.message,'erro');return;}
+  toast('Prazo reaberto — está de volta em aberto.','ok');carregarPrazos();
 }
 // Marca/desmarca a categoria do prazo (custas / documentos). Clicar de novo tira.
 // Grava categoria_fonte='humano': trava contra o classificador de IA sobrescrever a decisão da pessoa.
