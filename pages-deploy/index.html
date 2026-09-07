@@ -5842,16 +5842,10 @@ function pBeckerIA(modo){
     </div>`;
   } else if(modoAtivo==='documentos'){
     corpo=`<div style="max-width:700px;margin:0 auto">
-      <p style="color:#64748b;font-size:13px;margin-bottom:20px">Escolha o tipo de documento e descreva o caso. A IA gera um <strong>rascunho</strong> para você revisar.</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">
-        ${[['✉️','Notificação Extrajudicial'],['📄','Petição Inicial'],['🔄','Réplica'],['📝','Recurso Inominado'],['⚖️','Apelação Cível'],['📃','Contrato']].map(([ico,nome])=>`
-        <div class="card" style="cursor:pointer;transition:.2s" onmouseover="this.style.background='rgba(201,165,92,.08)'" onmouseout="this.style.background=''" onclick="beckerIADocEscolher('${nome}')">
-          <div class="card-body" style="padding:20px;text-align:center">
-            <div style="font-size:32px;margin-bottom:8px">${ico}</div>
-            <div style="font-size:12px;font-weight:600;color:var(--texto)">${nome}</div>
-          </div>
-        </div>`).join('')}
-      </div>
+      <p style="color:#64748b;font-size:13px;margin-bottom:12px">Escolha o tipo de documento e descreva o caso. A IA gera um <strong>rascunho</strong> para você revisar.</p>
+      <div class="search-box" style="margin-bottom:6px"><input type="text" id="ia-doc-busca" placeholder="Buscar modelo (ex.: embargos, contestação, agravo)..." oninput="renderModelosDoc(this.value)"></div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Não achou? Use <strong>Outro</strong> no fim da lista e escreva o tipo — a IA aceita qualquer peça.</div>
+      <div id="ia-doc-modelos"></div>
       <div id="ia-doc-form" style="margin-top:20px"></div>
       <div id="ia-doc-resultado" style="margin-top:20px"></div>
       <p style="font-size:11px;color:#94a3b8;margin-top:16px;text-align:center">⚠️ Rascunho gerado por IA — sempre revise antes de protocolar ou enviar.</p>
@@ -5875,6 +5869,7 @@ function pBeckerIA(modo){
     ${corpo}
   </div>`;
   renderIaAsk();
+  if(modoAtivo==='documentos')renderModelosDoc();
 }
 // ─── Front-door: "Pergunte à Becker IA" (assistente geral, resposta inline) ────
 let iaAskHist=[];
@@ -6212,6 +6207,83 @@ async function beckerIATranscCriar(clienteId){
 }
 
 // ---- Geração de documentos (Gemini) ----
+// ─── Modelos de documento ─────────────────────────────────────────────────────
+// A lista saiu da carteira real do escritório (classes dos processos ativos em
+// 07/09/2026), não de um catálogo genérico: Procedimento Comum 81, Ação Trabalhista
+// 114 (ordinário + sumaríssimo), Execução de Título Extrajudicial 76, Cumprimento de
+// Sentença ~71, Agravo de Instrumento 36, Juizado Especial Cível 53, Monitória 16,
+// Busca e Apreensão 14, Inventário/Arrolamento 14, Recurso Ordinário Trabalhista 18,
+// Embargos à Execução 9, Usucapião 5, Superendividamento 4, além do extrajudicial
+// (INSS/GERID, DETRAN, parecer, notificação) que virou a aba Administrativos.
+//
+// A edge function `becker-ia` (action gerar_documento) aceita QUALQUER string em `tipo`
+// — ela só interpola o nome no prompt. Então esta lista é conveniência, nunca limite:
+// o item "Outro" deixa a advogada escrever o tipo que quiser.
+const MODELOS_DOC=[
+  ['Petições iniciais',[
+    ['📄','Petição Inicial (Cível)'],['⚡','Petição Inicial (Juizado Especial)'],['⚒️','Reclamação Trabalhista'],
+    ['💵','Execução de Título Extrajudicial'],['📑','Ação Monitória'],
+    ['⚖️','Cumprimento de Sentença'],['🏦','Ação Revisional / Superendividamento'],
+    ['🏛️','Inventário / Arrolamento'],['🏠','Usucapião'],
+    ['🚗','Busca e Apreensão (Alienação Fiduciária)'],['👨‍👩‍👧','Alimentos / Guarda'],
+  ]],
+  ['Defesas',[
+    ['🛡️','Contestação (Cível)'],['⚒️','Contestação Trabalhista'],
+    ['🚫','Embargos à Execução'],['🚫','Embargos à Ação Monitória'],
+    ['❗','Exceção de Pré-Executividade'],['📉','Impugnação ao Cumprimento de Sentença'],
+    ['🧍','Embargos de Terceiro'],['🚗','Defesa em Busca e Apreensão'],
+  ]],
+  ['Recursos',[
+    ['⚖️','Apelação Cível'],['📝','Recurso Inominado'],
+    ['⬆️','Agravo de Instrumento'],['⚒️','Recurso Ordinário Trabalhista'],
+    ['🔁','Embargos de Declaração'],['↩️','Contrarrazões'],
+  ]],
+  ['Manifestações no processo',[
+    ['🔄','Réplica'],['✍️','Petição Simples / Manifestação'],
+    ['🏁','Alegações Finais'],['📌','Cumprimento de Despacho / Diligência'],
+    ['🧮','Impugnação a Cálculos'],['🔬','Manifestação sobre Laudo Pericial'],
+  ]],
+  ['Extrajudicial e consultivo',[
+    ['✉️','Notificação Extrajudicial'],['📃','Contrato'],
+    ['🧾','Parecer Jurídico'],['🤝','Acordo / Transação Extrajudicial'],
+    ['🏥','Recurso Administrativo (INSS)'],['🚦','Defesa Administrativa (DETRAN)'],
+  ]],
+];
+// Sem acento e minúsculo, para "peticao" achar "Petição" e "apelacao" achar "Apelação".
+const _semAcento=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+function renderModelosDoc(busca=''){
+  const el=document.getElementById('ia-doc-modelos'); if(!el)return;
+  const q=_semAcento(busca).trim();
+  const grupos=MODELOS_DOC
+    .map(([g,itens])=>[g,itens.filter(([,nome])=>!q||_semAcento(nome).includes(q))])
+    .filter(([,itens])=>itens.length);
+  let html=grupos.map(([grupo,itens])=>`
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;margin:0 0 6px 2px">${escHtml(grupo)}</div>
+      <div class="card"><div class="card-body" style="padding:4px">
+        ${itens.map(([ico,nome])=>`
+        <button onclick="beckerIADocEscolher(${JSON.stringify(nome)})" style="display:flex;align-items:center;gap:10px;width:100%;min-height:44px;background:none;border:none;border-radius:8px;padding:9px 10px;cursor:pointer;text-align:left;font-family:inherit;font-size:13px;color:var(--texto)" onmouseover="this.style.background='rgba(201,165,92,.10)'" onmouseout="this.style.background='none'">
+          <span style="font-size:18px;flex:none">${ico}</span><span style="font-weight:600">${escHtml(nome)}</span>
+        </button>`).join('')}
+      </div></div>
+    </div>`).join('');
+  if(!grupos.length)html=`<div style="font-size:13px;color:#94a3b8;padding:8px 2px">Nenhum modelo com esse nome — use <strong>Outro</strong> abaixo e escreva o tipo.</div>`;
+  html+=`<div class="card"><div class="card-body" style="padding:12px">
+    <div style="font-size:12px;font-weight:700;color:var(--azul3);margin-bottom:8px">✏️ Outro tipo de documento</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="ia-doc-outro" placeholder="Ex.: Habilitação de Crédito em Falência" style="flex:1;min-width:200px;background:var(--card);border:1.5px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--texto);font-family:inherit;font-size:13px" onkeydown="if(event.key==='Enter'){event.preventDefault();beckerIADocOutro()}">
+      <button class="btn btn-secondary btn-sm" onclick="beckerIADocOutro()">Usar este tipo</button>
+    </div>
+  </div></div>`;
+  el.innerHTML=html;
+}
+function beckerIADocOutro(){
+  // escHtml não escapa < e >, e este é o único lugar onde o nome do tipo é digitado
+  // livremente — então tira os sinais aqui, na entrada, em vez de confiar na saída.
+  const v=(document.getElementById('ia-doc-outro')?.value||'').replace(/[<>]/g,'').trim().slice(0,80);
+  if(v.length<3){toast('Escreva o tipo de documento.','erro');return;}
+  beckerIADocEscolher(v);
+}
 function beckerIADocEscolher(tipo){
   const form=document.getElementById('ia-doc-form');
   document.getElementById('ia-doc-resultado').innerHTML='';
@@ -6227,7 +6299,7 @@ function beckerIADocEscolher(tipo){
       <textarea id="ia-doc-contexto" rows="6" style="width:100%;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--texto);font-family:inherit;font-size:13px;resize:vertical" placeholder="Descreva o caso e os dados: partes, fatos, pedido, valores, prazos... (o que faltar a IA marca como [PREENCHER])"></textarea>
     </div>
     <div id="ia-doc-autos" style="margin-bottom:12px"></div>
-    <button class="btn btn-primary" onclick="beckerIAGerarDoc('${tipo.replace(/'/g,'')}')">✨ Gerar rascunho</button>
+    <button class="btn btn-primary" onclick='beckerIAGerarDoc(${escHtml(JSON.stringify(tipo))})'>✨ Gerar rascunho</button>
   </div></div>`;
 }
 async function beckerIADocPuxar(){
