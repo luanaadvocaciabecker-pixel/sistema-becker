@@ -4193,6 +4193,9 @@ let prazosCache=[]; let prazoBucket='ativos'; let prazoVerCumpridos=false; let p
 // Filtro por data: prazoPeriodo é um dos presets ('hoje','7','15','30','mes') ou 'custom',
 // e aí valem prazoDe/prazoAte. Vazio = qualquer data.
 let prazoPeriodo=''; let prazoDe=''; let prazoAte='';
+// O que está na tela agora (já filtrado). O botão "Planilha" exporta exatamente isto,
+// para a lista e o arquivo nunca divergirem.
+let prazosVisiveis=[];
 const _hojeIso=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().split('T')[0];};
 // Mês inteiro a partir de 'AAAA-MM' -> ['AAAA-MM-01','AAAA-MM-<último dia>']
 const _mesInteiro=am=>{const[a,m]=am.split('-');const fim=new Date(+a,+m,0).getDate();
@@ -4276,6 +4279,7 @@ async function pPrazos(filtroInicial='ativos'){
       <input type="date" class="filtro" id="prazo-ate" title="Até" onchange="prazoAte=this.value;renderPrazos()">
     </span>
     <span style="flex:1"></span>
+    <button class="btn btn-sm btn-secondary" onclick="exportarPrazosCSV()" title="Gera a planilha (CSV) do que está na tela, no formato da aba PRAZOS — com o prazo fatal">📊 Planilha</button>
     <button class="btn btn-secondary" id="btn-sync-prazos" onclick="sincronizarPrazos()" title="Fecha automaticamente os prazos já cumpridos/peticionados no Legal Mail">🔄 Sincronizar agora</button>
     <button class="btn btn-primary" onclick="novoPrazo()">+ Novo Prazo</button>
   </div>
@@ -4295,6 +4299,84 @@ async function sincronizarPrazos(){
     await carregarPrazos();
   }catch(e){ toast('Não deu para sincronizar: '+(e.message||'erro'),'erro'); }
   finally{ if(b){b.disabled=false;b.textContent='🔄 Sincronizar agora';} }
+}
+// ---- Export da planilha de prazos (formato da aba PRAZOS do escritório) ----
+// A planilha do escritório tem TRIBUNAL | Nº DO PROCESSO | CLIENTE | PRAZO 1 | PRAZO 2 |
+// INTERNO | ADVOGADO | STATUS | OBSERVAÇÕES. Aqui sai só o prazo fatal (o PRAZO 1 de lá),
+// que foi o pedido — as outras duas datas são derivadas dele na planilha.
+
+// Sigla do tribunal + grau a partir do próprio CNJ (NNNNNNN-DD.AAAA.J.TR.OOOO).
+// O campo processos.tribunal está inconsistente no banco (TRF04/TRF4/TRF-4 convivem),
+// então o CNJ é a fonte melhor. OOOO='0000' é o próprio tribunal, ou seja 2º grau —
+// conferido contra a planilha dela (…8.24.0000=TJSC 2G, …8.24.0038=TJSC 1G).
+const _UF_TR={'01':'AC','02':'AL','03':'AP','04':'AM','05':'BA','06':'CE','07':'DF','08':'ES',
+  '09':'GO','10':'MA','11':'MT','12':'MS','13':'MG','14':'PA','15':'PB','16':'PR','17':'PE',
+  '18':'PI','19':'RJ','20':'RN','21':'RS','22':'RO','23':'RR','24':'SC','25':'SE','26':'SP','27':'TO'};
+function _tribunalCNJ(numero,fallback){
+  const d=(numero||'').replace(/\D/g,'');
+  if(d.length!==20)return (fallback||'').toUpperCase()||'';
+  const j=d[13], tr=d.slice(14,16), org=d.slice(16,20);
+  const grau=org==='0000'?'2G':'1G';
+  let sigla='';
+  if(j==='8'&&_UF_TR[tr])sigla='TJ'+_UF_TR[tr];
+  else if(j==='5')sigla='TRT'+String(Number(tr));
+  else if(j==='4')sigla='TRF'+String(Number(tr));
+  else if(j==='6'&&_UF_TR[tr])sigla='TJM'+_UF_TR[tr];
+  // Fora do mapa: usa o que está gravado no processo; só então o J.TR cru.
+  if(!sigla)return ((fallback||'').toUpperCase()||`J${j}.${tr}`)+' '+grau;
+  return sigla+' '+grau;
+}
+// dd/mm/aaaa direto da string ISO — sem criar Date, que escorregaria de fuso.
+const _dataBR=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||'');return m?`${m[3]}/${m[2]}/${m[1]}`:'';};
+// Tipo curto do prazo. O padrão gravado é "CLIENTE · TRIBUNAL — Sentença (15 dias)".
+function _obsPrazo(p){
+  const d=(p.descricao||'').trim();
+  if(/^⚠\s*ESTIMADO/i.test(d))return '⚠ ESTIMADO — conferir';
+  const partes=d.split('—');
+  const cauda=partes.length>1?partes[partes.length-1].trim():'';
+  return (cauda||p.tipo||'').replace(/\s+/g,' ').slice(0,120);
+}
+const _statusPlanilha=p=>p.cumprido?'PROTOCOLADO':(_classPrazo(p)==='excedido'?'PERDIDO':'PENDENTE');
+// Campo CSV: sempre entre aspas, aspas internas duplicadas. Nome de cliente e observação
+// têm ';' e vírgula com frequência, então não dá para escapar condicionalmente.
+const _csvCampo=v=>'"'+String(v==null?'':v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
+const _slug=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+  .replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+function _linhasPlanilhaPrazos(lista){
+  return lista.map(p=>[
+    _tribunalCNJ(p.processos?.numero, p.processos?.tribunal),
+    p.processos?.numero||'',
+    (p.processos?.clientes?.nome||'').toUpperCase(),
+    _dataBR(p.data),
+    (p.processos?.advogado_responsavel||'SEM RESPONSÁVEL').toUpperCase(),
+    _statusPlanilha(p),
+    _obsPrazo(p),
+  ]);
+}
+const _CAB_PLANILHA=['TRIBUNAL','Nº DO PROCESSO','CLIENTE','PRAZO FATAL','ADVOGADO','STATUS','OBSERVAÇÕES'];
+function _montarCSVPrazos(lista){
+  // ';' e CRLF = o que o Excel em pt-BR espera. BOM para os acentos abrirem certos.
+  return '﻿'+[_CAB_PLANILHA,..._linhasPlanilhaPrazos(lista)]
+    .map(l=>l.map(_csvCampo).join(';')).join('\r\n');
+}
+function _nomeArquivoPrazos(){
+  const rot={hoje:'vence-hoje','7':'prox-7-dias','15':'prox-15-dias','30':'prox-30-dias',
+    mes:'este-mes',dia:'dia-'+prazoDe,mesano:'mes-'+prazoDe,custom:'periodo'};
+  const partes=['prazos-becker',_hojeIso()];
+  if(prazoAdv)partes.push(_slug(prazoAdv==='__SEM__'?'sem-responsavel':prazoAdv));
+  if(prazoPeriodo&&rot[prazoPeriodo])partes.push(_slug(rot[prazoPeriodo]));
+  if(prazoBucket&&prazoBucket!=='ativos')partes.push(_slug(prazoBucket));
+  return partes.join('-')+'.csv';
+}
+function exportarPrazosCSV(){
+  const lista=prazosVisiveis||[];
+  if(!lista.length){toast('Não há prazo na tela para gerar a planilha.','erro');return;}
+  const url=URL.createObjectURL(new Blob([_montarCSVPrazos(lista)],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');
+  a.href=url;a.download=_nomeArquivoPrazos();
+  document.body.appendChild(a);a.click();a.remove();
+  URL.revokeObjectURL(url);
+  toast(`Planilha gerada com ${lista.length} prazo${lista.length>1?'s':''}.`,'ok');
 }
 async function carregarPrazos(){
   // Duas consultas separadas (não-cumprido x cumprido) em vez de uma só ordenada por
@@ -4358,6 +4440,7 @@ function renderPrazos(){
   else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
   else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.excedido,...g.cumprido];
   else lista=[...g.hoje,...g.aberto]; // 'ativos' (padrão): hoje + futuros. Vencidos saem daqui ("esquece o que já passou") e ficam só no card Vencidos.
+  prazosVisiveis=lista;   // o botão "Planilha" exporta exatamente esta seleção
   // Alerta vermelho de perdidos (excedido) — sempre visível no topo (menos quando já se está vendo eles).
   let html='';
   if(g.excedido.length && prazoBucket!=='excedido'){
