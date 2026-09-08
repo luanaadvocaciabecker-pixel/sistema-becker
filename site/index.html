@@ -1652,6 +1652,43 @@ tbody tr:hover td{
 <div id="toast"></div>
 
 <script>
+// Versão publicada. O workflow de deploy troca __BUILD__ pelo hash do commit + data antes
+// de subir; se ficou como está, é o arquivo aberto local, sem passar pelo deploy.
+// Existe porque a página fica aberta no celular por horas: sair do app e voltar não
+// recarrega o JS, e daí a advogada testa uma correção que já subiu mas ela não tem.
+const APP_BUILD='__BUILD__';
+const APP_BUILD_OK=APP_BUILD!=='__'+'BUILD__';
+let _verChecadaEm=0;
+// Rota inexistente no Cloudflare Pages devolve 200 com o index.html inteiro (fallback de
+// SPA), então só vale o que PARECE um build: curto e sem '<'. Senão avisaria toda hora.
+const _buildPlausivel=s=>!!s&&s.length<=40&&!s.includes('<');
+async function checarVersao(forcar){
+  if(!APP_BUILD_OK)return;
+  const agora=Date.now();
+  if(!forcar&&agora-_verChecadaEm<120000)return;   // no máximo a cada 2 min
+  _verChecadaEm=agora;
+  try{
+    const r=await fetch('/version.txt?cb='+agora,{cache:'no-store'});
+    if(!r.ok)return;
+    const v=(await r.text()).trim();
+    if(_buildPlausivel(v)&&v!==APP_BUILD)mostrarBarraAtualizar(v);
+  }catch(e){ /* offline: não incomoda */ }
+}
+function mostrarBarraAtualizar(nova){
+  if(document.getElementById('barra-atualizar'))return;
+  const d=document.createElement('div');
+  d.id='barra-atualizar';
+  d.style.cssText='position:fixed;left:0;right:0;top:0;z-index:2000;background:#1d4ed8;color:#fff;padding:11px 14px;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.25)';
+  d.innerHTML='🔄 Nova versão disponível — toque para atualizar'+
+    `<span style="font-weight:400;opacity:.75;font-size:11px">${APP_BUILD} → ${nova}</span>`;
+  d.onclick=()=>location.reload();
+  document.body.appendChild(d);
+}
+// O gesto dela é sair do app e voltar — é aí que vale checar.
+window.addEventListener('focus',()=>checarVersao(false));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)checarVersao(false)});
+setInterval(()=>checarVersao(true),900000);   // e de 15 em 15 min, se ficar aberta
+
 const SUPA_URL='https://fnuzhypsqvyolqqafrba.supabase.co';
 let SUPA_KEY='sb_publishable_QVrl-Cxs9FNjC7Pf9aHazQ_aGEk0PiO';
 // ── SESSÃO / TOKEN ────────────────────────────────────────────────────────
@@ -2037,7 +2074,8 @@ function renderSidebarMenu(){
     ])}
     ${grupoMenu('config','config','Configurações','config',[
       ['config','building','Escritório'],['documentacao','file','Modelos'],['config','plug','Integrações'],['config','lock','Segurança'],['cibele','star','Painel Cibele']
-    ])}`;
+    ])}
+    <div title="Toque para checar se há versão nova" onclick="checarVersao(true);toast('Versão em uso: '+APP_BUILD,'ok')" style="margin:18px 0 8px;padding:0 14px;font-size:10px;color:#94a3b8;cursor:pointer">versão ${APP_BUILD_OK?APP_BUILD:'local (sem deploy)'}</div>`;
 }
 function grupoMenu(id,icone,titulo,pagina,itens){
   const subs=itens.map(([page,icon,label,action])=>{

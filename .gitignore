@@ -25,3 +25,5 @@ yarn-error.log*
 # robô datajud - segredos
 robo-datajud/.env
 .env
+# gerado pelo workflow de deploy a cada publicação
+pages-deploy/version.txt

@@ -22,6 +22,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Estampa a versão publicada: troca o __BUILD__ do index.html e grava version.txt.
+      # A página compara os dois quando volta o foco e avisa que há atualização — sem isso,
+      # a aba fica aberta no celular por horas com o JS antigo e a correção parece não ter
+      # subido.
+      - name: Estampar a versão
+        run: |
+          BUILD="$(git rev-parse --short HEAD)-$(date -u +%d%m%H%M)"
+          echo "Build: $BUILD"
+          sed -i "s/__BUILD__/$BUILD/g" pages-deploy/index.html
+          printf '%s' "$BUILD" > pages-deploy/version.txt
+          grep -c "$BUILD" pages-deploy/index.html
+
       - name: Deploy para o Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
