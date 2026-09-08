@@ -5097,6 +5097,22 @@ function toast(msg,tipo=''){
 }
 function truncar(s,n){return s&&s.length>n?s.substring(0,n)+'…':(s||'');}
 function escHtml(s){if(typeof s==='object'&&s!==null)s=JSON.stringify(s);return(String(s||'')).replace(/'/g,"\\'").replace(/"/g,'&quot;');}
+// ---- Copiar para a área de transferência, sem texto dentro de atributo HTML ----
+// Nunca interpolar string num onclick: `onclick="f(${JSON.stringify(t)})"` gera
+// onclick="f("texto")", o navegador fecha o atributo na primeira aspa e o handler vira
+// `f(` — erro de sintaxe, e o botão simplesmente não faz nada. Foi assim que os botões
+// Copiar do Resumo, da Transcrição, do rascunho e da Jurisprudência nasceram mortos.
+// Aqui o texto fica num array e só o índice (um número) vai para o atributo.
+let _clipStore=[];
+const _clip=t=>{_clipStore.push(String(t==null?'':t));return _clipStore.length-1;};
+function copiarDoStore(i){
+  const txt=_clipStore[i]||'';
+  if(!txt){toast('Nada para copiar.','erro');return;}
+  // No iPhone o writeText falha em alguns contextos; sem o catch o botão ficava mudo.
+  (navigator.clipboard?.writeText(txt)||Promise.reject())
+    .then(()=>toast('Copiado!','ok'))
+    .catch(()=>toast('Não deu para copiar aqui — segure no texto e copie à mão.','erro'));
+}
 function fmtMoeda(v){return v!=null?'R$ '+parseFloat(v).toLocaleString('pt-BR',{minimumFractionDigits:2}):'R$ 0,00';}
 function debounce(fn,d){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),d);};}
 
@@ -6070,7 +6086,7 @@ async function beckerIABuscar(){
         <div style="padding:16px;border-bottom:1px solid var(--border)">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px">
             <span style="font-size:12px;font-weight:600;color:var(--gold)">${u.tribunal||''} — ${u.process||''}</span>
-            <button class="btn btn-sm" onclick="navigator.clipboard.writeText(${JSON.stringify(cits[i]||'')}).then(()=>toast('Copiado!','ok'))" style="font-size:11px;padding:3px 10px;flex-shrink:0">Copiar</button>
+            <button class="btn btn-sm" onclick="copiarDoStore(${_clip(cits[i]||'')})" style="font-size:11px;padding:3px 10px;flex-shrink:0">Copiar</button>
           </div>
           <p style="font-size:12px;color:#64748b;line-height:1.7;margin:0">${(u.original_text||'').substring(0,400)}${(u.original_text||'').length>400?'...':''}</p>
           ${u.rapporteur?`<div style="font-size:11px;color:#94a3b8;margin-top:6px">Rel. ${u.rapporteur} · ${u.judgment_date?new Date(u.judgment_date+'T12:00:00').toLocaleDateString('pt-BR'):''}</div>`:''}
@@ -6142,7 +6158,7 @@ async function beckerIAResumoAtend(){
     <div style="font-size:11px;font-weight:700;color:var(--azul3);text-transform:uppercase;letter-spacing:.5px">Pontos principais</div>${lista(r.pontos)}
     <div style="font-size:11px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:.5px;margin-top:12px">Pendências</div>${lista(r.pendencias)}
     <div style="font-size:11px;font-weight:700;color:#4ade80;text-transform:uppercase;letter-spacing:.5px;margin-top:12px">Próximos passos</div>${lista(r.proximos_passos)}
-    ${btnSalvar}<button class="btn btn-secondary btn-sm" style="margin-top:14px" onclick="navigator.clipboard.writeText(${JSON.stringify(window._iaUltimoResumo)}).then(()=>toast('Copiado!','ok'))">📋 Copiar</button>
+    ${btnSalvar}<button class="btn btn-secondary btn-sm" style="margin-top:14px" onclick="copiarDoStore(${_clip(window._iaUltimoResumo)})">📋 Copiar</button>
   </div></div>`;
 }
 async function beckerIASalvarResumoAtend(){
@@ -6167,7 +6183,7 @@ async function beckerIATranscricao(input){
       <div style="font-size:11px;font-weight:700;color:var(--azul3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Transcrição — ${escHtml(f.name)}</div>
       <div style="white-space:pre-wrap;font-size:13px;line-height:1.6">${escHtml(r.texto||'(vazio)')}</div>
       <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText(${JSON.stringify(r.texto||'')}).then(()=>toast('Copiado!','ok'))">📋 Copiar</button>
+        <button class="btn btn-secondary btn-sm" onclick="copiarDoStore(${_clip(r.texto||'')})">📋 Copiar</button>
         <button class="btn btn-secondary btn-sm" onclick="beckerIATranscResumir()">✨ Gerar resumo</button>
         <button class="btn btn-primary btn-sm" onclick="beckerIATranscSalvar()">💾 Salvar como atendimento</button>
       </div>
@@ -6254,15 +6270,18 @@ const _semAcento=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u030
 function renderModelosDoc(busca=''){
   const el=document.getElementById('ia-doc-modelos'); if(!el)return;
   const q=_semAcento(busca).trim();
+  // Guarda o índice ORIGINAL de cada item ao filtrar: o onclick passa gi/ii para
+  // beckerIADocPick, que lê o nome de MODELOS_DOC. Se usasse o índice da lista filtrada,
+  // buscar "réplica" e clicar abriria o modelo errado.
   const grupos=MODELOS_DOC
-    .map(([g,itens])=>[g,itens.filter(([,nome])=>!q||_semAcento(nome).includes(q))])
-    .filter(([,itens])=>itens.length);
-  let html=grupos.map(([grupo,itens])=>`
+    .map(([g,itens],gi)=>[g,gi,itens.map((it,ii)=>[it[0],it[1],ii]).filter(([,nome])=>!q||_semAcento(nome).includes(q))])
+    .filter(([,,itens])=>itens.length);
+  let html=grupos.map(([grupo,gi,itens])=>`
     <div style="margin-bottom:14px">
       <div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;margin:0 0 6px 2px">${escHtml(grupo)}</div>
       <div class="card"><div class="card-body" style="padding:4px">
-        ${itens.map(([ico,nome])=>`
-        <button onclick="beckerIADocEscolher(${JSON.stringify(nome)})" style="display:flex;align-items:center;gap:10px;width:100%;min-height:44px;background:none;border:none;border-radius:8px;padding:9px 10px;cursor:pointer;text-align:left;font-family:inherit;font-size:13px;color:var(--texto)" onmouseover="this.style.background='rgba(201,165,92,.10)'" onmouseout="this.style.background='none'">
+        ${itens.map(([ico,nome,ii])=>`
+        <button onclick="beckerIADocPick(${gi},${ii})" style="display:flex;align-items:center;gap:10px;width:100%;min-height:44px;background:none;border:none;border-radius:8px;padding:9px 10px;cursor:pointer;text-align:left;font-family:inherit;font-size:13px;color:var(--texto)" onmouseover="this.style.background='rgba(201,165,92,.10)'" onmouseout="this.style.background='none'">
           <span style="font-size:18px;flex:none">${ico}</span><span style="font-weight:600">${escHtml(nome)}</span>
         </button>`).join('')}
       </div></div>
@@ -6276,6 +6295,12 @@ function renderModelosDoc(busca=''){
     </div>
   </div></div>`;
   el.innerHTML=html;
+}
+// Recebe só números do atributo — nada de nome de documento dentro de HTML.
+function beckerIADocPick(gi,ii){
+  const item=MODELOS_DOC[gi]?.[1]?.[ii];
+  if(!item){toast('Modelo não encontrado.','erro');return;}
+  beckerIADocEscolher(item[1]);
 }
 function beckerIADocOutro(){
   // escHtml não escapa < e >, e este é o único lugar onde o nome do tipo é digitado
@@ -6291,7 +6316,7 @@ function beckerIADocEscolher(tipo){
   form.innerHTML=`<div class="card"><div class="card-body">
     <div style="font-size:13px;font-weight:600;color:var(--azul3);margin-bottom:10px">📄 ${escHtml(tipo)}</div>
     <div style="display:flex;gap:8px;margin-bottom:10px">
-      <input id="ia-doc-proc" placeholder="Nº do processo (CNJ) — opcional, puxa os dados" style="flex:1;background:var(--card);border:1.5px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--texto);font-family:inherit;font-size:13px" onkeydown="if(event.key==='Enter'){event.preventDefault();beckerIADocPuxar()}">
+      <input id="ia-doc-proc" placeholder="Nome do cliente ou nº do processo" style="flex:1;background:var(--card);border:1.5px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--texto);font-family:inherit;font-size:13px" oninput="beckerIADocAutoPuxar(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();beckerIADocPuxar()}">
       <button class="btn btn-secondary btn-sm" onclick="beckerIADocPuxar()">⤵️ Puxar dados</button>
     </div>
     <div id="ia-doc-vinculo" style="font-size:12px;color:#64748b;margin-bottom:8px"></div>
@@ -6302,14 +6327,61 @@ function beckerIADocEscolher(tipo){
     <button class="btn btn-primary" onclick='beckerIAGerarDoc(${escHtml(JSON.stringify(tipo))})'>✨ Gerar rascunho</button>
   </div></div>`;
 }
+const _SEL_DOC_PROC='id,numero,tribunal,vara,comarca,classe_processual,assunto,situacao,parte_contraria,cliente_id,lm_idprocessos,clientes(id,nome,cpf_cnpj,rua,cep)';
+// Colar o CNJ completo já busca sozinho — 20 dígitos é CNJ, não há o que confirmar.
+// Nome de cliente não dispara automático: pode ter vários processos, e aí quem escolhe é ela.
+const beckerIADocAutoPuxar=debounce(v=>{
+  if((v||'').replace(/\D/g,'').length===20)beckerIADocPuxar();
+},350);
+// Escolha explícita na lista de processos do cliente. Recebe só o id.
+async function beckerIADocUsarProc(id){
+  const{data}=await supa.from('processos').select(_SEL_DOC_PROC).eq('id',id).limit(1);
+  if(data&&data[0])beckerIADocPreencher(data[0]);
+}
 async function beckerIADocPuxar(){
-  const num=(document.getElementById('ia-doc-proc')?.value||'').trim();
+  // O ilike do shim não codifica o padrão (site/index.html:1778), então & # , ( ) numa
+  // razão social quebrariam a query e ela veria só "não achei". Tira o que atrapalha.
+  const termo=(document.getElementById('ia-doc-proc')?.value||'')
+    .replace(/[&#,()*+%]/g,' ').replace(/\s+/g,' ').trim();
   const vin=document.getElementById('ia-doc-vinculo');
-  if(!num){toast('Digite o número do processo.','erro');return;}
-  vin.innerHTML='Buscando processo...';
-  const{data}=await supa.from('processos').select('id,numero,tribunal,vara,comarca,classe_processual,assunto,parte_contraria,cliente_id,lm_idprocessos,clientes(id,nome,cpf_cnpj,rua,cep)').ilike('numero','%'+num+'%').limit(1);
-  const p=data&&data[0];
-  if(!p){vin.innerHTML='<span style="color:#fbbf24">Processo não encontrado — pode digitar o contexto manualmente.</span>';return;}
+  if(!termo){toast('Digite o nome do cliente ou o número do processo.','erro');return;}
+  vin.innerHTML='Buscando...';
+  const digitos=termo.replace(/\D/g,'');
+  let data;
+  if(digitos.length>=7){
+    // parece número de processo
+    ({data}=await supa.from('processos').select(_SEL_DOC_PROC).ilike('numero','%'+termo+'%').limit(8));
+    if(!data?.length)({data}=await supa.from('processos').select(_SEL_DOC_PROC).ilike('numero','%'+digitos+'%').limit(8));
+  }else{
+    // nome de cliente: traz os processos dele, carga primeiro
+    ({data}=await supa.from('processos').select(_SEL_DOC_PROC).ilike('clientes.nome','%'+termo+'%').limit(20));
+    if(!data?.length){
+      // o filtro em tabela relacionada não pega em toda versão do PostgREST: acha o cliente e busca por cliente_id
+      const{data:cs}=await supa.from('clientes').select('id').ilike('nome','%'+termo+'%').limit(20);
+      const ids=(cs||[]).map(c=>c.id);
+      if(ids.length)({data}=await supa.from('processos').select(_SEL_DOC_PROC).in('cliente_id',ids).limit(20));
+    }
+    data=(data||[]).sort((a,b)=>{
+      const at=(a.situacao==='Ativo'||a.situacao==='Em andamento')?0:1;
+      const bt=(b.situacao==='Ativo'||b.situacao==='Em andamento')?0:1;
+      return at-bt||String(b.numero||'').localeCompare(String(a.numero||''));
+    });
+  }
+  if(!data?.length){vin.innerHTML='<span style="color:#fbbf24">Não achei — pode digitar o contexto manualmente.</span>';return;}
+  // Mais de um: ela escolhe. Nunca adivinhar qual processo do cliente é o certo.
+  if(data.length>1){
+    vin.innerHTML=`<div style="margin-bottom:4px">Achei ${data.length} processos — escolha qual usar:</div>
+      <div style="display:flex;flex-direction:column;gap:4px">${data.map(p=>`
+        <button onclick="beckerIADocUsarProc(${p.id})" style="text-align:left;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;cursor:pointer;font-family:inherit;font-size:12px;color:var(--texto);min-height:40px">
+          <strong>${escHtml(p.numero||'—')}</strong> · ${escHtml(p.clientes?.nome||'—')}
+          <span style="color:#94a3b8">${p.classe_processual?(' · '+escHtml(p.classe_processual)):''} · ${escHtml(p.situacao||'')}</span>
+        </button>`).join('')}</div>`;
+    return;
+  }
+  beckerIADocPreencher(data[0]);
+}
+async function beckerIADocPreencher(p){
+  const vin=document.getElementById('ia-doc-vinculo');
   window._iaDocProcId=p.id||null; window._iaDocCliId=p.clientes?.id||p.cliente_id||null;
   const cli=p.clientes||{};
   // Puxa as partes completas direto do Legal Mail (grátis), se o processo tiver vínculo.
@@ -6443,7 +6515,7 @@ async function beckerIAGerarDoc(tipo){
   const btnSalvar=(window._iaDocProcId||window._iaDocCliId)?`<button class="btn btn-primary btn-sm" style="margin-top:12px;margin-right:6px" onclick="beckerIASalvarDoc()">💾 Salvar no processo</button>`:'';
   res.innerHTML=`<div class="card"><div class="card-body">
     <div style="white-space:pre-wrap;font-size:13px;line-height:1.6;font-family:Georgia,serif">${escHtml(r.documento||'')}</div>
-    ${btnSalvar}<button class="btn btn-secondary btn-sm" style="margin-top:12px" onclick="navigator.clipboard.writeText(${JSON.stringify(r.documento||'')}).then(()=>toast('Copiado!','ok'))">📋 Copiar</button>
+    ${btnSalvar}<button class="btn btn-secondary btn-sm" style="margin-top:12px" onclick="copiarDoStore(${_clip(r.documento||'')})">📋 Copiar</button>
   </div></div>`;
 }
 async function beckerIASalvarDoc(){
