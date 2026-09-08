@@ -1,0 +1,53 @@
+-- public.trt_gera_prazos(p_de, p_ate, p_commit) — cria o prazo trabalhista que o tribunal não
+-- manda. (aplicado via migrations `trt_gera_prazos` e `trt_gera_prazos_fix_ambiguidade`)
+--
+-- POR QUE EXISTE: o diário do TRT nunca traz "Data final", e lm_upsert_prazo_por_texto() aborta
+-- sem esse campo (`if dfinal is null then return 0`). Resultado: 3.245 intimações do TRT e 0
+-- prazos. Ver db/pje_comunica_20260908.sql para a sondagem completa.
+--
+-- COMO CALCULA:
+--   data_prazo = becker_dias_uteis(becker_dias_uteis(disponibilizacao, 1), 5)
+--                (disponibilização + 1 dia útil de ciência + 5 dias úteis, sem feriado)
+--   Conferido contra a tela "Meus Expedientes" do PJe: 6 de 6 exatas.
+--
+-- N = 5 SEMPRE. Não se lê o texto. Motivo (medido, não achismo):
+--   * 4 dos 6 atos do gabarito não contêm nem a palavra "prazo"; 5 dos 6 não citam número de dia
+--     nenhum — e todos tinham prazo real no tribunal. "Só cria se o texto falar de prazo"
+--     perderia 4 dos 6, incluindo 3 dos 4 que venciam em 10/09.
+--   * Só 29% dos textos citam número de dias, e ele costuma ser de outro (perito, parte
+--     contrária, norma citada): de 12 textos lidos à mão, só 2 traziam o nosso prazo.
+--   * Erro assimétrico: N menor ANTECIPA a data (seguro); N maior PERDE O PRAZO.
+--   Os números achados no texto vão para a descrição como aviso ("texto cita 15 dias — conferir").
+--
+-- ESCOPO: lê de publicacoes_atos (NUNCA de publicacoes direto, senão volta a duplicar).
+--   tribunal ~ '^(TRT|TST)'  -- regex, por causa das grafias duplas TRT-12/TRT12
+--   sem 'data final' no texto  -- não invadir o caminho que já funciona nos outros tribunais
+--   sem 'pauta de julgamento' nem 'ata de sessão'  -- não são expediente com prazo
+--
+-- IDEMPOTÊNCIA: coluna prazos.ato_chave (cnj|data|ID do ato) + índice único parcial
+--   prazos_ato_chave_uk. Rodar duas vezes não duplica. Também pula se já existe prazo do mesmo
+--   processo na mesma data-limite (evita bater com prazo vindo por outro caminho).
+--
+-- GRAVA: status='estimado', tipo='Prazo', fonte='DJEN/calculado', cumprido=false,
+--   categoria via lm_categoria_prazo() (que já existia), alertar_dias=3.
+--   Descrição: "CLIENTE · TRT-12 — ESTIMADO: disp. dd/mm +1+5 dias úteis [· texto cita N dias]".
+--
+-- ARMADILHA DE IMPLEMENTAÇÃO: o parâmetro OUT não pode se chamar `ato_chave` — colide com a
+-- coluna dentro do `on conflict (ato_chave)` e o Postgres recusa por ambiguidade. Alias no
+-- INSERT não resolve: o conflict_target do ON CONFLICT só aceita nome de coluna sem qualificação.
+-- Por isso o OUT se chama `chave_do_ato`.
+--
+-- USO:
+--   select * from trt_gera_prazos('2026-08-20','2026-09-08', false);  -- SIMULA, não grava
+--   select * from trt_gera_prazos('2026-08-20','2026-09-08', true);   -- grava
+--   -- desfazer:  delete from prazos where fonte='DJEN/calculado';
+--
+-- PRIMEIRA RODADA (08/09/2026): 71 prazos, 57 com processo vinculado, 14 sem.
+--   37 em aberto, 34 já vencidos (28/08 a 04/09).
+--   Os 34 vencidos foram MANTIDOS de propósito: prazo que expirou antes de o sistema saber dele
+--   é justamente o caso de prazo possivelmente perdido, que é o que este trabalho existe para
+--   revelar. Não são ruído — precisam ser conferidos um a um.
+--   Nenhum outro status de prazo se moveu (conferido antes/depois): só estimado, +71.
+--
+-- AGENDADO em cron.job (nada disso rodava antes — ver db/djen_supabase_pgcron.sql):
+--   trt_prazos_diario  '20 10 * * *'  select trt_gera_prazos(current_date-15, current_date, true)

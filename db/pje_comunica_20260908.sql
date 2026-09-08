@@ -1,0 +1,97 @@
+-- SONDAGEM DAS APIs DO PJe/CNJ — 08/09/2026. Documento de achado, não é para rodar.
+-- Motivo: 3.245 intimações do TRT na base e 0 prazos. A Luana pediu para "colocar essas APIs
+-- do PJe para ver se conseguimos arrumar".
+--
+-- ===========================================================================================
+-- 1. A CAUSA DO PROBLEMA, EM CÓDIGO
+-- ===========================================================================================
+-- public.lm_upsert_prazo_por_texto() é quem cria prazo a partir de publicação. Ela tem:
+--
+--     if dfinal is null then return 0; end if;   -- dfinal = regexp de 'Data final:'
+--
+-- O texto do diário do TRT NUNCA traz "Data final". Medido: 0 de 552 comunicações reais da API
+-- do CNJ, e 0 de 318 linhas de TRT/TST na nossa base. A função devolve 0 e o prazo nunca nasce.
+-- Não era falha de cadastro nem do Legal Mail.
+--
+-- ===========================================================================================
+-- 2. API COMUNICA DO CNJ (DJEN) — comunicaapi.pje.jus.br/api/v1/comunicacao
+-- ===========================================================================================
+-- Pública, grátis, sem autenticação. Consultável por numeroOab+ufOab ou por numeroProcesso.
+--
+-- ATENÇÃO — BLOQUEIO GEOGRÁFICO: o CloudFront do CNJ responde 403 "configured to block access
+-- from your country" para chamada de fora do Brasil. Edge function do Supabase roda na região
+-- DE QUEM CHAMA, não na do banco: é preciso o header `x-region: sa-east-1`. Do Brasil, 200.
+-- (Foi isso que fez a sondagem parecer impossível num primeiro momento.)
+--
+-- Devolve 24 campos por comunicação:
+--   ativo, codigoClasse, data_cancelamento, data_disponibilizacao, datadisponibilizacao,
+--   destinatarioadvogados, destinatarios, hash, id, idOrgao, link, meio, meiocompleto,
+--   motivo_cancelamento, nomeClasse, nomeOrgao, numeroComunicacao, numero_processo,
+--   numeroprocessocommascara, siglaTribunal, status, texto, tipoComunicacao, tipoDocumento
+--
+--   NÃO EXISTE CAMPO DE PRAZO. Nem data-limite, nem data de ciência, nem contagem de dias.
+--   0 de 552 têm "Data final" ou "Prazo final" no texto. A fonte oficial não publica a
+--   data-limite — ela existe só na tela "Meus Expedientes" do PJe, que não tem API aberta.
+--   Não gaste tempo procurando prazo aqui de novo.
+--
+-- O que a API é boa para: cobertura. 552 comunicações em 39 dias para a OAB 40082/SC, em
+-- 15 tribunais (TJSC 228, TRT12 213, TRF4 26, TST 25, TRT15 21, TRT9 8, TJSP/TJPR/STJ 7...).
+-- É janela móvel, não arquivo: devolve menos do que a base já guarda. Sem coleta diária,
+-- perde-se.
+--
+-- ===========================================================================================
+-- 3. PDPJ — não resolve
+-- ===========================================================================================
+-- sso.cloud.pje.jus.br (Keycloak, realm `pje`): responde 200, suporta client_credentials e
+-- tls_client_auth. Ou seja, se derem credencial a integração é padrão.
+-- gateway.cloud.pje.jus.br: 404 sem token (vivo, mas sem credencial não serve).
+-- discovery.stg.cloud.pje.jus.br: 200, é um Swagger UI.
+-- MNI do TRT12 (pje.trt12.jus.br/pje-web/intercomunicacao?wsdl): 403 em tudo, de qualquer lugar.
+--
+-- Conclusão: credencial do PDPJ NÃO resolveria este problema, porque o campo de prazo não
+-- existe na fonte. O e-mail ao integracaopdpj@cnj.jus.br perde urgência.
+--
+-- ===========================================================================================
+-- 4. A FÓRMULA QUE SUBSTITUI O CAMPO QUE NÃO EXISTE
+-- ===========================================================================================
+--     Prazo Final = disponibilização + 1 dia útil (a ciência) + 5 dias úteis
+--                   descontando sábado, domingo e feriado
+--
+-- Conferida contra a tela "Meus Expedientes" do PJe (gabarito da Cibele, 08/09): 6 de 6 exatas.
+--   00000238420265120030 EDILSON  disp 01/09 -> 10/09
+--   00026206020255120030 JUAREZ   disp 01/09 -> 10/09
+--   00012164320265120028 KAUE     disp 01/09 -> 10/09
+--   00026581720255120016 STEFANI  disp 03/09 -> 14/09
+--   00025296720255120030 ANGELO   disp 08/09 -> 16/09
+--   00013596320265120050 EDNA     disp 08/09 -> 16/09
+--
+-- POR QUE N=5 FIXO, e não lido do texto:
+--   * 4 dos 6 atos do gabarito não contêm nem a palavra "prazo"; 5 dos 6 não citam número de
+--     dia nenhum — e todos tinham prazo real. Regra do tipo "só cria se o texto falar de prazo"
+--     perderia 4 dos 6, incluindo 3 dos 4 que venciam em 10/09.
+--   * Só 29% dos textos citam algum número de dias, e o número costuma ser de outro (perito,
+--     parte contrária, norma citada): de 12 textos lidos à mão, só 2 traziam o nosso prazo.
+--   * O erro é assimétrico: N menor que o real ANTECIPA a data (trabalha-se adiantado, seguro);
+--     N maior PERDE O PRAZO. Na dúvida, o menor.
+--   Os números achados no texto entram na descrição como aviso ("texto cita 15 dias — conferir")
+--   para a conferência humana decidir.
+--
+-- ===========================================================================================
+-- 5. CORREÇÕES DE AFIRMAÇÕES MINHAS ANTERIORES
+-- ===========================================================================================
+-- (a) Eu disse que "dos 598 atos, 109 mencionam prazo e 489 são só ciência". ERRADO. Ausência
+--     de número no texto não significa ausência de prazo — ver acima. A comparação boa é outra:
+--     na semana 01–08/09 o recorte TRT-12 dá 21 atos distintos, contra os 21 expedientes em
+--     aberto que o PJe mostrava. É ~1 prazo por intimação, não 1 em 6.
+-- (b) Eu disse que as publicações estavam duplicadas em massa. Duplicata idêntica são 79 linhas
+--     em 10.980 (0,7%). A repetição real é cópia por advogado monitorado E por fonte de coleta
+--     (até 4 cópias do mesmo ato), que se resolve pela view publicacoes_atos.
+-- (c) O geo-bloqueio: eu havia concluído que o 403 provava indisponibilidade. Provava só a
+--     localização do contêiner.
+--
+-- ===========================================================================================
+-- 6. FUNÇÃO DE SONDAGEM — JÁ NEUTRALIZADA
+-- ===========================================================================================
+-- A edge function `pje-probe` (temporária, verify_jwt=false, token no deploy) foi substituída
+-- por stub 410 com verify_jwt=true; confirmado 401 sem JWT. Ela só devolvia nomes de campo,
+-- contagens e datas — nenhum texto de comunicação foi gravado nem trafegado.

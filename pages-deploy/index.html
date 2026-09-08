@@ -4256,7 +4256,15 @@ function _noPeriodo(p){
   return !!p.data && p.data>=j[0] && p.data<=j[1];
 }
 const _advCurto=s=>{if(!s)return'';const w=s.trim().split(/\s+/)[0];return w?w[0].toUpperCase()+w.slice(1).toLowerCase():'';};
+// Prazo cuja data foi calculada/estimada e ainda não passou por olho humano.
+// 'estimado' = calculada pelo sistema (regra de dias úteis); 'estimado_ia' = lida por IA.
+// confirmarPrazo() troca o status para 'confirmado' e o prazo sai desta condição.
+const _naoConfirmado=p=>{const s=(p?.status||'').toLowerCase();return s==='estimado'||s==='estimado_ia';};
 function _classPrazo(p){
+  // Descartado na conferência ("não era prazo nosso"). Vem antes de cumprido porque a linha fica
+  // com cumprido=true para sair das listas em aberto — mas ela não foi cumprida, foi descartada,
+  // e mostrar "CUMPRIDO" nela seria mentira.
+  if((p.status||'').toLowerCase()==='descartado')return'descartado';
   if(p.cumprido)return'cumprido';
   // Perdido: o tribunal marcou o prazo como excedido (não cumprido a tempo). Precisa de conferência.
   if((p.status||'').toLowerCase()==='excedido')return'excedido';
@@ -4453,14 +4461,22 @@ function renderPrazos(){
   [['prazo-f-dia','dia'],['prazo-f-mesano','mesano'],['prazo-f-datas','custom']].forEach(([id,modo])=>{
     const b=document.getElementById(id); if(b)b.style.display=prazoPeriodo===modo?'flex':'none';
   });
-  const g={hoje:[],vencido:[],aberto:[],cumprido:[],excedido:[]};
-  base.forEach(p=>g[_classPrazo(p)].push(p));
+  const g={hoje:[],vencido:[],aberto:[],cumprido:[],excedido:[],descartado:[]};
+  // Toda classe devolvida por _classPrazo precisa existir aqui, senão o push estoura e a tela
+  // de Prazos fica em branco. O balde `descartado` foi acrescentado junto com a fila de
+  // conferência; se _classPrazo ganhar outra classe, acrescente o balde no mesmo commit.
+  base.forEach(p=>(g[_classPrazo(p)]||g.aberto).push(p));
   const stats=document.getElementById('prazos-stats');
   const ativos=[...g.hoje,...g.vencido,...g.aberto];
   const nCat=c=>ativos.filter(p=>p.categoria===c).length;
+  // Fila de conferência: prazo cuja DATA foi calculada, não veio do tribunal. O prazo do TRT
+  // nasce assim, porque o diário trabalhista não publica a data-limite (ver
+  // db/trt_gera_prazos.sql). Fica nesta fila E na lista normal, marcado, até alguém confirmar.
+  const aConferir=base.filter(p=>!p.cumprido&&_naoConfirmado(p));
   if(stats)stats.innerHTML=[
     ['hoje','Vence HOJE',g.hoje.length,'#f87171'],
     ['aberto','Em aberto',g.aberto.length,'#60a5fa'],
+    ['conferir','⚠ A conferir',aConferir.length,'#f59e0b'],
     ['custas','💰 Custas',nCat('custas'),'#d97706'],
     ['documentos','📎 Documentos',nCat('documentos'),'#7c3aed'],
     ['vencido','Vencidos',g.vencido.length,'#fbbf24']
@@ -4475,8 +4491,9 @@ function renderPrazos(){
   else if(prazoBucket==='custas'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='custas');vazio='Nenhum prazo de custas em aberto. 💰';}
   else if(prazoBucket==='documentos'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='documentos');vazio='Nenhum prazo de documentos em aberto. 📎';}
   else if(prazoBucket==='excedido'){lista=g.excedido;vazio='Nenhum prazo perdido. 👍';}
+  else if(prazoBucket==='conferir'){lista=aConferir;vazio='Nada a conferir — todas as datas foram confirmadas. 👍';}
   else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
-  else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.excedido,...g.cumprido];
+  else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.excedido,...g.cumprido,...g.descartado];
   else lista=[...g.hoje,...g.aberto]; // 'ativos' (padrão): hoje + futuros. Vencidos saem daqui ("esquece o que já passou") e ficam só no card Vencidos.
   prazosVisiveis=lista;   // o botão "Planilha" exporta exatamente esta seleção
   // Alerta vermelho de perdidos (excedido) — sempre visível no topo (menos quando já se está vendo eles).
@@ -4484,6 +4501,13 @@ function renderPrazos(){
   if(g.excedido.length && prazoBucket!=='excedido'){
     html += `<div onclick="prazoBucket='excedido';renderPrazos()" style="cursor:pointer;background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:12px 14px;margin-bottom:12px;color:#dc2626;font-size:13px;font-weight:700">
       ⚠️ ${g.excedido.length} prazo(s) marcado(s) como PERDIDO pelo tribunal — clique para conferir se foram peticionados</div>`;
+  }
+  // Aviso da fila de conferência. Fica no topo porque prazo com data calculada que ninguém olha
+  // é pior do que prazo nenhum: passa a impressão de estar controlado.
+  if(aConferir.length && prazoBucket!=='conferir'){
+    const jaVenceu=aConferir.filter(p=>_classPrazo(p)==='vencido').length;
+    html += `<div onclick="prazoBucket='conferir';renderPrazos()" style="cursor:pointer;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.40);border-radius:10px;padding:12px 14px;margin-bottom:12px;color:#b45309;font-size:13px;font-weight:700">
+      ⚠ ${aConferir.length} prazo(s) com data CALCULADA pelo sistema — clique para conferir e confirmar${jaVenceu?` · <span style="color:#dc2626">${jaVenceu} já passou da data</span>`:''}</div>`;
   }
   html += lista.length?`<div class="card"><div class="card-body">${renderPrazosLista(lista,true)}</div></div>`
     :`<div class="empty-state"><div class="icon">✅</div><p>${vazio}</p></div>`;
@@ -4500,15 +4524,15 @@ function renderPrazos(){
 }
 function renderPrazosLista(lista,comAcoes=false){
   if(!lista?.length)return'<div class="empty-state"><div class="icon">✅</div><p>Nenhum prazo.</p></div>';
-  const badge={hoje:['HOJE','#f87171'],vencido:['DECORRIDO','#fbbf24'],aberto:['EM ABERTO','#60a5fa'],cumprido:['CUMPRIDO','#4ade80'],excedido:['⚠️ PERDIDO','#dc2626']};
-  const boxCls={hoje:'urgente',vencido:'urgente',aberto:'proximo',cumprido:'ok',excedido:'urgente'};
+  const badge={hoje:['HOJE','#f87171'],vencido:['DECORRIDO','#fbbf24'],aberto:['EM ABERTO','#60a5fa'],cumprido:['CUMPRIDO','#4ade80'],excedido:['⚠️ PERDIDO','#dc2626'],descartado:['DESCARTADO','#94a3b8']};
+  const boxCls={hoje:'urgente',vencido:'urgente',aberto:'proximo',cumprido:'ok',excedido:'urgente',descartado:'ok'};
   return lista.map(p=>{
     const dt=new Date((p.data||'')+'T12:00:00');
     const cls=_classPrazo(p);const[bl,bc]=badge[cls];
     const dRest=_diasAte(p);
     // prazo em aberto mas a ≤3 dias já entra no visual de urgência (não espera "vencer hoje")
     const boxK=(cls==='aberto'&&dRest!==null&&dRest<=3)?'urgente':boxCls[cls];
-    const chip=(cls!=='cumprido')?_chipDias(p):'';
+    const chip=(cls!=='cumprido'&&cls!=='descartado')?_chipDias(p):'';
     // Sugestão da IA (só quando ainda não confirmada por humano e a categoria está em aberto/geral)
     const semCat=(!p.categoria||p.categoria==='geral');
     const sug=(!p.cumprido&&semCat&&p.categoria_fonte!=='humano'&&(p.categoria_sugerida==='custas'||p.categoria_sugerida==='documentos'))?p.categoria_sugerida:'';
@@ -4517,7 +4541,12 @@ function renderPrazosLista(lista,comAcoes=false){
     const est=(p.status==='estimado');
     const estIA=(p.status==='estimado_ia');
     const naoConfirmado=est||estIA;
-    const seloEst=est?` <span title="Data estimada pelo sistema (disponibilização + 15 dias úteis). Confira e confirme." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">⚠ ESTIMADO</span>`
+    // O texto do aviso muda com a origem: o prazo do TRT vem da regra de dias úteis conferida
+    // contra o PJe, e não de um "+15 dias" genérico (que era o que este título dizia antes).
+    const explEst=p.fonte==='DJEN/calculado'
+      ? 'Data CALCULADA: disponibilização + 1 dia útil (ciência) + 5 dias úteis, descontando fim de semana e feriado. O diário do TRT não publica a data-limite, por isso ela é calculada. A regra bateu com a tela do PJe em 6 de 6 casos conferidos. Confira e confirme.'
+      : 'Data estimada pelo sistema. Confira e confirme.';
+    const seloEst=est?` <span title="${explEst}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">⚠ ESTIMADO</span>`
       :estIA?` <span title="Data estimada por IA (Infinitum/Publijus, leu o documento). Confira e confirme." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#0ea5e922;color:#0369a1">🤖 Estimado por IA</span>`:'';
     const seloFonte=p.fonte==='infinitum'?` <span title="Origem: Infinitum/Publijus" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#8b5cf622;color:#7c3aed">via Infinitum</span>`:'';
     return`<div class="prazo-item"${naoConfirmado?' style="background:rgba(245,158,11,.05)"':''}>
@@ -4534,7 +4563,9 @@ function renderPrazosLista(lista,comAcoes=false){
         ${sug?`<button class="btn btn-sm" style="background:${sug==='custas'?'#fef3c7':'#ede9fe'};color:${sug==='custas'?'#b45309':'#6d28d9'};font-weight:700" title="Confirmar a sugestão da IA" onclick="setCatPrazo('${p.id}','${sug}')">✓ Confirmar ${sug==='custas'?'💰':'📎'}</button>`:''}
         ${!p.cumprido?`<button class="btn-icon" title="Marcar: recolher custas" style="opacity:${p.categoria==='custas'?1:.4}" onclick="setCatPrazo('${p.id}','custas')">💰</button>
         <button class="btn-icon" title="Marcar: apresentar documento" style="opacity:${p.categoria==='documentos'?1:.4}" onclick="setCatPrazo('${p.id}','documentos')">📎</button>`:''}
-        ${naoConfirmado&&!p.cumprido?`<button class="btn btn-sm" style="background:#fef3c7;color:#b45309" onclick="confirmarPrazo('${p.id}','${p.data||''}')">✎ Confirmar data</button>`:''}
+        ${naoConfirmado&&!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d;font-weight:700" title="A data calculada está certa: confirma e o prazo deixa de ser estimado" onclick="confirmarPrazoOk('${p.id}')">✓ Data confere</button>
+        <button class="btn btn-sm" style="background:#fef3c7;color:#b45309" title="A data está errada: digitar a data real" onclick="confirmarPrazo('${p.id}','${p.data||''}')">✎ Corrigir data</button>
+        <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" title="Este ato não gerava prazo para nós (era do perito, da parte contrária, ou só ciência)" onclick="descartarPrazo('${p.id}')">✕ Não é prazo</button>`:''}
         ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d" onclick="cumprir('${p.id}')">✓ Cumprir</button>`
           :`<span style="color:#15803d;font-size:12px">✅ Cumprido</span>
             <button class="btn btn-sm" style="background:#e0e7ff;color:#3730a3" title="Marcou sem querer? Volta o prazo para em aberto" onclick="reabrirPrazo('${p.id}')">↩ Reabrir</button>`}
@@ -4603,6 +4634,25 @@ async function confirmarPrazo(id,dataAtual){
   const{error}=await supa.from('prazos').update({data:nova.trim(),data_prazo:nova.trim(),status:'confirmado'}).eq('id',id);
   if(error){toast('Erro: '+error.message,'erro');return;}
   toast('Prazo confirmado — não será mais alterado automaticamente.','ok');carregarPrazos();
+}
+// "A data confere": só troca o status, mantém a data calculada. É o caminho de um clique — o
+// esperado na maioria dos casos, já que a regra acertou 6 de 6 contra o PJe.
+async function confirmarPrazoOk(id){
+  const{error}=await supa.from('prazos').update({status:'confirmado'}).eq('id',id);
+  if(error){toast('Erro: '+error.message,'erro');return;}
+  toast('Data confirmada.','ok');carregarPrazos();
+}
+// "Não é prazo": o ato não gerava prazo para o escritório (era do perito, da parte contrária, ou
+// mera ciência).
+// NÃO deletar a linha: a rotina diária é idempotente pela prazos.ato_chave, então apagar o prazo
+// apagaria a chave e a rotina recriaria o mesmo prazo no dia seguinte. Marcar
+// status='descartado' + cumprido=true tira da fila e da lista em aberto, e a chave permanece
+// bloqueando a recriação.
+async function descartarPrazo(id){
+  if(!confirm('Marcar como "não era prazo nosso"?\n\nEle sai da fila e da lista de prazos em aberto. A publicação de origem continua guardada.'))return;
+  const{error}=await supa.from('prazos').update({status:'descartado',cumprido:true}).eq('id',id);
+  if(error){toast('Erro: '+error.message,'erro');return;}
+  toast('Descartado — não era prazo nosso.','ok');carregarPrazos();
 }
 async function excluirPrazo(id){
   if(!confirm('Excluir prazo?'))return;

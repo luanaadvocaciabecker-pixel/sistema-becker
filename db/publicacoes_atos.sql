@@ -1,0 +1,39 @@
+-- View public.publicacoes_atos — um ATO por linha, em vez de uma CÓPIA por linha.
+-- (aplicado via migration `view_publicacoes_atos`)
+--
+-- POR QUE EXISTE: a mesma intimação chega até 4 vezes — 2 advogados do escritório monitorados
+-- (o diário publica uma cópia por destinatário) x 2 fontes de coleta (DJEN direto e Legal Mail).
+-- Medido no processo do EDILSON: 11 comunicações na API do CNJ, 21 linhas em publicacoes
+-- (13 DJEN + 8 Legal Mail). Sem colapsar, cada ato viraria 4 prazos.
+--
+-- CHAVE DO ATO: (CNJ em dígitos, data_disponibilizacao, ID do ato)
+--   O ID vem no próprio texto ("Despacho ID cda30e1") e existe em ~55% das linhas. Sem ID a
+--   chave cai para (CNJ, data), que na janela medida dá 85 grupos contra 86 da chave com ID —
+--   praticamente o mesmo corte.
+--
+-- DUAS ARMADILHAS, medidas:
+--   * Hash do texto NÃO serve de desempate: as cópias diferem entre si porque cada uma cita o
+--     seu destinatário. md5(left(texto,400)) dava 136 grupos onde a chave certa dá 86 — separava
+--     justamente o que devia juntar.
+--   * `tipo` NÃO é o tipo do ato, é o rótulo da fonte de coleta: "Publicação", "DJEN/PJe" e
+--     "Diário de Justiça Eletrônico Nacional" são a mesma coisa por caminhos diferentes. Só
+--     serve para excluir 'Audiência' (que é data de sessão, não expediente com prazo).
+--   * numero_processo vem formatado numas fontes e só em dígitos noutras — normalizar é
+--     obrigatório na chave.
+--
+-- Linha canônica do ato: texto mais longo; empate por fonte DJEN e depois por id (determinístico).
+-- Agrega processo_id e prazo_gerado do ato inteiro, porque o vínculo às vezes está preenchido em
+-- só uma das cópias.
+--
+-- É VIEW, não DELETE: o histórico das publicações fica intacto.
+--
+-- Conferir:
+--   select count(*) from publicacoes_atos
+--    where tribunal ~ '^(TRT|TST)' and data_disponibilizacao between '2026-09-01' and '2026-09-08';
+--   -- 30 atos, contra 106 linhas cruas. E o recorte TRT-12 dá 21 atos = os 21 expedientes
+--   -- que a tela "Meus Expedientes" do PJe mostrava em 08/09.
+--
+-- CUIDADO: a coluna `tribunal` não é normalizada — convivem TRT-12 e TRT12, TRT-9 e TRT9,
+-- TRT-15 e TRT15, TRF-4 e TRF4 (23 grafias na base). SEMPRE filtrar com ~ '^(TRT|TST)',
+-- nunca com igualdade. Foi exatamente isso que fez uma conferência minha mostrar 4 atos em vez
+-- de 21. Normalizar a coluna é dívida pendente.
