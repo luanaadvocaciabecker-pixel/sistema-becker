@@ -19,14 +19,47 @@
 --                (disponibilização + 1 dia útil de ciência + 5 dias úteis, sem feriado)
 --   Conferido contra a tela "Meus Expedientes" do PJe: 6 de 6 exatas.
 --
--- N = 5 SEMPRE. Não se lê o texto. Motivo (medido, não achismo):
---   * 4 dos 6 atos do gabarito não contêm nem a palavra "prazo"; 5 dos 6 não citam número de dia
---     nenhum — e todos tinham prazo real no tribunal. "Só cria se o texto falar de prazo"
---     perderia 4 dos 6, incluindo 3 dos 4 que venciam em 10/09.
---   * Só 29% dos textos citam número de dias, e ele costuma ser de outro (perito, parte
---     contrária, norma citada): de 12 textos lidos à mão, só 2 traziam o nosso prazo.
---   * Erro assimétrico: N menor ANTECIPA a data (seguro); N maior PERDE O PRAZO.
---   Os números achados no texto vão para a descrição como aviso ("texto cita 15 dias — conferir").
+-- N = least(5, menor prazo DIRIGIDO no texto). O texto só ENCURTA, nunca alonga.
+--
+-- Como se chegou aqui (a primeira versão estava errada, corrigida em 09/09/2026):
+--
+-- Ponto de partida: N=5 fixo, porque 4 dos 6 atos do gabarito não contêm nem a palavra "prazo",
+-- 5 dos 6 não citam número de dia nenhum, e todos tinham prazo real. Regra do tipo "só cria se o
+-- texto falar de prazo" perderia 4 dos 6, incluindo 3 dos 4 que venciam em 10/09.
+--
+-- O erro que eu cometi: justifiquei o 5 fixo dizendo que 5 é o menor prazo comum, logo o erro
+-- seria sempre "para antes", que é seguro. A Luana lembrou de um caso antigo (o sistema abria 15
+-- e a intimação dizia 8) e pediu para conferir. A premissa era FALSA. Nos atos reais existe:
+--     "diga o autor em 2 dias se insiste na prova oral requerida"                    (4 atos)
+--     "Intimem-se as partes para que digam, em 48 horas, se têm interesse em ..."     (3 atos)
+-- "O autor" e "as partes" incluem o nosso cliente. Prazo real de 2 dias, e o 5 dava data DEPOIS
+-- da real — a direção que PERDE PRAZO. Um dos 71 prazos já gravados estava assim (id 5734,
+-- mostrava 28/08 quando o certo era 25/08); foi corrigido à mão.
+--
+-- Como se acha sem gerar ruído: casar ORDEM DIRIGIDA + PRAZO, não número solto.
+--     verbo (diga|digam|manifeste|informe|apresente|comprove|junte|cumpra|esclareça|indique)
+--     + "em|no prazo de|dentro de" + N + (dias|horas)
+-- Em 397 atos isso casa 10 vezes — 2 dias (x4), 5, 8, 10, 48 horas (x3) — e nenhum boilerplate.
+-- Casar número solto pegava 44 atos, quase todos norma citada ou prazo de outra parte.
+--
+-- POR QUE SÓ ENCURTA:
+--   * texto diz 2 dias ou 48 horas -> usa 2   (corrige o caso perigoso)
+--   * texto diz 8 ou 10            -> mantém 5 (antecipa; a pessoa estende na conferência)
+--   * texto não diz nada           -> 5        (o padrão validado 6/6 contra o PJe)
+-- Alongar automaticamente é exatamente o erro do estimador antigo de "+15 dias úteis", removido
+-- na v3 da reconciliação por isso mesmo (db/legalmail_webhook.sql, seção 6).
+--
+-- E NÃO converter "24/48/72 horas" às cegas: das 22 menções a horas, a maioria está ancorada
+-- noutra data ("48 horas antes da sessão", "24 horas antes da audiência") ou é norma citada
+-- (art. 880 da CLT). Encurtar tudo criaria urgência falsa, e fila que grita sem motivo deixa de
+-- ser lida. Só vale dentro da ordem dirigida.
+--
+-- ARMADILHA DE IMPLEMENTAÇÃO, que me pegou: ao tornar o grupo do verbo NÃO-capturante, os índices
+-- andam — m[1] é o número e m[2] a unidade. Eu havia usado m[2] e m[3], e a função ESTOURAVA
+-- ('horas'::int) justamente ao encontrar a ordem dirigida. Não foi pego na primeira conferência
+-- porque a janela testada não tinha nenhuma ordem dirigida: a subconsulta nunca era avaliada.
+-- Teste que não exercita o caminho novo não é teste — conferir sempre em junho/julho, onde os
+-- casos existem.
 --
 -- ESCOPO: lê de publicacoes_atos (NUNCA de publicacoes direto, senão volta a duplicar).
 --   tribunal ~ '^(TRT|TST)'  -- regex, por causa das grafias duplas TRT-12/TRT12
