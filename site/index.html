@@ -4526,6 +4526,153 @@ function renderPrazos(){
   }
   el.innerHTML=html;
 }
+// ---- Olhinho do prazo: a intimação e um norte do que fazer ----------------------------
+// O texto da intimação já está em publicacoes.texto (chega pelo DJEN/Legal Mail), então mostrar
+// não custa nada e não toca no tribunal. Alcança 170 dos 174 prazos em aberto, via legalmail_id.
+//
+// O "norte" é determinístico de propósito: sai da MESMA regex de ordem dirigida que o
+// trt_gera_prazos usa no banco, para tela e cálculo não divergirem. A IA fica atrás de um botão
+// (decisão dela em 09/09) para não gastar em toda abertura nem escrever palpite sem pedirem.
+const RE_ORDEM_PRAZO=/(diga|digam|manifeste|manifestem|informe|informem|apresente|apresentem|comprove|comprovem|junte|juntem|cumpra|cumpram|esclare[cç]\w*|indique|indiquem)\w*[^.;:]{0,60}?(?:em|no prazo de|dentro de)\s+(\d{1,3})\s*\(?[a-zç ]{0,12}\)?\s*(dias?|horas?)/gi;
+const _ACAO_VERBO={diga:'manifestar-se',digam:'manifestar-se',manifeste:'manifestar-se',manifestem:'manifestar-se',
+  informe:'informar',informem:'informar',apresente:'apresentar',apresentem:'apresentar',
+  comprove:'comprovar',comprovem:'comprovar',junte:'juntar documento',juntem:'juntar documento',
+  cumpra:'cumprir a determinação',cumpram:'cumprir a determinação',indique:'indicar',indiquem:'indicar'};
+// Duas fontes, nesta ordem de confiança:
+//   1. o BLOCO ESTRUTURADO do Legal Mail — "Prazo: N dias", "Data final: DD/MM/AAAA",
+//      "Status do prazo: aberto/fechado". É campo do próprio tribunal, e existe em 137 das 170
+//      intimações dos prazos em aberto. É a melhor informação que temos.
+//   2. a ORDEM DIRIGIDA no corpo do despacho ("diga o autor em 2 dias") — mesma regex do
+//      trt_gera_prazos. Cobre o TRT, que não tem o bloco estruturado (só 3 das 170).
+// Sem as duas, diz que não consta em vez de inventar.
+function _norteDoTexto(txt){
+  const s=String(txt||'');
+  const r={acao:null,prazoTexto:null,dias:null,fonte:null,dataFinal:null,statusPrazo:null,ato:null};
+
+  // 1) bloco estruturado
+  const mDias=s.match(/[Pp]razo:\s*(\d{1,3})\s*dias?/);
+  const mFinal=s.match(/[Dd]ata final:\s*(\d{2}\/\d{2}\/\d{4})/);
+  const mStatus=s.match(/[Ss]tatus do prazo:\s*([^\n\r]{0,40})/);
+  const mAto=s.match(/eletr[ôo]nica\s*-\s*([^\n\r]{0,60})/i);
+  if(mAto)r.ato=mAto[1].trim().replace(/\s{2,}/g,' ');
+  if(mFinal)r.dataFinal=mFinal[1];
+  if(mStatus)r.statusPrazo=mStatus[1].trim();
+  if(mDias){
+    r.prazoTexto=mDias[1]+' dias';
+    r.dias=parseInt(mDias[1],10);
+    r.fonte='campo do tribunal';
+  }
+
+  // 2) ordem dirigida no corpo — a MAIS CURTA, que é a que manda
+  const achados=[];
+  RE_ORDEM_PRAZO.lastIndex=0; let m;
+  while((m=RE_ORDEM_PRAZO.exec(s))!==null){
+    const verbo=m[1].toLowerCase(), qtd=parseInt(m[2],10), un=m[3].toLowerCase();
+    if(!(qtd>=1&&qtd<=120))continue;
+    achados.push({acao:_ACAO_VERBO[verbo]||(verbo.startsWith('esclare')?'esclarecer':verbo),
+                  prazoTexto:qtd+' '+un, dias:un.startsWith('hora')?Math.max(1,Math.ceil(qtd/24)):qtd});
+  }
+  if(achados.length){
+    achados.sort((a,b)=>a.dias-b.dias);
+    const o=achados[0];
+    r.acao=o.acao;
+    // A ordem no corpo só substitui o campo do tribunal se for MAIS CURTA — mesma lógica do
+    // banco: encurtar é seguro, alongar perde prazo.
+    if(r.dias==null||o.dias<r.dias){r.prazoTexto=o.prazoTexto;r.dias=o.dias;r.fonte='ordem no texto';}
+  }
+  return r;
+}
+function _tipoDoAto(txt){
+  const s=String(txt||'');
+  const tipo=(s.match(/\b(Despacho|Senten[çc]a|Decis[ãa]o|Ata de|Ac[óo]rd[ãa]o|Certid[ãa]o|Notifica[çc][ãa]o|Alvar[áa]|Edital)\b/i)||[])[1]||null;
+  const orgao=(s.match(/(\d+ª\s+VARA DO TRABALHO DE [A-ZÀ-Ú\s]+|CEJUSC-JT\/\S+)/i)||[])[1]||null;
+  return{tipo:tipo||null,orgao:orgao?orgao.trim().replace(/\s{2,}/g,' '):null};
+}
+let _prazoAberto=null;   // guarda o prazo do modal, para o botão da IA não passar texto por atributo
+async function verPrazo(id){
+  const{data:p}=await supa.from('prazos').select('*,processos(numero,advogado_responsavel,clientes(nome))').eq('id',id).single();
+  if(!p){toast('Prazo não encontrado.','erro');return;}
+  // Busca a publicação de origem: legalmail_id cobre quase tudo; ato_chave é a reserva do TRT.
+  let pub=null;
+  if(p.legalmail_id){
+    const{data}=await supa.from('publicacoes').select('texto,link,tribunal,tipo,data_disponibilizacao').eq('legalmail_id',p.legalmail_id).limit(1);
+    pub=(data||[])[0]||null;
+  }
+  if(!pub&&p.ato_chave){
+    // Reserva para o prazo do TRT: a ato_chave é 'cnj|data|idDoAto'. Filtra a data no banco e o
+    // CNJ aqui, porque numero_processo vem formatado numas fontes e só em dígitos noutras.
+    // numero_processo TEM de estar no select — sem ele o find compara undefined e nunca acha.
+    const num=String(p.ato_chave).split('|')[0]||'', dt=String(p.ato_chave).split('|')[1]||'';
+    if(num&&/^\d{4}-\d{2}-\d{2}$/.test(dt)){
+      const{data}=await supa.from('publicacoes')
+        .select('numero_processo,texto,link,tribunal,tipo,data_disponibilizacao')
+        .eq('data_disponibilizacao',dt).order('id').limit(200);
+      pub=(data||[]).find(x=>String(x.numero_processo||'').replace(/\D/g,'')===num)||null;
+    }
+  }
+  _prazoAberto={id:p.id,texto:pub?.texto||'',cliente:p.processos?.clientes?.nome||''};
+
+  const cls=_classPrazo(p), naoConf=_naoConfirmado(p);
+  const norte=_norteDoTexto(pub?.texto), ato=_tipoDoAto(pub?.texto);
+  const disp=pub?.data_disponibilizacao||(p.ato_chave?String(p.ato_chave).split('|')[1]:'')||'';
+  const conta=(p.descricao||'').match(/\+1\+(\d+) dias úteis/);
+  const linha=(rot,val)=>`<div style="display:flex;gap:8px;padding:3px 0"><span style="color:#94a3b8;min-width:132px;flex-shrink:0">${rot}</span><span>${val}</span></div>`;
+
+  const bloco=`
+  <div style="font-size:12px;color:#94a3b8;margin-bottom:10px">
+    ${escHtml(p.processos?.clientes?.nome||'(cliente a vincular)')}
+    ${p.processos?.numero?' · Proc. '+escHtml(p.processos.numero):''}
+    ${pub?.tribunal?' · '+escHtml(pub.tribunal):''}
+    ${p.processos?.advogado_responsavel?' · 👤 '+escHtml(_advCurto(p.processos.advogado_responsavel)):' · <span style="color:#dc2626">⚠️ sem responsável</span>'}
+  </div>
+  <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.30);border-radius:8px;padding:11px 13px;margin-bottom:12px;font-size:13px">
+    <div style="font-weight:700;color:#b45309;margin-bottom:6px">O QUE FAZER</div>
+    ${linha('O juízo mandou:', norte.acao?'<b>'+escHtml(norte.acao)+'</b>'
+      :norte.ato?'<b>'+escHtml(norte.ato)+'</b> <span style="color:#94a3b8">— ler a intimação para saber a providência</span>'
+      :'<span style="color:#94a3b8">o texto não traz ordem expressa — ler a intimação abaixo</span>')}
+    ${linha('Prazo no texto:', norte.prazoTexto?'<b>'+escHtml(norte.prazoTexto)+'</b> <span style="color:#64748b;font-size:11px">('+escHtml(norte.fonte)+')</span>':'<span style="color:#94a3b8">não consta</span>')}
+    ${norte.dataFinal?linha('Data final do tribunal:', '<b style="color:#4ade80">'+escHtml(norte.dataFinal)+'</b> <span style="color:#64748b;font-size:11px">(data oficial, não estimada)</span>'):''}
+    ${norte.statusPrazo?linha('Status no tribunal:', escHtml(norte.statusPrazo)):''}
+    ${linha('Data do prazo:', '<b>'+_dataBR(p.data||p.data_prazo)+'</b>'+(naoConf?' <span style="color:#b45309">(estimada pelo sistema)</span>':''))}
+    ${disp&&naoConf?linha('Conta:', 'disp. '+_dataBR(disp)+' + 1 dia útil (ciência)'+(conta?' + '+conta[1]+' dias úteis':'')):''}
+    ${ato.tipo||ato.orgao?linha('Ato:', escHtml([ato.tipo,ato.orgao].filter(Boolean).join(' · '))):''}
+    ${p.categoria==='custas'?linha('Categoria:','<b style="color:#d97706">💰 Recolher custas</b>'):p.categoria==='documentos'?linha('Categoria:','<b style="color:#7c3aed">📎 Apresentar documento</b>'):''}
+    ${pub?.texto?`<div style="margin-top:9px"><button class="btn btn-sm" style="background:#e0e7ff;color:#3730a3;font-weight:700" onclick="resumirPrazoIA()">🤖 Resumir com IA</button>
+      <span style="color:#64748b;font-size:11px;margin-left:6px">para despacho longo</span></div>
+      <div id="prazo-ia" style="margin-top:9px"></div>`:''}
+  </div>
+  <div style="font-size:12px;color:#94a3b8;margin-bottom:6px">
+    INTIMAÇÃO ${pub?.tipo?'· '+escHtml(pub.tipo):''}
+    ${pub?.link?'· <a href="'+escHtml(pub.link)+'" target="_blank" rel="noopener" style="color:var(--azul3)">abrir no DJEN</a>':''}
+  </div>
+  <div style="white-space:pre-wrap;font-size:13px;line-height:1.5;max-height:42vh;overflow:auto;background:rgba(7,18,32,.6);padding:12px;border-radius:8px">${
+    pub?.texto?escHtml(pub.texto)
+    :'<span style="color:#94a3b8">Sem publicação de origem guardada — este prazo foi criado à mão. O texto está no PJe.</span>'}</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:13px;padding-top:11px;border-top:1px solid var(--border)">
+    ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d;font-weight:700" onclick="fecharModal();cumprir('${p.id}')">✓ Cumprir</button>`:''}
+    ${naoConf&&!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d" onclick="fecharModal();confirmarPrazoOk('${p.id}')">✓ Data confere</button>
+    <button class="btn btn-sm" style="background:#fef3c7;color:#b45309" onclick="fecharModal();confirmarPrazo('${p.id}','${p.data||''}')">✎ Corrigir data</button>
+    <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="fecharModal();descartarPrazo('${p.id}')">✕ Não é prazo</button>`:''}
+    ${p.processo_id?`<button class="btn btn-sm btn-secondary" onclick="fecharModal();abrirProcesso('${p.processo_id}')">👁️ Abrir processo</button>`:''}
+  </div>`;
+  abrirModal('⏰ Prazo '+_dataBR(p.data||p.data_prazo), bloco, null, 'Fechar', false, true);
+}
+// Resumo pela IA, só quando pedem. Não grava nada no prazo: é apoio de leitura, não registro.
+async function resumirPrazoIA(){
+  const el=document.getElementById('prazo-ia'); if(!el||!_prazoAberto)return;
+  el.innerHTML='<span style="color:#94a3b8;font-size:12px">🤖 lendo a intimação…</span>';
+  const r=await chamarFuncao('becker-ia',{action:'assistente',pergunta:
+    'Você é assistente de um escritório de advocacia trabalhista. Leia a intimação abaixo e '
+    +'responda em no máximo 3 linhas curtas: (1) o que o juízo decidiu ou determinou; '
+    +'(2) o que o escritório precisa fazer; (3) se o texto indica prazo, qual. '
+    +'Não invente prazo que não esteja escrito. Se não houver providência para nós, diga isso.'
+    +(_prazoAberto.cliente?'\n\nNosso cliente neste processo: '+_prazoAberto.cliente:'')
+    +'\n\nINTIMAÇÃO:\n'+String(_prazoAberto.texto||'').slice(0,3500)});
+  if(r.erro){el.innerHTML='<span style="color:#dc2626;font-size:12px">Não deu para resumir: '+escHtml(r.erro)+'</span>';return;}
+  el.innerHTML='<div style="background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.28);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.5;white-space:pre-wrap">'
+    +'<b style="color:#0369a1">🤖 Resumo da IA</b> <span style="color:#64748b;font-size:11px">— confira no texto, a IA pode errar</span><br>'
+    +escHtml(r.resposta||'(sem resposta)')+'</div>';
+}
 function renderPrazosLista(lista,comAcoes=false){
   if(!lista?.length)return'<div class="empty-state"><div class="icon">✅</div><p>Nenhum prazo.</p></div>';
   const badge={hoje:['HOJE','#f87171'],vencido:['DECORRIDO','#fbbf24'],aberto:['EM ABERTO','#60a5fa'],cumprido:['CUMPRIDO','#4ade80'],excedido:['⚠️ PERDIDO','#dc2626'],descartado:['DESCARTADO','#94a3b8'],encerrado:['ENCERRADO S/ CONFERIR','#94a3b8']};
@@ -4564,6 +4711,7 @@ function renderPrazosLista(lista,comAcoes=false){
         ${sug?`<p style="margin:4px 0 0"><span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:${sug==='custas'?'#d9770622':'#7c3aed22'};color:${sug==='custas'?'#b45309':'#6d28d9'}">🤖 IA sugere: ${sug==='custas'?'💰 Custas':'📎 Documentos'}${p.categoria_confianca?` · confiança ${p.categoria_confianca}`:''}</span>${p.categoria_motivo?` <span style="color:#94a3b8;font-size:11px">— ${p.categoria_motivo}</span>`:''}</p>`:''}
       </div>
       ${comAcoes?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <button class="btn-icon" title="Ver a intimação e o que é para fazer" onclick="verPrazo('${p.id}')">👁️</button>
         ${sug?`<button class="btn btn-sm" style="background:${sug==='custas'?'#fef3c7':'#ede9fe'};color:${sug==='custas'?'#b45309':'#6d28d9'};font-weight:700" title="Confirmar a sugestão da IA" onclick="setCatPrazo('${p.id}','${sug}')">✓ Confirmar ${sug==='custas'?'💰':'📎'}</button>`:''}
         ${!p.cumprido?`<button class="btn-icon" title="Marcar: recolher custas" style="opacity:${p.categoria==='custas'?1:.4}" onclick="setCatPrazo('${p.id}','custas')">💰</button>
         <button class="btn-icon" title="Marcar: apresentar documento" style="opacity:${p.categoria==='documentos'?1:.4}" onclick="setCatPrazo('${p.id}','documentos')">📎</button>`:''}
