@@ -1,0 +1,175 @@
+-- SONDAGEM DAS APIs DO PJe/CNJ — 08/09/2026. Documento de achado, não é para rodar.
+-- Motivo: 3.245 intimações do TRT na base e 0 prazos. A Luana pediu para "colocar essas APIs
+-- do PJe para ver se conseguimos arrumar".
+--
+-- ===========================================================================================
+-- 1. A CAUSA DO PROBLEMA, EM CÓDIGO
+-- ===========================================================================================
+-- public.lm_upsert_prazo_por_texto() é quem cria prazo a partir de publicação. Ela tem:
+--
+--     if dfinal is null then return 0; end if;   -- dfinal = regexp de 'Data final:'
+--
+-- O texto do diário do TRT NUNCA traz "Data final". Medido: 0 de 552 comunicações reais da API
+-- do CNJ, e 0 de 318 linhas de TRT/TST na nossa base. A função devolve 0 e o prazo nunca nasce.
+-- Não era falha de cadastro nem do Legal Mail.
+--
+-- ===========================================================================================
+-- 2. API COMUNICA DO CNJ (DJEN) — comunicaapi.pje.jus.br/api/v1/comunicacao
+-- ===========================================================================================
+-- Pública, grátis, sem autenticação. Consultável por numeroOab+ufOab ou por numeroProcesso.
+--
+-- ATENÇÃO — BLOQUEIO GEOGRÁFICO: o CloudFront do CNJ responde 403 "configured to block access
+-- from your country" para chamada de fora do Brasil. Edge function do Supabase roda na região
+-- DE QUEM CHAMA, não na do banco: é preciso o header `x-region: sa-east-1`. Do Brasil, 200.
+-- (Foi isso que fez a sondagem parecer impossível num primeiro momento.)
+--
+-- Devolve 24 campos por comunicação:
+--   ativo, codigoClasse, data_cancelamento, data_disponibilizacao, datadisponibilizacao,
+--   destinatarioadvogados, destinatarios, hash, id, idOrgao, link, meio, meiocompleto,
+--   motivo_cancelamento, nomeClasse, nomeOrgao, numeroComunicacao, numero_processo,
+--   numeroprocessocommascara, siglaTribunal, status, texto, tipoComunicacao, tipoDocumento
+--
+--   NESTE ENDPOINT não existe campo de prazo. Nem data-limite, nem data de ciência, nem
+--   contagem de dias. 0 de 552 têm "Data final" ou "Prazo final" no texto.
+--   ATENÇÃO: isso vale só para o Comunica/DJEN. O prazo EXISTE noutro serviço da PDPJ —
+--   ver o bloco 3. Não repita o meu erro de generalizar de um endpoint para a plataforma.
+--
+-- O que a API é boa para: cobertura. 552 comunicações em 39 dias para a OAB 40082/SC, em
+-- 15 tribunais (TJSC 228, TRT12 213, TRF4 26, TST 25, TRT15 21, TRT9 8, TJSP/TJPR/STJ 7...).
+-- É janela móvel, não arquivo: devolve menos do que a base já guarda. Sem coleta diária,
+-- perde-se.
+--
+-- ===========================================================================================
+-- 3. PDPJ — AQUI ESTÁ O PRAZO.  *** CORRIGE A CONCLUSÃO ANTERIOR DESTE ARQUIVO ***
+-- ===========================================================================================
+-- Levantamento de 09/09/2026, depois de a Luana cobrar: "a api do pje é bem extensa, tem que
+-- analisar o que realmente tem". Ela estava certa e eu estava errado: eu havia sondado UM
+-- endpoint (o /api/v1/comunicacao do Comunica/DJEN) e generalizado para "o PJe não tem prazo".
+--
+-- Como se acha o resto: o discovery da PDPJ é um EUREKA (registro de serviços da Netflix) e
+-- responde sem autenticação:
+--     GET https://discovery.stg.cloud.pje.jus.br/eureka/apps      -> 422 serviços
+-- Cada serviço traz o homePageUrl com o caminho real no gateway. E o OpenAPI de cada um é
+-- PÚBLICO (só a chamada de dados é que exige token):
+--     GET https://gateway.cloud.pje.jus.br/<servico>/v3/api-docs
+--
+-- O SERVIÇO QUE TEM O CAMPO: Domicílio Eletrônico (PDPJ). 57 endpoints, spec pública.
+--     GET https://gateway.cloud.pje.jus.br/domicilio-eletronico/api/v1/comunicacoes
+--     (produção, viva; sem token responde 401, não 404)
+--
+-- O schema ComunicacaoProcessualViewModel tem 67 campos, incluindo:
+--     prazo             [integer] "Data limite para cumprimento da intimação"
+--     dataFinalCiencia  [string]  "Data final para ciência"
+--     tipoPrazo, ciente, dataCiente, foiCienciaAutomatica, cienciaAutomatica, emCurso, status
+--     tipoIntimacao, linksDocumentos, linksDocumentosAdicionais
+--     autoresReclamantes[], reus[], representantes[]
+--     magistrado, valorCausa, dataAjuizamento, audiencia, varaJudicial, instancia
+--
+-- *** MAS NÃO USAR. DECISÃO DA LUANA EM 09/09/2026, E ELA ESTÁ CERTA. ***
+--
+-- Eu havia escrito aqui que "falta só a credencial" e que a integração era trivial. Ela
+-- perguntou: "o domicílio eletrônico do CNJ abre o prazo também né no pdpj? isso é arriscado".
+-- Dois motivos para não seguir, o segundo pior que o primeiro:
+--
+-- 1. CIÊNCIA É O GATILHO DO PRAZO. No Domicílio Judicial Eletrônico, dar ciência à comunicação
+--    inicia a contagem. A janela até a ciência tácita é justamente a folga para trabalhar. Uma
+--    rotina automática lendo tudo de manhã queimaria essa folga em todo processo, todo dia —
+--    trocaria "não sei o prazo" por "o prazo é hoje", que é pior do que o problema original.
+--
+--    A spec SUGERE que a ciência é escrita explícita e não efeito colateral da leitura:
+--      - PUT /api/v1/processos/{numeroProcesso}/comunicacoes/{numeroComunicacao} é a ÚNICA
+--        escrita sobre comunicação — quase certamente o "dar ciência";
+--      - o GET da lista devolve ciente/dataCiente/usuarioCiente/foiCienciaAutomatica e já traz
+--        prazo e dataFinalCiencia, ou seja, dá para ver o prazo com ciente=false;
+--      - existe GET /api/v1/processos/{numeroProcesso}/logs: toda ação fica registrada e
+--        atribuída a um usuário.
+--    ISSO É INFERÊNCIA DE DOCUMENTAÇÃO, NÃO TESTE. Errar aqui custa prazo de cliente. Não se
+--    descobre experimentando em produção.
+--
+-- 2. PROVAVELMENTE NÃO COBRE A CARTEIRA DO ESCRITÓRIO. O Domicílio é a caixa postal do
+--    DESTINATÁRIO, não do advogado: documentoDestinatario (CPF/CNPJ), nomeDestinatario,
+--    GET /api/v1/representados, GET /api/v1/comunicacoes-representantes,
+--    POST /api/v1/cadastro-compulsorio/{offSize}. O cadastro é compulsório para empresa e órgão
+--    público e OPCIONAL para pessoa física. A carteira trabalhista daqui é de reclamantes pessoa
+--    física — então a API provavelmente não traz as intimações deles. Risco alto de queimar
+--    prazo, com cobertura duvidosa.
+--
+-- CONSEQUÊNCIA: não ligar.
+--
+-- E O E-MAIL AO CNJ FOI DESCARTADO (decisão dela, 09/09/2026). Eu vinha listando como pendência
+-- por inércia. Depois de barrar o Domicílio, o e-mail só teria valor se DUAS respostas voltassem
+-- favoráveis — (a) consultar a API não constitui ciência; (b) escritório vê comunicação de
+-- cliente pessoa física — e nada no sistema depende dele. As quatro rotinas rodam sem isso.
+-- Se algum dia alguém quiser retomar, são essas as duas perguntas, para
+-- integracaopdpj@cnj.jus.br, e a ordem importa: sem as duas respostas por escrito, não se liga.
+--
+-- E o mérito do que ficou rodando: o cálculo (ver db/trt_gera_prazos.sql) NÃO TOCA EM NADA no
+-- tribunal. Não dá ciência, não abre comunicação, não deixa rastro. Risco processual zero. O que
+-- parecia solução de segunda linha é a de primeira.
+--
+-- Outros serviços que valem nota:
+--   MNI-REST  -> POST /api/v1/mni3/{siglaEntidade}/consultar-avisos-pendentes
+--                POST /api/v1/mni3/{siglaEntidade}/consultar-teor-comunicacao
+--                O corpo do pedido leva usuario/senha DO TRIBUNAL, o que me fez achar que era
+--                uma alternativa independente do CNJ. TESTADO EM 09/09/2026: NÃO É.
+--                O gateway responde 401 com WWW-Authenticate: Bearer realm="Unknown" antes de
+--                sequer olhar o corpo — precisa do mesmo token OAuth2 do CNJ. Em produção o
+--                serviço devolve 500 "GENERAL" (o Eureka que eu li é de homologação).
+--                E direto no tribunal não há rota: pje.trt12.jus.br devolve 403 do CloudFront
+--                em tudo, inclusive na home, por ser tráfego de datacenter — enquanto
+--                www.trt12.jus.br (outra infra) responde 200. Não se contorna isso.
+--   COMUNICACAO-PROCESSUAL -> só 1 endpoint (POST/PATCH /api/v1/notificacao). Não serve.
+--   NOTIFICACAO            -> api-docs devolve 401, não deu para inspecionar.
+--   CABECALHO-PROCESSUAL, PESSOAS-API, ENDERECOS, TPU -> dado cadastral/referência.
+--
+-- MNI do TRT12 direto (pje.trt12.jus.br/.../intercomunicacao?wsdl): 403 de qualquer origem.
+--
+-- O QUE ISSO NÃO MUDA: o cálculo continua valendo e continua ligado, porque não depende de
+-- autorização de ninguém e já está acertando (6/6 contra o PJe). Quando a credencial existir,
+-- troca-se a data calculada pela data oficial do campo `prazo` — a arquitetura já suporta,
+-- porque o prazo nasce com status 'estimado' e a ato_chave identifica o ato.
+
+-- ===========================================================================================
+-- 4. A FÓRMULA QUE SUBSTITUI O CAMPO QUE NÃO EXISTE
+-- ===========================================================================================
+--     Prazo Final = disponibilização + 1 dia útil (a ciência) + 5 dias úteis
+--                   descontando sábado, domingo e feriado
+--
+-- Conferida contra a tela "Meus Expedientes" do PJe (gabarito da Cibele, 08/09): 6 de 6 exatas.
+--   00000238420265120030 EDILSON  disp 01/09 -> 10/09
+--   00026206020255120030 JUAREZ   disp 01/09 -> 10/09
+--   00012164320265120028 KAUE     disp 01/09 -> 10/09
+--   00026581720255120016 STEFANI  disp 03/09 -> 14/09
+--   00025296720255120030 ANGELO   disp 08/09 -> 16/09
+--   00013596320265120050 EDNA     disp 08/09 -> 16/09
+--
+-- POR QUE N=5 FIXO, e não lido do texto:
+--   * 4 dos 6 atos do gabarito não contêm nem a palavra "prazo"; 5 dos 6 não citam número de
+--     dia nenhum — e todos tinham prazo real. Regra do tipo "só cria se o texto falar de prazo"
+--     perderia 4 dos 6, incluindo 3 dos 4 que venciam em 10/09.
+--   * Só 29% dos textos citam algum número de dias, e o número costuma ser de outro (perito,
+--     parte contrária, norma citada): de 12 textos lidos à mão, só 2 traziam o nosso prazo.
+--   * O erro é assimétrico: N menor que o real ANTECIPA a data (trabalha-se adiantado, seguro);
+--     N maior PERDE O PRAZO. Na dúvida, o menor.
+--   Os números achados no texto entram na descrição como aviso ("texto cita 15 dias — conferir")
+--   para a conferência humana decidir.
+--
+-- ===========================================================================================
+-- 5. CORREÇÕES DE AFIRMAÇÕES MINHAS ANTERIORES
+-- ===========================================================================================
+-- (a) Eu disse que "dos 598 atos, 109 mencionam prazo e 489 são só ciência". ERRADO. Ausência
+--     de número no texto não significa ausência de prazo — ver acima. A comparação boa é outra:
+--     na semana 01–08/09 o recorte TRT-12 dá 21 atos distintos, contra os 21 expedientes em
+--     aberto que o PJe mostrava. É ~1 prazo por intimação, não 1 em 6.
+-- (b) Eu disse que as publicações estavam duplicadas em massa. Duplicata idêntica são 79 linhas
+--     em 10.980 (0,7%). A repetição real é cópia por advogado monitorado E por fonte de coleta
+--     (até 4 cópias do mesmo ato), que se resolve pela view publicacoes_atos.
+-- (c) O geo-bloqueio: eu havia concluído que o 403 provava indisponibilidade. Provava só a
+--     localização do contêiner.
+--
+-- ===========================================================================================
+-- 6. FUNÇÃO DE SONDAGEM — JÁ NEUTRALIZADA
+-- ===========================================================================================
+-- A edge function `pje-probe` (temporária, verify_jwt=false, token no deploy) foi substituída
+-- por stub 410 com verify_jwt=true; confirmado 401 sem JWT. Ela só devolvia nomes de campo,
+-- contagens e datas — nenhum texto de comunicação foi gravado nem trafegado.

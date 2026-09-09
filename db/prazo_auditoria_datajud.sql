@@ -1,0 +1,57 @@
+-- Auditoria retrospectiva do prazo calculado, contra os movimentos do processo no DataJud.
+-- (aplicado via migration `prazo_auditoria_datajud`; função em
+--  whatsapp-bot/edge-function-prazos-auditoria-datajud.ts)
+--
+-- POR QUE EXISTE: o prazo do TRT é calculado, não vem do tribunal. Sem conferência, ninguém sabe
+-- se o cálculo acertou nem se o prazo foi cumprido. Foi ideia da Luana ("não tem como fazer por
+-- movimentação?"), e a versão boa dela: o DataJud (API pública do CNJ, grátis) traz os movimentos
+-- com código da TPU, e "Petição" (85) juntada depois da intimação é sinal forte de cumprimento.
+--
+-- POR QUE É MENSAL E NÃO FECHA PRAZO — medido em 09/09/2026 nos 32 vencidos com CNJ:
+--   encontrados 26 de 32; TODOS com dataHoraUltimaAtualizacao = 2026-08-10 (uma carga só);
+--   movimento mais recente de cada um em julho ou antes; 0 de 26 com qualquer movimento na data
+--   da intimação (20-28/08) ou depois. O TRT12 alimenta o DataJud em lote de ~30 dias.
+--   Prazo de 5 dias úteis não se confirma com fonte que chega um mês depois. Logo: serve para
+--   olhar para trás, não para fechar na hora. A view prazos_a_auditar corta em 35 dias.
+--
+-- POR QUE NÃO TEM RISCO PROCESSUAL: o DataJud é índice público do CNJ, não a caixa postal do
+-- destinatário. Consultar NÃO dá ciência e não inicia prazo. É a diferença essencial em relação
+-- ao Domicílio Eletrônico, que foi descartado exatamente por isso (db/pje_comunica_20260908.sql).
+--
+-- A ARMADILHA QUE A FUNÇÃO EVITA, e que precisa continuar evitada: "nenhuma petição encontrada"
+-- NÃO significa prazo perdido — pode ser só atraso da fonte. Por isso a ordem da avaliação é:
+--   1. achou petição?              -> cumprido_no_prazo | cumprido_atrasado
+--   2. o DataJud está atualizado até depois do prazo?  Se NÃO -> sem_dados_ainda (inconclusivo)
+--   3. só então -> sem_peticao ("CONFERIR se o prazo foi perdido")
+-- Testado em 09/09 com dados reais: 6 de 6 devolveram sem_dados_ainda e ZERO falso "sem_peticao".
+-- Se algum dia essa ordem for invertida, o sistema passa a gritar "prazo perdido" sem motivo.
+--
+-- NUNCA FECHA NEM APAGA PRAZO. Só grava o veredito para uma pessoa decidir.
+
+-- ALTER TABLE public.prazos ADD COLUMN auditoria_em       timestamptz;
+-- ALTER TABLE public.prazos ADD COLUMN auditoria_veredito text;
+-- ALTER TABLE public.prazos ADD COLUMN auditoria_detalhe  text;
+-- CREATE INDEX prazos_auditoria_pendente ON prazos (data_prazo)
+--   WHERE fonte='DJEN/calculado' AND auditoria_em IS NULL;
+--
+-- Vereditos: cumprido_no_prazo | cumprido_atrasado | sem_peticao | sem_dados_ainda |
+--            processo_nao_encontrado
+--
+-- VIEW public.prazos_a_auditar  -- fila: prazo calculado, não conferido, com 35+ dias
+
+-- AGENDADO:
+--   SELECT cron.schedule('prazos_auditoria_mensal', '0 11 1 * *', $$
+--     select net.http_post(
+--       url := 'https://.../functions/v1/prazos-auditoria-datajud?k=<K>&limit=200',
+--       headers := jsonb_build_object('Content-Type','application/json'),
+--       body := '{}'::jsonb, timeout_milliseconds := 300000) $$);
+--   (dia 1, 08:00 BRT)
+
+-- Rodar manualmente / conferir:
+--   curl "https://.../functions/v1/prazos-auditoria-datajud?k=<K>&dry=1"   -- não grava
+--   select * from prazos_a_auditar;
+--   select auditoria_veredito, count(*) from prazos where fonte='DJEN/calculado'
+--    group by 1 order by 2 desc;
+--   -- os que precisam de olho humano:
+--   select data_prazo, descricao, auditoria_detalhe from prazos
+--    where auditoria_veredito in ('sem_peticao','cumprido_atrasado') order by data_prazo;

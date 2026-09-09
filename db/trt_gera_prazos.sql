@@ -1,0 +1,154 @@
+-- public.trt_gera_prazos(p_de, p_ate, p_commit) — cria o prazo trabalhista que o tribunal não
+-- manda. (aplicado via migrations `trt_gera_prazos` e `trt_gera_prazos_fix_ambiguidade`)
+--
+-- POR QUE EXISTE: o diário do TRT nunca traz "Data final", e lm_upsert_prazo_por_texto() aborta
+-- sem esse campo (`if dfinal is null then return 0`). Resultado: 3.245 intimações do TRT e 0
+-- prazos. Ver db/pje_comunica_20260908.sql para o levantamento completo.
+--
+-- ESTE É O CAMINHO PRINCIPAL, e não um paliativo — reavaliado em 09/09/2026.
+-- A vantagem decisiva dele não é técnica, é processual: o cálculo NÃO TOCA EM NADA no tribunal.
+-- Não dá ciência, não abre comunicação, não deixa rastro, não antecipa contagem de prazo. Risco
+-- processual zero.
+-- A alternativa "oficial" (campo `prazo` do Domicílio Eletrônico) foi descartada justamente
+-- porque consultá-la pode constituir ciência e iniciar o prazo — ver db/pje_comunica_20260908.sql.
+-- Ou seja: mesmo se a credencial do CNJ aparecer amanhã, não é troca automática. Só se troca a
+-- data calculada pela oficial se o CNJ confirmar por escrito que a consulta não dá ciência.
+--
+-- COMO CALCULA:
+--   data_prazo = becker_dias_uteis(becker_dias_uteis(disponibilizacao, 1), 5)
+--                (disponibilização + 1 dia útil de ciência + 5 dias úteis, sem feriado)
+--   Conferido contra a tela "Meus Expedientes" do PJe: 6 de 6 exatas.
+--
+-- N = least(5, menor prazo DIRIGIDO no texto). O texto só ENCURTA, nunca alonga.
+--
+-- Como se chegou aqui (a primeira versão estava errada, corrigida em 09/09/2026):
+--
+-- Ponto de partida: N=5 fixo, porque 4 dos 6 atos do gabarito não contêm nem a palavra "prazo",
+-- 5 dos 6 não citam número de dia nenhum, e todos tinham prazo real. Regra do tipo "só cria se o
+-- texto falar de prazo" perderia 4 dos 6, incluindo 3 dos 4 que venciam em 10/09.
+--
+-- O erro que eu cometi: justifiquei o 5 fixo dizendo que 5 é o menor prazo comum, logo o erro
+-- seria sempre "para antes", que é seguro. A Luana lembrou de um caso antigo (o sistema abria 15
+-- e a intimação dizia 8) e pediu para conferir. A premissa era FALSA. Nos atos reais existe:
+--     "diga o autor em 2 dias se insiste na prova oral requerida"                    (4 atos)
+--     "Intimem-se as partes para que digam, em 48 horas, se têm interesse em ..."     (3 atos)
+-- "O autor" e "as partes" incluem o nosso cliente. Prazo real de 2 dias, e o 5 dava data DEPOIS
+-- da real — a direção que PERDE PRAZO. Um dos 71 prazos já gravados estava assim (id 5734,
+-- mostrava 28/08 quando o certo era 25/08); foi corrigido à mão.
+--
+-- Como se acha sem gerar ruído: casar ORDEM DIRIGIDA + PRAZO, não número solto.
+--     verbo (diga|digam|manifeste|informe|apresente|comprove|junte|cumpra|esclareça|indique)
+--     + "em|no prazo de|dentro de" + N + (dias|horas)
+-- Em 397 atos isso casa 10 vezes — 2 dias (x4), 5, 8, 10, 48 horas (x3) — e nenhum boilerplate.
+-- Casar número solto pegava 44 atos, quase todos norma citada ou prazo de outra parte.
+--
+-- POR QUE SÓ ENCURTA:
+--   * texto diz 2 dias ou 48 horas -> usa 2   (corrige o caso perigoso)
+--   * texto diz 8 ou 10            -> mantém 5 (antecipa; a pessoa estende na conferência)
+--   * texto não diz nada           -> 5        (o padrão validado 6/6 contra o PJe)
+-- Alongar automaticamente é exatamente o erro do estimador antigo de "+15 dias úteis", removido
+-- na v3 da reconciliação por isso mesmo (db/legalmail_webhook.sql, seção 6).
+--
+-- E NÃO converter "24/48/72 horas" às cegas: das 22 menções a horas, a maioria está ancorada
+-- noutra data ("48 horas antes da sessão", "24 horas antes da audiência") ou é norma citada
+-- (art. 880 da CLT). Encurtar tudo criaria urgência falsa, e fila que grita sem motivo deixa de
+-- ser lida. Só vale dentro da ordem dirigida.
+--
+-- ARMADILHA DE IMPLEMENTAÇÃO, que me pegou: ao tornar o grupo do verbo NÃO-capturante, os índices
+-- andam — m[1] é o número e m[2] a unidade. Eu havia usado m[2] e m[3], e a função ESTOURAVA
+-- ('horas'::int) justamente ao encontrar a ordem dirigida. Não foi pego na primeira conferência
+-- porque a janela testada não tinha nenhuma ordem dirigida: a subconsulta nunca era avaliada.
+-- Teste que não exercita o caminho novo não é teste — conferir sempre em junho/julho, onde os
+-- casos existem.
+--
+-- ESCOPO: lê de publicacoes_atos (NUNCA de publicacoes direto, senão volta a duplicar).
+--   tribunal ~ '^(TRT|TST)'  -- regex, por causa das grafias duplas TRT-12/TRT12
+--   sem 'data final' no texto  -- não invadir o caminho que já funciona nos outros tribunais
+--   sem 'pauta de julgamento' nem 'ata de sessão'  -- não são expediente com prazo
+--
+-- IDEMPOTÊNCIA: coluna prazos.ato_chave (cnj|data|ID do ato) + índice único parcial
+--   prazos_ato_chave_uk. Rodar duas vezes não duplica. Também pula se já existe prazo do mesmo
+--   processo na mesma data-limite (evita bater com prazo vindo por outro caminho).
+--
+-- GRAVA: status='estimado', tipo='Prazo', fonte='DJEN/calculado', cumprido=false,
+--   categoria via lm_categoria_prazo() (que já existia), alertar_dias=3.
+--   Descrição: "CLIENTE · TRT-12 — ESTIMADO: disp. dd/mm +1+5 dias úteis [· texto cita N dias]".
+--
+-- ARMADILHA DE IMPLEMENTAÇÃO: o parâmetro OUT não pode se chamar `ato_chave` — colide com a
+-- coluna dentro do `on conflict (ato_chave)` e o Postgres recusa por ambiguidade. Alias no
+-- INSERT não resolve: o conflict_target do ON CONFLICT só aceita nome de coluna sem qualificação.
+-- Por isso o OUT se chama `chave_do_ato`.
+--
+-- USO:
+--   select * from trt_gera_prazos('2026-08-20','2026-09-08', false);  -- SIMULA, não grava
+--   select * from trt_gera_prazos('2026-08-20','2026-09-08', true);   -- grava
+--   -- desfazer:  delete from prazos where fonte='DJEN/calculado';
+--
+-- PRIMEIRA RODADA (08/09/2026): 71 prazos, 57 com processo vinculado, 14 sem.
+--   37 em aberto, 34 já vencidos (28/08 a 04/09).
+--   Os 34 vencidos foram MANTIDOS de propósito: prazo que expirou antes de o sistema saber dele
+--   é justamente o caso de prazo possivelmente perdido, que é o que este trabalho existe para
+--   revelar. Não são ruído — precisam ser conferidos um a um.
+--   Nenhum outro status de prazo se moveu (conferido antes/depois): só estimado, +71.
+--
+-- FECHAMENTO AUTOMÁTICO (corrigido em 09/09/2026):
+-- O prazo nasce com `legalmail_id` do aviso do Legal Mail que cobre o MESMO ato, porque
+-- lm_reconcile() — quem fecha prazo quando o tribunal informa cumprido/excedido — casa por
+-- legalmail_id e não por ato_chave. Os 71 primeiros nasceram sem esse vínculo e ficariam
+-- abertos para sempre mesmo depois de cumpridos; foram ligados na mão e a função corrigida.
+-- A view publicacoes_atos expõe `legalmail_id_do_ato` (qualquer cópia do grupo serve: o status
+-- vem do tribunal e é igual para todas). O vínculo só é gravado se nenhum outro prazo já usar
+-- aquele id, porque uq_prazos_legalmail é único.
+--
+-- LIMITE CONHECIDO, medido em 09/09/2026: para o TRT o Legal Mail NÃO reporta prazo_status.
+-- Rodada completa de reconciliação (5.449 avisos) fechou 15 prazos de outros tribunais
+-- (12 cumpridos, 3 excedidos) e ZERO dos 71 do TRT. É a mesma causa raiz: sem "Data final" o
+-- Legal Mail nunca registrou prazo para o TRT, então não tem status para informar.
+-- Quem fecha prazo trabalhista, então:
+--   1. Export "Meus Expedientes" do PJe: o que NÃO está na lista já foi cumprido. Autoritativo
+--      e grátis, mas manual.
+--   2. Domicílio Eletrônico da PDPJ: tem os campos (ciente, dataCiente, emCurso, status), mas
+--      DESCARTADO por decisão da Luana em 09/09/2026 — consultar lá pode constituir CIÊNCIA, e
+--      ciência inicia o prazo. Automatizar a leitura queimaria a folga até a ciência tácita em
+--      todo processo, todo dia. Além disso é a caixa do destinatário, e cadastro de pessoa
+--      física é opcional, então provavelmente não cobre a carteira de reclamantes daqui.
+--      Ver db/pje_comunica_20260908.sql para o raciocínio completo. NÃO LIGAR sem resposta
+--      escrita do CNJ.
+--   3. MNI-REST consultar-avisos-pendentes: DESCARTADO em 09/09/2026, depois de testar.
+--      A ideia era boa (a lista de avisos pendentes é o inverso do que fechou, e o corpo do
+--      pedido leva usuario/senha DO TRIBUNAL, não do CNJ), mas não se chega lá:
+--        - via gateway da PDPJ: 401 com WWW-Authenticate: Bearer realm="Unknown" — o gateway
+--          exige token OAuth2 do CNJ ANTES de olhar o usuario/senha do corpo. Mesmo bloqueio
+--          do caminho 2, então não é alternativa a ele.
+--        - em produção o mni-rest responde 500 "GENERAL" (o registro do Eureka que eu li é de
+--          homologação; não parece publicado em produção).
+--        - direto no tribunal (pje.trt12.jus.br/.../intercomunicacao): 403 do CloudFront em
+--          TUDO, inclusive na home. É bloqueio de tráfego de datacenter, não da API: o
+--          www.trt12.jus.br (outra infra) responde 200 normalmente. Ou seja, integração
+--          servidor-a-servidor não alcança o PJe do TRT12 de forma alguma.
+--      Não se tenta contornar o bloqueio deles.
+--   4. DataJud (API pública do CNJ, api-publica.datajud.cnj.jus.br): a ideia certa — os
+--      movimentos vêm com código da TPU, e "Petição" (código 85) juntada depois da
+--      disponibilização é sinal forte de cumprimento. TESTADO em 09/09/2026 nos 32 vencidos
+--      com CNJ, e NÃO SERVE PARA FECHAR NO PRAZO, por atraso da fonte:
+--        - encontrados 26 de 32;
+--        - TODOS os 26 com dataHoraUltimaAtualizacao = 2026-08-10 (uma carga só, mensal);
+--        - o movimento mais recente de cada um é de julho ou antes;
+--        - 0 de 26 têm qualquer movimento na data da intimação (20-28/08) ou depois;
+--        - 0 de 26 têm Petição posterior à intimação.
+--      O TRT12 manda para o DataJud em lote de ~30 dias. Prazo de 5 dias úteis não pode ser
+--      confirmado por fonte que chega um mês depois. A API responde bem e SEM bloqueio
+--      geográfico (funciona até de fora do Brasil), o problema é só a defasagem.
+--      PARA QUE SERVE, ENTÃO: auditoria retrospectiva. Rodando um mês depois, o DataJud diz se
+--      houve petição em cada prazo estimado — pega prazo realmente perdido e mede o acerto do
+--      cálculo. Vale construir, mas como conferência mensal, não como fechamento.
+--      A função datajud-enriquecer já existe e já consulta essa API (só usa classe/assunto e
+--      descarta `movimentos`); o caminho para a auditoria é aproveitar ela.
+--
+-- NÃO usar "houve movimento posterior no processo" (qualquer publicação depois da data) para
+-- fechar: em 09/09 isso valia para 10 dos
+-- 39 vencidos, e é indício, não prova de cumprimento. Fechar prazo por indício é pior do que
+-- deixar aberto.
+--
+-- AGENDADO em cron.job (nada disso rodava antes — ver db/djen_supabase_pgcron.sql):
+--   trt_prazos_diario  '20 10 * * *'  select trt_gera_prazos(current_date-15, current_date, true)

@@ -1,0 +1,44 @@
+-- Calendário de dias em que prazo NÃO corre, e a contagem de dias úteis que o usa.
+-- (aplicado via migration `feriados_e_dias_uteis`)
+--
+-- POR QUE EXISTE: lm_add_business_days() só pula sábado e domingo. Com ela, a intimação
+-- disponibilizada em 01/09/2026 dava prazo 09/09 — mas o PJe mostra 10/09, porque 07/09 caiu
+-- numa segunda. Conferido contra o gabarito de 6 expedientes do PJe:
+--     becker_dias_uteis (nova) ....... 6 de 6 certas
+--     lm_add_business_days (antiga) ... 2 de 6  (errava 1 dia em três, e 3 dias na STEFANI)
+--
+-- REGRA DE OURO PARA SEMEAR: feriado esquecido puxa a data PARA TRÁS (avisamos mais cedo do que
+-- precisava — inofensivo). Feriado inventado empurra PARA FRENTE e PERDE PRAZO. Na dúvida, não
+-- semeie. É por isso que aqui só há feriado nacional e a suspensão da CLT — feriado municipal de
+-- Joinville não foi semeado por falta de confirmação.
+--
+-- lm_add_business_days ficou intacta de propósito: outros caminhos dependem dela.
+
+-- CREATE TABLE public.feriados (
+--   data date primary key,
+--   nome text not null,
+--   abrangencia text not null default 'nacional'
+--     check (abrangencia in ('nacional','trabalhista','estadual','municipal'))
+-- );
+-- RLS: policy `feriados_leitura`, select para authenticated.
+
+-- Semeado: feriados nacionais 2026 e 2027.
+--   2026 (Páscoa 05/04): 01/01, 16-17/02 Carnaval, 03/04 Sexta Santa, 21/04, 01/05,
+--                        04/06 Corpus Christi, 07/09, 12/10, 02/11, 15/11, 20/11, 25/12
+--   2027 (Páscoa 28/03): 01/01, 08-09/02 Carnaval, 26/03 Sexta Santa, 21/04, 01/05,
+--                        27/05 Corpus Christi, 07/09, 12/10, 02/11, 15/11, 20/11, 25/12
+-- Semeado: suspensão de prazo da Justiça do Trabalho, CLT art. 775-A —
+--   "suspende-se o curso dos prazos processuais nos dias compreendidos entre 20 de dezembro e
+--    20 de janeiro, inclusive" -> 20/12/2026 a 20/01/2027, abrangencia 'trabalhista'.
+
+-- public.becker_dias_uteis(d date, n integer, p_abrangencias text[] default
+--   array['nacional','trabalhista']) returns date  -- STABLE (lê tabela, não IMMUTABLE)
+--   Soma n dias úteis a partir de d pulando sábado, domingo e public.feriados.
+--   n=0 devolve d sem mexer. Usar no lugar de lm_add_business_days.
+
+-- Conferir:
+--   select becker_dias_uteis(becker_dias_uteis('2026-09-01',1),5);  -- 2026-09-10
+--   select lm_add_business_days(lm_add_business_days('2026-09-01',1),5);  -- 2026-09-09 (errado)
+--   select * from feriados order by data;
+--
+-- MANUTENÇÃO: semear os feriados de 2028 antes de dez/2027, e a suspensão 20/12/2027-20/01/2028.
