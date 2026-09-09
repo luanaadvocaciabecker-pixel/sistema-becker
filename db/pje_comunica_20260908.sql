@@ -94,10 +94,14 @@
 --    física — então a API provavelmente não traz as intimações deles. Risco alto de queimar
 --    prazo, com cobertura duvidosa.
 --
--- CONSEQUÊNCIA: não ligar. E o e-mail ao CNJ deixa de ser pedido de credencial e passa a ser
--- duas PERGUNTAS, a serem respondidas por escrito antes de qualquer código:
---   (a) consultar comunicação pela API constitui ciência?
---   (b) escritório de advocacia consegue ver comunicação de cliente pessoa física?
+-- CONSEQUÊNCIA: não ligar.
+--
+-- E O E-MAIL AO CNJ FOI DESCARTADO (decisão dela, 09/09/2026). Eu vinha listando como pendência
+-- por inércia. Depois de barrar o Domicílio, o e-mail só teria valor se DUAS respostas voltassem
+-- favoráveis — (a) consultar a API não constitui ciência; (b) escritório vê comunicação de
+-- cliente pessoa física — e nada no sistema depende dele. As quatro rotinas rodam sem isso.
+-- Se algum dia alguém quiser retomar, são essas as duas perguntas, para
+-- integracaopdpj@cnj.jus.br, e a ordem importa: sem as duas respostas por escrito, não se liga.
 --
 -- E o mérito do que ficou rodando: o cálculo (ver db/trt_gera_prazos.sql) NÃO TOCA EM NADA no
 -- tribunal. Não dá ciência, não abre comunicação, não deixa rastro. Risco processual zero. O que
