@@ -1,0 +1,172 @@
+-- ============================================================================
+-- POLO DO CLIENTE — de que lado o escritório está, deduzido do texto da intimação
+-- Migrations: processo_polo_cliente, processo_polo_cliente_fix, _fix2, gemini_file_cache
+-- Aplicado em 09/09/2026
+-- ============================================================================
+--
+-- POR QUE ISTO EXISTE. A Luana abriu o chat do processo 6618 e disse "a ia ta se perdendo, ela
+-- tem os autos para analisar". Investigando, o problema era pior que se perder: o resumo dos
+-- autos (processo_autos id 5) escreveu a ESTRATÉGIA DO LADO ERRADO.
+--
+--   Cliente: GABRIEL LUCCAS BENEDITO, cumprimento de sentença 5046273-18.2025.8.24.0038
+--   A intimação (publicacoes id 12328) diz, em texto literal:
+--       ID do evento: 67 · Refer. ao Evento 65
+--       (EXECUTADO - GABRIEL LUCCAS BENEDITO)
+--       Prazo: 15 dias   Data inicial: 19/08/2026   Data final: 09/09/2026
+--   Nosso cliente é o EXECUTADO. O resumo dizia "insistir na expedição do alvará/transferência
+--   dos valores bloqueados para a conta da exequente" e, em o_que_fazer, "aguardar a preclusão
+--   da decisão que indeferiu a impenhorabilidade" — a decisão do Evento 65, CONTRA o nosso
+--   cliente, cujo prazo de 15 dias vencia naquele mesmo dia, 09/09/2026.
+--
+-- CAUSA RAIZ, de uma linha: o PROMPT do autos-ia (e a cópia no autos-anexo-ia) mandava
+-- "Você é advogado(a) analisando os autos COMPLETOS" e NUNCA dizia qual lado o escritório
+-- representa. Sem isso o modelo adota o protagonista dos documentos, e em cumprimento de
+-- sentença quem conduz o feito é o exequente. Não era alucinação — era ausência de instrução.
+--
+-- *** REGRA QUE NÃO PODE SER PERDIDA: todo prompt que analisa processo TEM de declarar o polo.
+--     Existe a função blocoPolo(), idêntica em autos-ia, autos-anexo-ia e processo-chat.
+--     Quando o polo é nulo, o bloco diz "NÃO ESTÁ IDENTIFICADO, não afirme de que lado
+--     estamos" — omitir em silêncio é exatamente o que causou o erro. ***
+
+-- ---------------------------------------------------------------------------
+-- 1. O DADO ESTAVA DE GRAÇA, NO BANCO
+-- ---------------------------------------------------------------------------
+-- O padrão "(PAPEL - NOME)" aparece no texto das intimações. Cruzando o nome do parêntese com
+-- clientes.nome dá o papel processual do NOSSO cliente, sem custo e sem chamada externa.
+-- Eu vinha registrando a qualificação da parte como disponível só nos autos pagos (R$ 0,02/doc).
+-- Estava errado: está no texto que a rotina do DJEN já coleta todo dia.
+
+-- processos.polo_cliente  papel principal (o do parêntese mais recente)
+-- processos.polo_papeis   todos os papéis vistos, ex. 'APELANTE/RÉU'
+-- processos.polo_fonte    'derivado' | 'manual'  -> becker_deriva_polo NUNCA sobrescreve manual
+-- processos.polo_pub_id   a publicacoes.id que justificou, para conferir em caso de homônimo
+
+-- ---------------------------------------------------------------------------
+-- 2. A REGRA DE CASAMENTO DE NOME, E POR QUE ELA É ESTRITA
+-- ---------------------------------------------------------------------------
+-- A primeira regra que eu escrevi era frouxa (primeiro + último token do nome). Ela casou:
+--
+--   cliente:   AGRO LAVOURA COMERCIO DE PRODUTOS AGROPECUARIOS LTDA
+--   parêntese: AGRO GP COMERCIO E REPRESENTACOES LTDA - ME     <-- OUTRA EMPRESA
+--
+-- Só "AGRO" e "LTDA" em comum. Teria atribuído o polo do processo 6544 pelo nome da parte
+-- ADVERSA — que é literalmente o defeito que esta migration conserta.
+--
+-- Regra final (becker_polo_tokens + becker_deriva_polo):
+--   * tokens significativos = length>=2, fora conectivo (DE/DA/DO/DOS/DAS/E) e sufixo de
+--     empresa (LTDA/EIRELI/EPP/ME/MEI/SA/CIA). O corte em >=2 é para não perder "JS" de
+--     "JS LOCAÇÕES LTDA", que com >=3 sobrava com 1 token só e era descartado.
+--   * exige >=2 tokens; aceita ZERO divergente, ou 1 divergente se >=2 casarem.
+--   * a tolerância de 1 existe por erro de digitação no CADASTRO, encontrado na base:
+--       CASSIANO x CASIANO · TERRAPLANAGEM x TERRAPLENAGEM · GONÇALVEZ x GONÇALVES
+--       ELEUTEIRO x ELEUTERIO
+--   * acento é normalizado por becker_sem_acento() — translate() na mão, porque a extensão
+--     unaccent NÃO está instalada neste projeto.
+--
+-- Medido: sem tolerância 310 processos, com tolerância 325. O falso do AGRO é rejeitado nas
+-- duas (5 tokens, só 2 casam).
+
+-- ---------------------------------------------------------------------------
+-- 3. RESULTADO DA GRAVAÇÃO (09/09/2026)
+-- ---------------------------------------------------------------------------
+--   processos com polo gravado ......... 325   (todos polo_fonte='derivado')
+--   linhas 'manual' alteradas .......... 0
+--   papel duplo ........................ 17 — TODOS coerentes:
+--        APELADO/AUTOR, APELADO/RÉU, APELANTE/AUTOR, APELANTE/EMBARGANTE, APELANTE/REQUERIDO,
+--        APELANTE/RÉU, AUTOR/EXEQUENTE, AUTOR/RECORRENTE, AUTOR/RECORRIDO, AUTOR/REQUERENTE
+--        (mesmo lado, fase diferente: o AUTOR que apelou é APELANTE; AUTOR e REQUERENTE são
+--         sinônimos conforme o rito)
+--   contradição AUTOR×RÉU ou EXEQUENTE×EXECUTADO ..... 0
+--   processo 6618 ...................... EXECUTADO, justificado pela publicação 12167
+--   lado de defesa (RÉU/EXECUTADO/AGRAVADO/...) ...... 96 dos 325
+--
+-- PARTE CONTRÁRIA: eu estimei que 32 processos ganhariam parte_contraria do parêntese que NÃO
+-- casa com o cliente. Na prática foram 0. A estimativa não exigia papel diferente do nosso nem
+-- excluía o próprio cliente com outra grafia; sobraram 3 candidatos e os 3 já tinham o campo
+-- preenchido. O ganho aqui é NULO — o valor todo está no polo. A função mantém o preenchimento
+-- (só quando o campo está vazio, nunca sobrescrevendo), mas não conte com ele.
+
+-- ---------------------------------------------------------------------------
+-- 4. ARMADILHA DE PLPGSQL QUE JÁ MORDEU DUAS VEZES NESTE BANCO
+-- ---------------------------------------------------------------------------
+-- Coluna com o MESMO NOME de um parâmetro de saída da função vira
+--   "ERROR 42702: column reference \"pub_id\" is ambiguous"
+-- e o erro NÃO aparece no CREATE FUNCTION — só na primeira EXECUÇÃO. Aconteceu aqui com
+-- pub_id/papeis e antes com trt_gera_prazos.ato_chave. Por isso os nomes internos são
+-- deliberadamente diferentes dos de saída: pubid, paps, pap, cli_nome, adv_nome.
+--
+-- Também: a classe de caracteres do regex é EXPLÍCITA ([A-ZÁÀÃÂÉÊÍÓÔÕÚÜÇ]) em vez de faixa
+-- [A-ZÀ-Ú], porque faixa com acentuada depende de collation.
+
+-- ---------------------------------------------------------------------------
+-- 5. AGENDAMENTO
+-- ---------------------------------------------------------------------------
+-- cron 'polo_diario'  ->  12 10 * * *  (09:12 UTC-3... 07:12 BRT)
+--   select public.becker_deriva_polo(true)
+-- Fica ENTRE djen_process_diario (10:06) e trt_prazos_diario (10:20): o polo é derivado das
+-- publicações que acabaram de entrar, antes de a rotina de prazo rodar.
+--
+-- Dry-run seguro a qualquer momento:
+--   select * from becker_deriva_polo(false);          -- não grava nada
+--   select count(*) from becker_deriva_polo(false);   -- deve dar 325+
+
+-- ---------------------------------------------------------------------------
+-- 6. CACHE DA ÍNTEGRA PARA O GEMINI (migration gemini_file_cache)
+-- ---------------------------------------------------------------------------
+-- documentos.gemini_uri / gemini_expira / paginas   (idem em processo_autos)
+--
+-- O processo-chat passou a mandar o PDF INTEIRO dos autos em cada pergunta. A File API do
+-- Gemini guarda o arquivo por 48h, então o URI é reaproveitável; sem cache, cada pergunta
+-- rebaixava e resubia o arquivo.
+--
+-- MEDIDO no 6618 (242 páginas, 9,1 MB):
+--   assinatura + download ..... 200 / 9.528.371 bytes
+--   upload para o Gemini ...... 1 s, ACTIVE sem espera
+--   Gemini .................... 200 em 21,6 s
+--   tokens de ENTRADA ......... 129.457      <-- ~R$ 0,07 por pergunta no gemini-flash-lite
+--   1ª pergunta / 2ª (cache) .. 27,5 s -> 6 s
+--
+-- *** O CACHE ECONOMIZA TEMPO, NÃO TOKENS. A entrada é recontada a cada pergunta. ***
+-- Eu havia estimado 258 tokens/página (~R$ 0,03) e é mais que o dobro: os autos têm imagem,
+-- não só texto. Para comparar: baixar esses mesmos autos pelo Legal Mail custaria R$ 4,84.
+-- Trava: acima de 40 MB o PDF não é anexado (limite do Gemini é 1.000 páginas) e a resposta
+-- DIZ que não leu — silêncio ali viraria um "não consta" mentiroso.
+
+-- ---------------------------------------------------------------------------
+-- 7. OS 5 RESUMOS REGERADOS (autorizado por ela em 09/09)
+-- ---------------------------------------------------------------------------
+-- Rodado pela função descartável 'regerar-polo', já neutralizada (410). Nenhuma chamada ao
+-- Legal Mail: leu os PDFs que já estavam no storage. 1.834 páginas, 978.451 tokens de
+-- entrada, ~R$ 0,53 no total (eu havia dito ~R$ 0,15 — errei pelo mesmo motivo do item 6).
+--
+--   id 1  AGRO LAVOURA        EXECUTADO   685 pág  -> "a defesa impugnou os laudos"
+--   id 2  MARIA DEBORA BILK   AUTOR       353 pág  -> "interpusemos recurso de apelação"
+--   id 3  MIRACI DE CASTRO    EXEQUENTE    79 pág  -> "a Executada protocolou petição"
+--   id 4  ADRIANA SANTANA     EXECUTADO   475 pág  -> "reiterar impenhorabilidade de bem de família"
+--   id 5  GABRIEL BENEDITO    EXECUTADO   242 pág  -> "interpor Agravo de Instrumento (evento 65)"
+--
+-- O do GABRIEL era o invertido. Passou a dizer "pedido de desbloqueio formulado PELA DEFESA",
+-- "decisão desfavorável", "interpor Agravo de Instrumento" — o oposto de "aguardar a preclusão".
+
+-- ---------------------------------------------------------------------------
+-- 8. ACHADO DE SEGURANÇA, CONSERTADO NO MESMO DIA
+-- ---------------------------------------------------------------------------
+-- A edge function autos-ia estava com verify_jwt=FALSE em produção: um POST SEM NENHUM TOKEN
+-- respondia 200 no action 'preview', devolvendo número do CNJ, contagem de documentos e o
+-- resumo por IA, e gastando a nossa chave do Legal Mail a cada chamada.
+-- Conferido que NENHUM cron chama essa função (só a tela, sempre com o token do login), então
+-- foi fechada: verify_jwt=true, confirmado 401 sem login. NÃO REABRIR.
+-- As demais foram varridas na mesma hora: prazos-monitor 405, legalmail-autos 401,
+-- infinitum-sync 401, lm-inspect 410, prazos-classificar 401 — todas fechadas.
+
+-- ---------------------------------------------------------------------------
+-- 9. RISCOS QUE FICAM
+-- ---------------------------------------------------------------------------
+-- * HOMÔNIMO. O casamento é por token de nome. Cliente de nome muito comum pode casar com
+--   outra parte. Mitigação: polo_pub_id guarda a justificativa, e polo_fonte='manual' ganha
+--   sempre — se alguém corrigir à mão, a rotina diária não desfaz.
+-- * PAPEL MUDA COM A FASE. Por isso guarda-se polo_papeis inteiro, e o prompt manda dizer
+--   quando os autos contradisserem o polo declarado, em vez de escolher um lado calado.
+-- * 334 processos ativos AINDA SEM POLO. Neles a tela mostra "não identificado — confira nos
+--   autos antes de peticionar" e o prompt proíbe a IA de afirmar o lado. É o comportamento
+--   correto, mas não é cobertura: só a intimação com "(PAPEL - NOME)" resolve.

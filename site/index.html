@@ -3187,6 +3187,19 @@ async function excluirProcesso(id,num){
 function abrirMovs(pid){ir('movimentacoes');setTimeout(()=>{movsFiltroProcesso=pid;const s=document.getElementById('movs-select');if(s)s.value=pid;carregarMovs();},150);}
 
 // ---- DETALHE DO PROCESSO (acesso ao processo todo) ----
+// Etiqueta do polo. Existe por causa do erro de 09/09: o resumo dos autos do GABRIEL saiu com a
+// estratégia do EXEQUENTE quando o nosso cliente é o EXECUTADO, e ninguém tinha como notar na
+// tela, porque o polo não aparecia. Papel de defesa vem em vermelho — é onde errar o lado custa
+// recurso perdido.
+const _POLO_DEFESA=['RÉU','REU','EXECUTADO','REQUERIDO','AGRAVADO','APELADO','RECORRIDO','EMBARGADO','ACUSADO'];
+function _etiquetaPolo(polo,papeis){
+  if(!polo)return '';
+  const def=_POLO_DEFESA.includes(String(polo).toUpperCase());
+  const txt=(papeis&&papeis!==polo)?papeis:polo;
+  return `<span class="tag" title="Papel processual do nosso cliente, deduzido do texto da intimação"
+    style="background:${def?'rgba(239,68,68,.14)':'rgba(34,197,94,.14)'};color:${def?'#b91c1c':'#15803d'};font-weight:700">
+    Nosso cliente: ${escHtml(txt)}</span>`;
+}
 async function abrirProcesso(id){
   const c=document.getElementById('conteudo');
   c.innerHTML='<p style="text-align:center;padding:40px;color:#94a3b8">Carregando processo...</p>';
@@ -3203,6 +3216,7 @@ async function abrirProcesso(id){
       <h3 style="font-family:monospace;font-size:16px">⚖️ ${p.numero||'Sem nº CNJ'}</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <span class="tag ${tagSituacaoProcesso(p.situacao)}">${rotuloSituacaoProcesso(p.situacao)}</span>
+        ${_etiquetaPolo(p.polo_cliente,p.polo_papeis)}
         <button class="btn btn-secondary btn-sm" onclick="editarProcesso('${p.id}')">✏️ Editar</button>
         <button class="btn btn-secondary btn-sm" onclick="abrirMovs('${p.id}')">🔄 Movimentações</button>
         <button class="btn btn-primary btn-sm" onclick="uploadDocProcesso('${p.id}')">📎 Anexar íntegra/documento</button>
@@ -3221,6 +3235,7 @@ async function abrirProcesso(id){
         ${campo('Assunto',p.assunto)}
         ${campo('Área',p.area)}
         ${campo('Parte contrária',p.parte_contraria)}
+        ${campo('Polo do nosso cliente',p.polo_cliente?escHtml(p.polo_papeis||p.polo_cliente)+(p.polo_fonte==='derivado'?' <span style="color:#64748b;font-size:11px">(deduzido da intimação)</span>':''):'<span style="color:#b45309">não identificado — confira nos autos antes de peticionar</span>')}
         ${campo('Valor da causa',p.valor_causa!=null?fmtMoeda(p.valor_causa):'')}
         ${campo('Atualizado em',atualizado)}
       </div>
@@ -3257,7 +3272,7 @@ function montarChatProcesso(id){
       <input id="chat-input" placeholder="Ex.: qual o próximo passo? tem custas a pagar? do que se trata?" style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter'){event.preventDefault();perguntarProcessoIA('${id}')}">
       <button class="btn btn-primary" id="chat-send" onclick="perguntarProcessoIA('${id}')">Perguntar</button>
     </div>
-    <p style="font-size:11px;color:#94a3b8;margin:8px 0 0">⚠️ A IA responde com base no que está cadastrado (dados + resumo dos autos + movimentações + prazos). Confira sempre nos autos antes de agir.</p>
+    <p style="font-size:11px;color:#94a3b8;margin:8px 0 0" id="chat-rodape">⚠️ A IA lê a íntegra dos autos anexada (quando existe), o texto das intimações dos prazos abertos, o cadastro e as movimentações. Confira sempre nos autos antes de agir.</p>
   </div></div>`;
   renderChatMsgs();
 }
@@ -3266,7 +3281,9 @@ function renderChatMsgs(){
   if(!procChatHist.length){box.innerHTML='<p style="font-size:13px;color:#94a3b8;margin:0">Faça uma pergunta sobre este processo — ex.: "em que pé está?", "tem prazo correndo?", "qual a estratégia?"</p>';return;}
   box.innerHTML=procChatHist.map(m=>{
     const eu=m.role==='user';
-    return `<div style="align-self:${eu?'flex-end':'flex-start'};max-width:88%;background:${eu?'var(--azul3)':'var(--card)'};color:${eu?'#fff':'var(--texto)'};border:1px solid ${eu?'transparent':'var(--border)'};border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.5;white-space:pre-wrap">${escHtml(m.texto)}</div>`;
+    const bolha=`<div style="background:${eu?'var(--azul3)':'var(--card)'};color:${eu?'#fff':'var(--texto)'};border:1px solid ${eu?'transparent':'var(--border)'};border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.5;white-space:pre-wrap">${escHtml(m.texto)}</div>`;
+    const fonte=m.fonte?`<div style="font-size:10px;margin-top:3px;color:${m.leu?'#64748b':'#b45309'}">${escHtml(m.fonte)}</div>`:'';
+    return `<div style="align-self:${eu?'flex-end':'flex-start'};max-width:88%">${bolha}${fonte}</div>`;
   }).join('');
   box.scrollTop=box.scrollHeight;
 }
@@ -3283,7 +3300,9 @@ async function perguntarProcessoIA(id){
     const r=await chamarFuncao('processo-chat',{processo_id:id,pergunta:q,historico:hist});
     procChatHist.pop(); // tira o "pensando"
     if(r&&r.erro)throw new Error(r.erro);
-    procChatHist.push({role:'assistant',texto:r.resposta||'(sem resposta)'});
+    procChatHist.push({role:'assistant',texto:r.resposta||'(sem resposta)',
+      fonte:r.leu_autos?('📄 leu a íntegra dos autos'+(r.paginas?' ('+r.paginas+' páginas)':'')):'⚠️ respondeu SEM a íntegra dos autos'+(r.aviso?' — '+r.aviso:''),
+      leu:!!r.leu_autos});
   }catch(e){
     procChatHist.pop();
     procChatHist.push({role:'assistant',texto:'❌ Não consegui responder agora: '+(e.message||'erro')});
@@ -4580,13 +4599,18 @@ const _ACAO_VERBO={diga:'manifestar-se',digam:'manifestar-se',manifeste:'manifes
 // Sem as duas, diz que não consta em vez de inventar.
 function _norteDoTexto(txt){
   const s=String(txt||'');
-  const r={acao:null,prazoTexto:null,dias:null,fonte:null,dataFinal:null,statusPrazo:null,ato:null};
+  const r={acao:null,prazoTexto:null,dias:null,fonte:null,dataFinal:null,statusPrazo:null,ato:null,polo:null};
 
   // 1) bloco estruturado
   const mDias=s.match(/[Pp]razo:\s*(\d{1,3})\s*dias?/);
   const mFinal=s.match(/[Dd]ata final:\s*(\d{2}\/\d{2}\/\d{4})/);
   const mStatus=s.match(/[Ss]tatus do prazo:\s*([^\n\r]{0,40})/);
   const mAto=s.match(/eletr[ôo]nica\s*-\s*([^\n\r]{0,60})/i);
+  // Papel processual escrito na própria intimação, ex. "(EXECUTADO - GABRIEL LUCCAS BENEDITO)".
+  // Mesma fonte que a becker_deriva_polo usa no banco — aqui é reserva, para o prazo que não
+  // tem processo vinculado e portanto não tem processos.polo_cliente.
+  const mPolo=s.match(/\(\s*(AUTOR|R[ÉE]U|EXEQUENTE|EXECUTADO|REQUERENTE|REQUERIDO|EMBARGANTE|EMBARGADO|AGRAVANTE|AGRAVADO|APELANTE|APELADO|RECORRENTE|RECORRIDO|IMPETRANTE|ACUSADO)\s*-\s*[^)]{3,80}\)/i);
+  if(mPolo)r.polo=mPolo[1].toUpperCase();
   if(mAto)r.ato=mAto[1].trim().replace(/\s{2,}/g,' ');
   if(mFinal)r.dataFinal=mFinal[1];
   if(mStatus)r.statusPrazo=mStatus[1].trim();
@@ -4623,7 +4647,7 @@ function _tipoDoAto(txt){
 }
 let _prazoAberto=null;   // guarda o prazo do modal, para o botão da IA não passar texto por atributo
 async function verPrazo(id){
-  const{data:p}=await supa.from('prazos').select('*,processos(numero,advogado_responsavel,clientes(nome))').eq('id',id).single();
+  const{data:p}=await supa.from('prazos').select('*,processos(numero,advogado_responsavel,polo_cliente,polo_papeis,clientes(nome))').eq('id',id).single();
   if(!p){toast('Prazo não encontrado.','erro');return;}
   // Busca a publicação de origem: legalmail_id cobre quase tudo; ato_chave é a reserva do TRT.
   let pub=null;
@@ -4660,6 +4684,12 @@ async function verPrazo(id){
   </div>
   <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.30);border-radius:8px;padding:11px 13px;margin-bottom:12px;font-size:13px">
     <div style="font-weight:700;color:#b45309;margin-bottom:6px">O QUE FAZER</div>
+    ${linha('Nosso cliente é:', p.processos?.polo_cliente
+      ? '<b style="color:'+(_POLO_DEFESA.includes(String(p.processos.polo_cliente).toUpperCase())?'#b91c1c':'#15803d')+'">'
+        +escHtml(p.processos.polo_papeis||p.processos.polo_cliente)+'</b>'
+        +(_POLO_DEFESA.includes(String(p.processos.polo_cliente).toUpperCase())?' <span style="color:#64748b;font-size:11px">decisão contra ele é derrota nossa</span>':'')
+      : (norte.polo?'<b>'+escHtml(norte.polo)+'</b> <span style="color:#64748b;font-size:11px">(do texto da intimação)</span>'
+                   :'<span style="color:#b45309">não identificado — confira nos autos</span>'))}
     ${linha('O juízo mandou:', norte.acao?'<b>'+escHtml(norte.acao)+'</b>'
       :norte.ato?'<b>'+escHtml(norte.ato)+'</b> <span style="color:#94a3b8">— ler a intimação para saber a providência</span>'
       :'<span style="color:#94a3b8">o texto não traz ordem expressa — ler a intimação abaixo</span>')}
