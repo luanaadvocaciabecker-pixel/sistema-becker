@@ -1,0 +1,32 @@
+-- O que o `lawsuit/case-files` do Legal Mail devolve por documento — sondado em 09/09/2026.
+-- (sondagem `lm-casefiles-probe`, já neutralizada)
+--
+-- POR QUE FOI SONDADO: a Luana anexou a íntegra à mão e perguntou "não tem como ele só ir
+-- atualizando os documentos que faltam?". O autos-ia só fazia `.length` nesse array para contar
+-- e mostrar o custo — nunca olhamos o que vem dentro de cada item.
+--
+-- CADA DOCUMENTO VEM ASSIM (7 campos):
+--   idmovimentacoes   número em texto (8 dígitos)
+--   fk_processo       número em texto
+--   id                texto (6 chars)
+--   hash_documento    texto (36 chars, formato UUID)
+--   titulo            texto — o nome da peça
+--   tipo              texto
+--   data_movimentacao DATA ISO      <-- é isto que responde "o que é novo"
+--
+-- CONCLUSÃO: DÁ para saber exatamente quais documentos entraram depois de uma data, e existem
+-- três identificadores por documento (id, idmovimentacoes, hash_documento).
+--
+-- Volume real medido, para dimensionar a economia:
+--   processo 6358: 123 documentos = R$ 2,46 para baixar tudo
+--   processo 6133:  55 documentos = R$ 1,10
+-- Se só 3 forem novos, seriam R$ 0,06.
+--
+-- *** O QUE AINDA NÃO SE SABE, E NÃO SE DESCOBRE CHUTANDO ***
+-- Se `POST case-files/download/request` aceita um SUBCONJUNTO. Ele sempre recebeu só
+-- {idprocessos} — o processo inteiro. Se receber um campo desconhecido (ex.: documentos:[ids])
+-- e IGNORAR, baixa tudo e COBRA TUDO. Um teste malfeito custa dinheiro real.
+-- Portanto: perguntar ao suporte do Legal Mail por escrito ANTES de tentar filtro.
+--
+-- Conferir (GRÁTIS, só GET):
+--   GET {BASE}/api/v1/lawsuit/case-files?api_key=...&idprocessos={idp}

@@ -3296,11 +3296,18 @@ async function perguntarProcessoIA(id){
 // ─── AUTOS + IA (sob demanda, com custo controlado) ──────────────────────────
 async function carregarAutosIA(id){
   const el=document.getElementById('proc-autosia');if(!el)return;
-  const r=await chamarFuncao('autos-ia',{action:'get',processo_id:id});
-  renderAutosIA(id,r);
+  // Dois pedidos em paralelo: o estado dos autos (caminho pago) e a lista de íntegras anexadas
+  // à mão (caminho grátis). Nenhum dos dois gasta nada — o gasto só acontece no 'request'.
+  const [r,anx]=await Promise.all([
+    chamarFuncao('autos-ia',{action:'get',processo_id:id}),
+    chamarFuncao('autos-anexo-ia',{action:'listar',processo_id:id}),
+  ]);
+  renderAutosIA(id,r,anx);
   if(r&&(r.estado==='processando'||r.estado==='processando_ia'||r.estado==='baixando'))autosIApoll(id);
 }
-function renderAutosIA(id,r){
+function renderAutosIA(id,r,anx){
+  const anexos=(anx&&Array.isArray(anx.anexos))?anx.anexos:[];
+  const jaResumido=anx&&anx.ja_resumido?anx.ja_resumido:null;
   const el=document.getElementById('proc-autosia');if(!el)return;
   if(r&&r.erro){
     const semVinc=/vínculo|vinculo|Legal Mail/i.test(r.erro||'');
@@ -3308,7 +3315,10 @@ function renderAutosIA(id,r){
     return;
   }
   const est=r?r.estado:'nenhum';
-  if(est==='pronto'){el.innerHTML=cardAutosPronto(id,r);return;}
+  // O `get` do autos-ia devolve a linha mais recente de processo_autos, que agora pode ser a do
+  // anexo. Sem `documentos` (n_autos) nem `pdf` (pdf_path), é resumo de íntegra anexada — e o
+  // card tem de dizer isso, para ninguém achar que pagou download.
+  if(est==='pronto'){el.innerHTML=cardAutosPronto(id,r,!r.documentos&&!!jaResumido,anexos);return;}
   if(est==='processando'||est==='processando_ia'||est==='baixando'){
     el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;margin:0">⏳ Baixando a íntegra e lendo com a IA... pode levar alguns minutos. Pode continuar usando o sistema — o resumo aparece aqui quando ficar pronto.</p></div></div>`;
     return;
@@ -3317,13 +3327,32 @@ function renderAutosIA(id,r){
     el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;color:#f87171;margin:0 0 10px">Falha ao processar os autos${r&&r.erro?': '+r.erro:''}.</p><button class="btn btn-secondary btn-sm" onclick="autosIApreview('${id}')">Tentar de novo</button></div></div>`;
     return;
   }
+  // Quando já existe íntegra anexada à mão, o caminho grátis vem PRIMEIRO. Pagar o download
+  // tendo a íntegra na mão é desperdício — só vale para peça posterior ao anexo.
+  const blocoAnexo=anexos.length?`
+    <div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.30);border-radius:8px;padding:11px 13px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;color:#15803d;margin-bottom:4px">✅ Este processo já tem íntegra anexada</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:9px">${escHtml(anexos[0].nome)} · ${anexos[0].mb} MB · anexada em ${_dataBR(anexos[0].em)}</div>
+      <button class="btn btn-primary btn-sm" onclick="resumirAnexoIA('${id}')">🤖 Resumir a íntegra — sem custo do Legal Mail</button>
+    </div>`:'';
   el.innerHTML=`<div class="card"><div class="card-body">
+    ${blocoAnexo}
     <p style="font-size:13px;color:var(--texto);margin:0 0 10px">Baixa a <strong>íntegra do processo</strong> (todas as peças) e a IA lê o <strong>último despacho</strong> pra te dizer o que precisa ser feito e se o prazo é de 💰 custas ou 📎 documentos.</p>
     <p style="font-size:12px;color:#94a3b8;margin:0 0 12px">💡 Custa R$ 0,02 por documento. Você vê a contagem e o valor <strong>antes</strong> de confirmar — nada é cobrado sem o seu OK.</p>
-    <button class="btn btn-primary btn-sm" onclick="autosIApreview('${id}')">🤖 Puxar autos + resumo por IA</button>
+    ${anexos.length?`<p style="font-size:12px;color:#b45309;margin:0 0 10px">⚠️ Você já tem a íntegra de ${_dataBR(anexos[0].em)}. O download pago só vale se precisar de <strong>peça posterior</strong> a essa data.</p>`:''}
+    <button class="btn ${anexos.length?'btn-secondary':'btn-primary'} btn-sm" onclick="autosIApreview('${id}')">🤖 Puxar autos + resumo por IA${anexos.length?' (pago)':''}</button>
   </div></div>`;
 }
-function cardAutosPronto(id,r){
+// Manda a IA ler a íntegra anexada. Não passa pelo Legal Mail: custo zero de download.
+async function resumirAnexoIA(id){
+  const el=document.getElementById('proc-autosia');
+  if(el)el.innerHTML='<div class="card"><div class="card-body"><p style="font-size:13px;margin:0">🤖 Lendo a íntegra anexada... um arquivo grande leva cerca de meio minuto.</p></div></div>';
+  const r=await chamarFuncao('autos-anexo-ia',{action:'resumir',processo_id:id});
+  if(!r||r.erro){toast('Não deu para resumir: '+((r&&r.erro)||'falha'),'erro');carregarAutosIA(id);return;}
+  toast('✅ Resumo da íntegra pronto!','ok');
+  carregarAutosIA(id);
+}
+function cardAutosPronto(id,r,doAnexo,anexos){
   const ia=r.ia||{};
   const prov=ia.providencia;
   const selo=prov==='custas'?'<span class="tag" style="background:#7c2d12;color:#fed7aa">💰 Custas</span>':prov==='documentos'?'<span class="tag" style="background:#1e3a8a;color:#bfdbfe">📎 Documentos</span>':'<span class="tag">Geral</span>';
@@ -3331,7 +3360,9 @@ function cardAutosPronto(id,r){
   const sec=(titulo,cor,arr)=>Array.isArray(arr)&&arr.length?`<div style="margin-top:12px"><div style="font-size:11px;font-weight:700;color:${cor};text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${titulo}</div><ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7;color:var(--texto)">${arr.map(x=>`<li>${escHtml(x)}</li>`).join('')}</ul></div>`:'';
   const linha=(titulo,cor,txt)=>txt&&txt!=='null'?`<div style="margin-top:12px"><div style="font-size:11px;font-weight:700;color:${cor};text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${titulo}</div><div style="font-size:13px;line-height:1.6;color:var(--texto)">${escHtml(txt)}</div></div>`:'';
   return `<div class="card"><div class="card-body">
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">${selo}<span style="font-size:11px;color:#64748b">${r.documentos||'?'} documentos · resumo por IA</span></div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">${selo}<span style="font-size:11px;color:#64748b">${
+      doAnexo?'lido da <strong>íntegra anexada</strong> · sem custo de download'
+             :((r.documentos||'?')+' documentos baixados · resumo por IA')}</span></div>
     <div style="font-size:13px;line-height:1.6;color:var(--texto)">${escHtml(r.resumo||ia.resumo||'—')}</div>
     ${linha('Situação atual','var(--azul3)',ia.situacao_atual)}
     ${prazo}
@@ -3342,7 +3373,9 @@ function cardAutosPronto(id,r){
     ${ia.ultimo_ato&&ia.ultimo_ato!=='null'?`<div style="font-size:11px;color:#64748b;margin-top:10px">Último ato: ${escHtml(ia.ultimo_ato)}</div>`:''}
     <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
       ${r.pdf?`<a class="btn btn-secondary btn-sm" href="${r.pdf}" target="_blank" rel="noopener">📄 Abrir íntegra (PDF)</a>`:''}
-      <button class="btn btn-secondary btn-sm" onclick="autosIARegerar('${id}')">🔄 Atualizar resumo</button>
+      ${doAnexo?`<button class="btn btn-secondary btn-sm" onclick="resumirAnexoIA('${id}')">🔄 Reler a íntegra anexada</button>
+        <button class="btn btn-secondary btn-sm" onclick="autosIApreview('${id}')">💰 Baixar peças novas (pago)</button>`
+       :`<button class="btn btn-secondary btn-sm" onclick="autosIARegerar('${id}')">🔄 Atualizar resumo</button>`}
     </div>
     <div style="font-size:11px;color:#64748b;margin-top:10px">⚠️ Resumo gerado por IA — confira sempre com os autos antes de agir.</div>
   </div></div>`;
