@@ -1,5 +1,9 @@
 # Sistema Becker — Sistema Jurídico de gestão da Becker Advogados
 
+> ⚠️ **Antes de agendar rotina automática ou mexer em chamada de API paga: leia [`LICOES.md`](LICOES.md).**
+> É a lista corrida dos erros que já custaram dinheiro ou prazo, com a regra que cada um deixou.
+> O detalhe de custo da API do Legal Mail está em [`db/legalmail_custo_api.sql`](db/legalmail_custo_api.sql).
+
 > ⚠️ ATENÇÃO — LEIA ANTES DE MEXER EM QUALQUER COISA
 >
 > Este repositório contém o **sistema interno de gestão** da Becker Advogados
