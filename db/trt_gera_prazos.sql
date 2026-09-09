@@ -86,7 +86,26 @@
 --          www.trt12.jus.br (outra infra) responde 200 normalmente. Ou seja, integração
 --          servidor-a-servidor não alcança o PJe do TRT12 de forma alguma.
 --      Não se tenta contornar o bloqueio deles.
--- NÃO usar "houve movimento posterior no processo" para fechar: em 09/09 isso valia para 10 dos
+--   4. DataJud (API pública do CNJ, api-publica.datajud.cnj.jus.br): a ideia certa — os
+--      movimentos vêm com código da TPU, e "Petição" (código 85) juntada depois da
+--      disponibilização é sinal forte de cumprimento. TESTADO em 09/09/2026 nos 32 vencidos
+--      com CNJ, e NÃO SERVE PARA FECHAR NO PRAZO, por atraso da fonte:
+--        - encontrados 26 de 32;
+--        - TODOS os 26 com dataHoraUltimaAtualizacao = 2026-08-10 (uma carga só, mensal);
+--        - o movimento mais recente de cada um é de julho ou antes;
+--        - 0 de 26 têm qualquer movimento na data da intimação (20-28/08) ou depois;
+--        - 0 de 26 têm Petição posterior à intimação.
+--      O TRT12 manda para o DataJud em lote de ~30 dias. Prazo de 5 dias úteis não pode ser
+--      confirmado por fonte que chega um mês depois. A API responde bem e SEM bloqueio
+--      geográfico (funciona até de fora do Brasil), o problema é só a defasagem.
+--      PARA QUE SERVE, ENTÃO: auditoria retrospectiva. Rodando um mês depois, o DataJud diz se
+--      houve petição em cada prazo estimado — pega prazo realmente perdido e mede o acerto do
+--      cálculo. Vale construir, mas como conferência mensal, não como fechamento.
+--      A função datajud-enriquecer já existe e já consulta essa API (só usa classe/assunto e
+--      descarta `movimentos`); o caminho para a auditoria é aproveitar ela.
+--
+-- NÃO usar "houve movimento posterior no processo" (qualquer publicação depois da data) para
+-- fechar: em 09/09 isso valia para 10 dos
 -- 39 vencidos, e é indício, não prova de cumprimento. Fechar prazo por indício é pior do que
 -- deixar aberto.
 --
