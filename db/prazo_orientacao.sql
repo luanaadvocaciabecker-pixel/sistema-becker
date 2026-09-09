@@ -1,0 +1,105 @@
+-- ============================================================================
+-- BRIEFING DO PRAZO — o olhinho passa a dizer O QUE FAZER, com fortes e fracos
+-- Migration: prazo_orientacao. Aplicado em 09/09/2026. Ver LICOES.md.
+-- ============================================================================
+--
+-- PEDIDO: "quando clica no olhinho vai aparecer tipo o que é para fazer", e depois
+-- "ser mais longo, falar o que tem que fazer, tipo pontos fortes e fracos".
+--
+-- O que a tela mostrava: "O juízo mandou: Despacho/Decisão — ler a intimação para saber a
+-- providência". Confissão de que o sistema não sabia.
+
+-- ---------------------------------------------------------------------------
+-- 1. POR QUE A REGRA DETERMINÍSTICA NÃO PODIA FUNCIONAR
+-- ---------------------------------------------------------------------------
+-- Medido nos 167 prazos abertos COM texto:
+--   verbo imperativo + prazo ("apresente em 15 dias") ....  3
+--   qualquer verbo imperativo ............................ 11
+--   dizem "Prazo: N dias" ............................... 134
+--   dizem "Refer. ao Evento N" .......................... 133
+--
+-- Por origem:
+--   aviso do Legal Mail .... 134 prazos · 405 car. médios · 100% só aponta evento · 0 com verbo
+--   diário do TRT/TST ......  33 prazos · 3.938 car. ..... · 0 aponta evento · 10 com verbo
+--
+-- Os 134 NÃO SÃO O DESPACHO: são o recibo da intimação. Nenhum regex arranca ordem de um texto
+-- que não tem ordem. As movimentações também não salvam — são rótulos do DataJud
+-- ("Outras Decisões", "Petição"), sem teor.
+
+-- ---------------------------------------------------------------------------
+-- 2. O ACHADO: O TEOR ESTAVA NO BANCO, EM OUTRA LINHA
+-- ---------------------------------------------------------------------------
+-- O olhinho lia só a publicação ligada a prazos.legalmail_id — o aviso. Mas o DJEN publica o
+-- evento inteiro, e a rotina diária já coletava. Exemplo do prazo 5569 (BECKER ADVOGADOS):
+--   aviso  -> "Expedida/certificada a intimação eletrônica - Despacho/Decisão"
+--   pub 3059 (17/08) -> "Para viabilizar a análise do pedido [Evento 310], INTIME-SE a parte
+--                        exequente para indicar, no prazo de 15 [quinze] dias, o endereço
+--                        completo em que os eventuais bens podem ser localizados..."
+--
+-- Cobertura: 33 prazos já têm o teor no próprio texto + 103 ganham do ato vizinho = 136 de 163.
+
+-- ---------------------------------------------------------------------------
+-- 3. prazo_ato_origem(prazo_id) — e por que ORDENA POR DATA
+-- ---------------------------------------------------------------------------
+--  * própria publicação do prazo, quando NÃO é aviso -> é o teor (os 33 do TRT);
+--  * senão, atos do mesmo processo em publicacoes_atos (view que JÁ deduplica: o mesmo ato
+--    aparece em até 4 linhas cruas, com tipo 'Publicação'/'DJEN/PJe'/'Diário...');
+--  * EXCLUI aviso por ASSINATURA ('Refer. ao Evento'), NÃO por tamanho — o corte por tamanho
+--    que eu usei na sondagem quase descartou a pub 377822, de 1.039 caracteres, que é o ato certo;
+--  * ordena por abs(data do ato − data do aviso).
+--
+-- *** GABARITO, e é o que separa a regra certa da errada: ***
+--   prazo 5568 (aviso 14/08) -> pub 12452 de 17/08  (decisão que indeferiu o desbloqueio)
+--   prazo 5628 (aviso 21/08) -> pub 6492  de 24/08  ("aguarde-se a preclusão do evento 65")
+--   Ordenar por TAMANHO escolheria a decisão anterior nos dois casos. Defasagem média: +0,8 dia.
+--
+-- LIMITE CONHECIDO: o vínculo é heurístico. O aviso cita "Evento 65" e o texto do ato cita
+-- "evento 45" — NÃO há como casar por número de evento (conferido). Por isso a função devolve
+-- `dias` e a tela rotula o ato como "(provável)", e prazos.ia_teor_pub_id guarda qual texto
+-- gerou qual conselho.
+
+-- ---------------------------------------------------------------------------
+-- 4. becker_html_texto_final(texto)
+-- ---------------------------------------------------------------------------
+-- 38 dos teores vêm em HTML com entidade ("CUMPRIMENTO DE SENTEN&Ccedil;A"). Único lugar que
+-- limpa, para tela e IA nunca divergirem. As entidades tratadas são as MEDIDAS na base, não uma
+-- lista de catálogo. O &amp; é decodificado POR ÚLTIMO — senão "&amp;ccedil;" viraria "ç".
+
+-- ---------------------------------------------------------------------------
+-- 5. A TRAVA, que é a parte mais importante deste trabalho
+-- ---------------------------------------------------------------------------
+-- *** SEM O TEOR DO ATO, NÃO SE ESCREVE PONTO FORTE NEM FRACO. ***
+-- Em 27 dos 163 prazos o teor não está no banco. A edge function `prazo-orientacao` devolve
+-- sem_teor:true e NEM CHAMA O GEMINI — não se paga token por resposta garantidamente vazia. A
+-- tela mostra dois caminhos: anexar a íntegra (grátis) ou ler a peça (R$ 0,02, só sob clique).
+--
+-- Inventar força e fraqueza a partir de um recibo de 400 caracteres repetiria, num lugar pior, o
+-- erro do resumo que saiu escrito do lado do exequente quando o nosso cliente era o executado.
+--
+-- E o ALCANCE é o ATO, não a tese: de 100 processos com prazo aberto, só 2 têm os autos lidos.
+-- Fortes e fracos da tese nos outros 98 seria palpite sobre autos que ninguém abriu. O rodapé
+-- fixo do briefing diz isso, e não é a IA que decide se avisa — a frase é escrita por nós.
+
+-- ---------------------------------------------------------------------------
+-- 6. RESULTADO MEDIDO (3 prazos reais, 09/09/2026, ~890 tokens cada)
+-- ---------------------------------------------------------------------------
+--  5569 EXEQUENTE  -> "Indicar o endereço completo dos bens no prazo de 15 dias", evento 310,
+--                     prazo 15 dias; fortes VAZIO, 1 fraco. (Era o prazo da tela que ela mostrou.)
+--  5628 EXECUTADO  -> relatou que O JUÍZO mandou aguardar a preclusão do evento 65, e NÃO
+--                     recomendou isso como estratégia nossa. *** A trava do polo funcionou. ***
+--  5713 sem polo   -> ato de distribuição: as duas listas vazias, sem inventar, e sem afirmar lado.
+--
+-- Custo total estimado para os 163 prazos: ~R$ 0,08 no Gemini. Zero no Legal Mail.
+
+-- ---------------------------------------------------------------------------
+-- 7. CAMINHO PAGO (prazo-peca) — R$ 0,02, e a economia está na escolha do endpoint
+-- ---------------------------------------------------------------------------
+--   POST case-files/download/request -> R$ 0,02 POR AUTO DO PROCESSO INTEIRO (107 autos = R$ 2,14)
+--   GET  lawsuit/docket-entry/url    -> R$ 0,02 POR DOCUMENTO ESCOLHIDO
+-- Para uma peça de processo volumoso, 100x mais barato. A doc do Legal Mail diz isso.
+--
+-- Duas ações, e só a segunda gasta: `preview` (GRÁTIS, lista as peças com idmovimentacoes) e
+-- `puxar` (R$ 0,02, exige idmovimentacoes EXPLÍCITO — a função nunca escolhe sozinha).
+-- A URL pré-assinada vale 6 DIAS: gravada em prazos.peca_url/peca_url_expira e REUSADA enquanto
+-- válida, porque a doc avisa que pedir de novo é cobrança nova por um link que já se tinha.
+-- Antes de gastar, consulta GET /balance (grátis) e recusa abaixo de R$ 5,00.

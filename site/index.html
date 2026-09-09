@@ -4691,7 +4691,8 @@ async function verPrazo(id){
       pub=(data||[]).find(x=>String(x.numero_processo||'').replace(/\D/g,'')===num)||null;
     }
   }
-  _prazoAberto={id:p.id,texto:pub?.texto||'',cliente:p.processos?.clientes?.nome||''};
+  _prazoAberto={id:p.id,texto:pub?.texto||'',cliente:p.processos?.clientes?.nome||'',
+                processo_id:p.processo_id||p.processos?.id||null};
 
   const cls=_classPrazo(p), naoConf=_naoConfirmado(p);
   const norte=_norteDoTexto(pub?.texto), ato=_tipoDoAto(pub?.texto);
@@ -4706,17 +4707,15 @@ async function verPrazo(id){
     ${pub?.tribunal?' · '+escHtml(pub.tribunal):''}
     ${p.processos?.advogado_responsavel?' · 👤 '+escHtml(_advCurto(p.processos.advogado_responsavel)):' · <span style="color:#dc2626">⚠️ sem responsável</span>'}
   </div>
+  <div id="prazo-briefing" style="margin-bottom:12px"></div>
   <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.30);border-radius:8px;padding:11px 13px;margin-bottom:12px;font-size:13px">
-    <div style="font-weight:700;color:#b45309;margin-bottom:6px">O QUE FAZER</div>
+    <div style="font-weight:700;color:#b45309;margin-bottom:6px">PRAZO E CONTA</div>
     ${linha('Nosso cliente é:', p.processos?.polo_cliente
       ? '<b style="color:'+(_POLO_DEFESA.includes(String(p.processos.polo_cliente).toUpperCase())?'#b91c1c':'#15803d')+'">'
         +escHtml(p.processos.polo_papeis||p.processos.polo_cliente)+'</b>'
         +(_POLO_DEFESA.includes(String(p.processos.polo_cliente).toUpperCase())?' <span style="color:#64748b;font-size:11px">decisão contra ele é derrota nossa</span>':'')
       : (norte.polo?'<b>'+escHtml(norte.polo)+'</b> <span style="color:#64748b;font-size:11px">(do texto da intimação)</span>'
                    :'<span style="color:#b45309">não identificado — confira nos autos</span>'))}
-    ${linha('O juízo mandou:', norte.acao?'<b>'+escHtml(norte.acao)+'</b>'
-      :norte.ato?'<b>'+escHtml(norte.ato)+'</b> <span style="color:#94a3b8">— ler a intimação para saber a providência</span>'
-      :'<span style="color:#94a3b8">o texto não traz ordem expressa — ler a intimação abaixo</span>')}
     ${linha('Prazo no texto:', norte.prazoTexto?'<b>'+escHtml(norte.prazoTexto)+'</b> <span style="color:#64748b;font-size:11px">('+escHtml(norte.fonte)+')</span>':'<span style="color:#94a3b8">não consta</span>')}
     ${norte.dataFinal?linha('Data final do tribunal:', '<b style="color:#4ade80">'+escHtml(norte.dataFinal)+'</b> <span style="color:#64748b;font-size:11px">(data oficial, não estimada)</span>'):''}
     ${norte.statusPrazo?linha('Status no tribunal:', escHtml(norte.statusPrazo)):''}
@@ -4724,9 +4723,6 @@ async function verPrazo(id){
     ${disp&&naoConf?linha('Conta:', 'disp. '+_dataBR(disp)+' + 1 dia útil (ciência)'+(conta?' + '+conta[1]+' dias úteis':'')):''}
     ${ato.tipo||ato.orgao?linha('Ato:', escHtml([ato.tipo,ato.orgao].filter(Boolean).join(' · '))):''}
     ${p.categoria==='custas'?linha('Categoria:','<b style="color:#d97706">💰 Recolher custas</b>'):p.categoria==='documentos'?linha('Categoria:','<b style="color:#7c3aed">📎 Apresentar documento</b>'):''}
-    ${pub?.texto?`<div style="margin-top:9px"><button class="btn btn-sm" style="background:#e0e7ff;color:#3730a3;font-weight:700" onclick="resumirPrazoIA()">🤖 Resumir com IA</button>
-      <span style="color:#64748b;font-size:11px;margin-left:6px">para despacho longo</span></div>
-      <div id="prazo-ia" style="margin-top:9px"></div>`:''}
   </div>
   <div style="font-size:12px;color:#94a3b8;margin-bottom:6px">
     INTIMAÇÃO ${pub?.tipo?'· '+escHtml(pub.tipo):''}
@@ -4743,6 +4739,130 @@ async function verPrazo(id){
     ${p.processo_id?`<button class="btn btn-sm btn-secondary" onclick="fecharModal();abrirProcesso('${p.processo_id}')">👁️ Abrir processo</button>`:''}
   </div>`;
   abrirModal('⏰ Prazo '+_dataBR(p.data||p.data_prazo), bloco, null, 'Fechar', false, true);
+  carregarBriefingPrazo(p.id);
+}
+
+// ─── BRIEFING DO PRAZO ────────────────────────────────────────────────────────────────────────
+// Vem pronto ao abrir, e fica GRAVADO no prazo: da segunda abertura em diante é instantâneo e
+// não gasta nada. A regra por trás está em LICOES.md — sem o teor do ato, NÃO se escreve ponto
+// forte nem fraco. O aviso do Legal Mail (134 dos prazos) é recibo, não despacho: só aponta o
+// evento. Inventar análise a partir dele repetiria, num lugar pior, o resumo que saiu escrito do
+// lado do exequente quando o nosso cliente era o executado.
+async function carregarBriefingPrazo(id){
+  const el=document.getElementById('prazo-briefing'); if(!el)return;
+  el.innerHTML='<div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:8px;padding:11px 13px;font-size:13px;color:#94a3b8">🤖 lendo o despacho…</div>';
+  let r=null;
+  try{ r=await chamarFuncao('prazo-orientacao',{prazo_id:id}); }
+  catch(e){ r={erro:e.message||'falha'}; }
+  el.innerHTML=htmlBriefingPrazo(id,r);
+}
+function _listaBrief(itens,cor,sinal){
+  const a=(itens||[]).filter(x=>String(x||'').trim());
+  if(!a.length)return '<div style="color:#64748b;font-size:12px;padding:2px 0">nada a apontar neste ato</div>';
+  return a.map(x=>`<div style="display:flex;gap:6px;padding:2px 0"><span style="color:${cor};font-weight:700;flex-shrink:0">${sinal}</span><span>${escHtml(x)}</span></div>`).join('');
+}
+function htmlBriefingPrazo(id,r){
+  const cx=(t,c,b)=>`<div style="background:${b};border:1px solid ${c};border-radius:8px;padding:11px 13px;font-size:13px;margin-bottom:8px">${t}</div>`;
+  if(!r||r.erro)
+    return cx(`<span style="color:#b91c1c">Não consegui montar o briefing: ${escHtml(r?.erro||'erro')}</span>
+      <div style="margin-top:7px"><button class="btn btn-sm btn-secondary" onclick="carregarBriefingPrazo('${id}')">↻ tentar de novo</button></div>`,
+      'rgba(239,68,68,.30)','rgba(239,68,68,.08)');
+
+  // SEM TEOR: mostra os dois caminhos e NÃO escreve análise
+  if(r.sem_teor)
+    return cx(`<div style="font-weight:700;color:#b45309;margin-bottom:6px">FALTA O TEOR DO DESPACHO</div>
+      <div style="line-height:1.6">${escHtml(r.motivo||'')}</div>
+      <div style="margin-top:9px;display:flex;gap:6px;flex-wrap:wrap">
+        ${_prazoAberto&&_prazoAberto.processo_id?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d;font-weight:700" onclick="fecharModal();abrirProcesso('${_prazoAberto.processo_id}')">📎 Abrir processo e anexar íntegra (grátis)</button>`:''}
+        <button class="btn btn-sm" style="background:#fef3c7;color:#b45309;font-weight:700" onclick="puxarPecaPrazo('${id}')">💰 Ler a peça — R$ 0,02</button>
+        ${_prazoAberto&&_prazoAberto.texto?`<button class="btn btn-sm btn-secondary" onclick="resumirPrazoIA()">🤖 Resumir o aviso</button>`:''}
+      </div>
+      <div id="prazo-ia" style="margin-top:8px"></div>
+      <div style="color:#64748b;font-size:11px;margin-top:6px">Sem o teor eu não escrevo pontos fortes e fracos — seria palpite.</div>`,
+      'rgba(245,158,11,.30)','rgba(245,158,11,.08)');
+
+  const o=r.orientacao||{}, ato=o.ato||{};
+  const fazer=(o.o_que_fazer||[]).filter(x=>String(x||'').trim());
+  return cx(`
+    <div style="font-weight:700;color:#3730a3;margin-bottom:6px">O QUE O JUÍZO DECIDIU</div>
+    <div style="line-height:1.6">${escHtml(o.o_que_decidiu||'—')}</div>
+    ${o.evento?`<div style="color:#64748b;font-size:11px;margin-top:4px">refere-se ao evento ${escHtml(String(o.evento))}${o.prazo_no_texto?' · prazo no ato: <b>'+escHtml(String(o.prazo_no_texto))+'</b>':''}</div>`:''}
+
+    <div style="font-weight:700;color:#b45309;margin:11px 0 5px">O QUE FAZER</div>
+    ${fazer.length?fazer.map(x=>`<div style="display:flex;gap:6px;padding:2px 0"><span style="color:#b45309;flex-shrink:0">▸</span><span>${escHtml(x)}</span></div>`).join('')
+      :'<div style="color:#64748b;font-size:12px">nenhuma providência nossa decorre deste ato — é andamento. Confira se há outro prazo no processo.</div>'}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:11px">
+      <div>
+        <div style="font-weight:700;color:#15803d;margin-bottom:4px">A NOSSO FAVOR</div>
+        ${_listaBrief(o.pontos_fortes,'#15803d','+')}
+      </div>
+      <div>
+        <div style="font-weight:700;color:#b91c1c;margin-bottom:4px">CONTRA NÓS</div>
+        ${_listaBrief(o.pontos_fracos,'#b91c1c','−')}
+      </div>
+    </div>
+
+    <div style="margin-top:11px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span style="color:#64748b;font-size:11px">
+        ${ato.tipo?escHtml(ato.tipo)+' de '+_dataBR(ato.data):'ato de origem'}${ato.provavel?' <b>(provável)</b>':''}
+        ${r.cache?' · guardado'+(r.em?' em '+_dataBR(String(r.em).slice(0,10)):''):' · gerado agora'}
+      </span>
+      <button class="btn btn-sm btn-secondary" style="padding:2px 8px;font-size:11px" onclick="refazerBriefingPrazo('${id}')">↻ refazer</button>
+    </div>
+    <div style="color:#64748b;font-size:11px;margin-top:6px;font-style:italic">⚠️ ${escHtml(o.limite||'Leitura deste ato. Confira nos autos antes de agir.')}</div>`,
+    'rgba(99,102,241,.25)','rgba(99,102,241,.06)');
+}
+// Caminho PAGO do briefing: R$ 0,02 por documento, e só sob clique.
+// Duas etapas de propósito: o preview é GRÁTIS e mostra os documentos candidatos; só depois de
+// você escolher um é que sai a cobrança. A função do servidor recusa puxar sem `idmovimentacoes`
+// explícito justamente para nunca escolher sozinha.
+async function puxarPecaPrazo(id){
+  const el=document.getElementById('prazo-briefing');
+  if(el)el.innerHTML='<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.30);border-radius:8px;padding:11px 13px;font-size:13px;color:#94a3b8">🔎 listando as peças do processo (esta consulta é grátis)…</div>';
+  let pv=null;
+  try{ pv=await chamarFuncao('prazo-peca',{prazo_id:id,action:'preview'}); }
+  catch(e){ pv={erro:e.message||'falha'}; }
+  if(!pv||pv.erro){ if(el)el.innerHTML=htmlBriefingPrazo(id,{erro:pv?.erro||'falha no preview'}); return; }
+
+  const sug=(pv.sugeridos||[]);
+  if(!sug.length){ if(el)el.innerHTML=htmlBriefingPrazo(id,{erro:'o Legal Mail não listou nenhuma peça para este processo'}); return; }
+
+  const linhas=sug.map(d=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer">
+      <input type="radio" name="pc" value="${d.idmovimentacoes}" style="margin-top:3px">
+      <span><b>${escHtml(String(d.titulo||d.tipo||'documento'))}</b>
+        <span style="color:#64748b;font-size:11px"> · ${escHtml(String(d.data||'sem data'))}${d.dias!=null?' · '+(d.dias>0?'+':'')+d.dias+' dia(s) do aviso':''}</span></span>
+    </label>`).join('');
+
+  abrirModal('💰 Ler a peça — R$ 0,02',
+    `<div style="font-size:13px;line-height:1.6">
+      <p style="margin:0 0 8px">Processo <b>${escHtml(String(pv.processo||''))}</b> · aviso de <b>${escHtml(String(pv.data_do_aviso||'?'))}</b> · ${pv.total_documentos} peças no total.</p>
+      <p style="margin:0 0 10px;color:#64748b;font-size:12px">A lista acima saiu de graça. Escolha a peça: <b>custa R$ 0,02</b>, e a URL fica guardada por 6 dias — reabrir não cobra de novo.</p>
+      ${linhas}
+    </div>`,
+    async()=>{
+      const sel=document.querySelector('input[name="pc"]:checked');
+      if(!sel){toast('Escolha qual peça ler.','erro');return false;}
+      const idmov=Number(sel.value);
+      fecharModal();
+      const el2=document.getElementById('prazo-briefing');
+      if(el2)el2.innerHTML='<div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:8px;padding:11px 13px;font-size:13px;color:#94a3b8">💰 puxando a peça e lendo…</div>';
+      let r=null;
+      try{ r=await chamarFuncao('prazo-peca',{prazo_id:id,action:'puxar',idmovimentacoes:idmov}); }
+      catch(e){ r={erro:e.message||'falha'}; }
+      if(r&&r.orientacao){
+        toast(r.reusou?'Peça reaproveitada — sem cobrança.':'Peça lida — R$ 0,02.','ok');
+        if(el2)el2.innerHTML=htmlBriefingPrazo(id,{orientacao:r.orientacao,cache:false});
+      }else{
+        if(el2)el2.innerHTML=htmlBriefingPrazo(id,{erro:r?.erro||r?.erro_ia||'não consegui ler a peça'});
+      }
+    },'Puxar esta peça (R$ 0,02)');
+}
+async function refazerBriefingPrazo(id){
+  const el=document.getElementById('prazo-briefing'); if(!el)return;
+  el.innerHTML='<div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:8px;padding:11px 13px;font-size:13px;color:#94a3b8">🤖 lendo de novo…</div>';
+  let r=null; try{ r=await chamarFuncao('prazo-orientacao',{prazo_id:id,refazer:true}); }catch(e){ r={erro:e.message}; }
+  el.innerHTML=htmlBriefingPrazo(id,r);
 }
 // Resumo pela IA, só quando pedem. Não grava nada no prazo: é apoio de leitura, não registro.
 async function resumirPrazoIA(){
