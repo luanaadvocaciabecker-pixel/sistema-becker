@@ -53,29 +53,55 @@
 -- PÚBLICO (só a chamada de dados é que exige token):
 --     GET https://gateway.cloud.pje.jus.br/<servico>/v3/api-docs
 --
--- O SERVIÇO QUE RESOLVE: Domicílio Eletrônico (PDPJ). 57 endpoints, spec pública.
+-- O SERVIÇO QUE TEM O CAMPO: Domicílio Eletrônico (PDPJ). 57 endpoints, spec pública.
 --     GET https://gateway.cloud.pje.jus.br/domicilio-eletronico/api/v1/comunicacoes
 --     (produção, viva; sem token responde 401, não 404)
 --
--- O schema ComunicacaoProcessualViewModel tem 67 campos, e entre eles exatamente o que faltava:
---     prazo             [integer] "Data limite para cumprimento da intimação"   <-- ESTE
+-- O schema ComunicacaoProcessualViewModel tem 67 campos, incluindo:
+--     prazo             [integer] "Data limite para cumprimento da intimação"
 --     dataFinalCiencia  [string]  "Data final para ciência"
---     tipoPrazo         [string]  "Tipo de prazo"
---     ciente, dataCiente, foiCienciaAutomatica, cienciaAutomatica, emCurso, status
---     tipoIntimacao ("Liminar, obrigação de fazer, sentença, acórdão, trânsito em julgado...")
---     linksDocumentos, linksDocumentosAdicionais  (inteiro teor)
---     autoresReclamantes[], reus[], representantes[]   <-- qualificação de parte, que eu também
---                                                          havia dito não existir em lugar nenhum
---     magistrado, valorCausa, dataAjuizamento, audiencia, varaJudicial, instancia, segredoJustica
+--     tipoPrazo, ciente, dataCiente, foiCienciaAutomatica, cienciaAutomatica, emCurso, status
+--     tipoIntimacao, linksDocumentos, linksDocumentosAdicionais
+--     autoresReclamantes[], reus[], representantes[]
+--     magistrado, valorCausa, dataAjuizamento, audiencia, varaJudicial, instancia
 --
--- AUTENTICAÇÃO: OAuth2 client_credentials (máquina-a-máquina, sem login humano por trás):
---     tokenUrl = https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/token
---     Bearer JWT. O realm `pje` aceita client_credentials e também tls_client_auth (certificado).
+-- *** MAS NÃO USAR. DECISÃO DA LUANA EM 09/09/2026, E ELA ESTÁ CERTA. ***
 --
--- FALTA SÓ A CREDENCIAL (client_id/client_secret) do CNJ. Não há obstáculo técnico:
--- é OAuth2 padrão + REST. É isso que o e-mail ao integracaopdpj@cnj.jus.br deve pedir, e agora
--- o pedido é preciso: acesso de client_credentials ao serviço `domicilio-eletronico`,
--- endpoint GET /api/v1/comunicacoes.
+-- Eu havia escrito aqui que "falta só a credencial" e que a integração era trivial. Ela
+-- perguntou: "o domicílio eletrônico do CNJ abre o prazo também né no pdpj? isso é arriscado".
+-- Dois motivos para não seguir, o segundo pior que o primeiro:
+--
+-- 1. CIÊNCIA É O GATILHO DO PRAZO. No Domicílio Judicial Eletrônico, dar ciência à comunicação
+--    inicia a contagem. A janela até a ciência tácita é justamente a folga para trabalhar. Uma
+--    rotina automática lendo tudo de manhã queimaria essa folga em todo processo, todo dia —
+--    trocaria "não sei o prazo" por "o prazo é hoje", que é pior do que o problema original.
+--
+--    A spec SUGERE que a ciência é escrita explícita e não efeito colateral da leitura:
+--      - PUT /api/v1/processos/{numeroProcesso}/comunicacoes/{numeroComunicacao} é a ÚNICA
+--        escrita sobre comunicação — quase certamente o "dar ciência";
+--      - o GET da lista devolve ciente/dataCiente/usuarioCiente/foiCienciaAutomatica e já traz
+--        prazo e dataFinalCiencia, ou seja, dá para ver o prazo com ciente=false;
+--      - existe GET /api/v1/processos/{numeroProcesso}/logs: toda ação fica registrada e
+--        atribuída a um usuário.
+--    ISSO É INFERÊNCIA DE DOCUMENTAÇÃO, NÃO TESTE. Errar aqui custa prazo de cliente. Não se
+--    descobre experimentando em produção.
+--
+-- 2. PROVAVELMENTE NÃO COBRE A CARTEIRA DO ESCRITÓRIO. O Domicílio é a caixa postal do
+--    DESTINATÁRIO, não do advogado: documentoDestinatario (CPF/CNPJ), nomeDestinatario,
+--    GET /api/v1/representados, GET /api/v1/comunicacoes-representantes,
+--    POST /api/v1/cadastro-compulsorio/{offSize}. O cadastro é compulsório para empresa e órgão
+--    público e OPCIONAL para pessoa física. A carteira trabalhista daqui é de reclamantes pessoa
+--    física — então a API provavelmente não traz as intimações deles. Risco alto de queimar
+--    prazo, com cobertura duvidosa.
+--
+-- CONSEQUÊNCIA: não ligar. E o e-mail ao CNJ deixa de ser pedido de credencial e passa a ser
+-- duas PERGUNTAS, a serem respondidas por escrito antes de qualquer código:
+--   (a) consultar comunicação pela API constitui ciência?
+--   (b) escritório de advocacia consegue ver comunicação de cliente pessoa física?
+--
+-- E o mérito do que ficou rodando: o cálculo (ver db/trt_gera_prazos.sql) NÃO TOCA EM NADA no
+-- tribunal. Não dá ciência, não abre comunicação, não deixa rastro. Risco processual zero. O que
+-- parecia solução de segunda linha é a de primeira.
 --
 -- Outros serviços que valem nota:
 --   MNI-REST  -> POST /api/v1/mni3/{siglaEntidade}/consultar-avisos-pendentes

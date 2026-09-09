@@ -5,11 +5,14 @@
 -- sem esse campo (`if dfinal is null then return 0`). Resultado: 3.245 intimações do TRT e 0
 -- prazos. Ver db/pje_comunica_20260908.sql para o levantamento completo.
 --
--- ISTO É O CAMINHO QUE NÃO DEPENDE DE NINGUÉM, NÃO É O IDEAL. A data-limite oficial existe na
--- API do Domicílio Eletrônico da PDPJ (campo `prazo` do ComunicacaoProcessualViewModel), que só
--- falta credencial do CNJ para consumir. Quando ela vier, o certo é trocar a data calculada
--- pela oficial e deixar o cálculo como reserva para o que a PDPJ não cobrir. A troca é simples:
--- o prazo nasce com status 'estimado' e a ato_chave identifica o ato de origem.
+-- ESTE É O CAMINHO PRINCIPAL, e não um paliativo — reavaliado em 09/09/2026.
+-- A vantagem decisiva dele não é técnica, é processual: o cálculo NÃO TOCA EM NADA no tribunal.
+-- Não dá ciência, não abre comunicação, não deixa rastro, não antecipa contagem de prazo. Risco
+-- processual zero.
+-- A alternativa "oficial" (campo `prazo` do Domicílio Eletrônico) foi descartada justamente
+-- porque consultá-la pode constituir ciência e iniciar o prazo — ver db/pje_comunica_20260908.sql.
+-- Ou seja: mesmo se a credencial do CNJ aparecer amanhã, não é troca automática. Só se troca a
+-- data calculada pela oficial se o CNJ confirmar por escrito que a consulta não dá ciência.
 --
 -- COMO CALCULA:
 --   data_prazo = becker_dias_uteis(becker_dias_uteis(disponibilizacao, 1), 5)
@@ -71,8 +74,13 @@
 -- Quem fecha prazo trabalhista, então:
 --   1. Export "Meus Expedientes" do PJe: o que NÃO está na lista já foi cumprido. Autoritativo
 --      e grátis, mas manual.
---   2. Domicílio Eletrônico da PDPJ: campos ciente, dataCiente, emCurso, status. Precisa de
---      credencial do CNJ (ver db/pje_comunica_20260908.sql).
+--   2. Domicílio Eletrônico da PDPJ: tem os campos (ciente, dataCiente, emCurso, status), mas
+--      DESCARTADO por decisão da Luana em 09/09/2026 — consultar lá pode constituir CIÊNCIA, e
+--      ciência inicia o prazo. Automatizar a leitura queimaria a folga até a ciência tácita em
+--      todo processo, todo dia. Além disso é a caixa do destinatário, e cadastro de pessoa
+--      física é opcional, então provavelmente não cobre a carteira de reclamantes daqui.
+--      Ver db/pje_comunica_20260908.sql para o raciocínio completo. NÃO LIGAR sem resposta
+--      escrita do CNJ.
 --   3. MNI-REST consultar-avisos-pendentes: DESCARTADO em 09/09/2026, depois de testar.
 --      A ideia era boa (a lista de avisos pendentes é o inverso do que fechou, e o corpo do
 --      pedido leva usuario/senha DO TRIBUNAL, não do CNJ), mas não se chega lá:
