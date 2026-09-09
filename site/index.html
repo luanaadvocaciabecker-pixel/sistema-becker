@@ -2041,9 +2041,15 @@ function renderSidebarMenu(){
       ['judiciais','judicial','Todos os Processos'],['movimentacoes','refresh','Movimentações'],['prazos','clock','Prazos'],['audiencias','court','Audiências'],['documentos','folder','Documentos'],['datajud','zap','Atualização Processual']
     ])}
     <div class="nav-item" data-page="novos-negocios" data-leaf="true" onclick="ir('novos-negocios')"><span class="nav-emoji">${iconeMenu('handshake')}</span>Novos Negócios</div>
-    ${/* Processos Administrativos ocultos do menu (0 cadastros, sem uso). Tabela/páginas preservadas — reativar: restaurar este grupoMenu. */ ''}
+    ${/* O grupo 'Processos Administrativos' foi escondido antes com a nota "0 cadastros, sem uso".
+         ESTAVA ERRADO: processos_adm tem 30 casos, 7 deles com orgao='EXTRAJUDICIAL'. Com o grupo
+         escondido E o menu Extrajudiciais apontando para o cartaz de obra, os 30 ficaram sem
+         nenhuma porta no sistema. Extrajudicial e administrativo são a mesma coisa e moram na
+         mesma tabela, então virou um grupo só. NÃO esconder de novo sem contar as linhas. */ ''}
     ${grupoMenu('extrajudiciais','handshake','Extrajudiciais','extrajudiciais',[
-      ['extrajudiciais','handshake','Todos os Extrajudiciais'],['cartorio','bell','Notificações'],['cartorio','chat','Negociações'],['contratos','handshake','Acordos'],['documentos','folder','Documentos']
+      ['extrajudiciais','handshake','Todos os Extrajudiciais'],
+      ['novo-extrajudicial','plus','Novo Extrajudicial',"ir('extrajudiciais');setTimeout(()=>novoProcessoAdm&&novoProcessoAdm(),250)"],
+      ['documentos','folder','Documentos']
     ])}
     ${/* DJEN oculto do menu (redundante com o Legal Mail; 10.905 publicações não lidas e 0 prazos gerados). Robô/tabela/páginas preservados — reativar: restaurar este grupoMenu. */ ''}
     ${grupoMenu('alvaras','alvara','Alvarás','alvaras',[
@@ -2299,7 +2305,7 @@ function ir(pagina){
     audiencias:['Prazos e Agenda','Prazos, audiências e compromissos'],
     movimentacoes:['Movimentações','Histórico processual'],
     documentos:['Documentos','Arquivos e documentos'],
-    extrajudiciais:['Extrajudiciais','Notificações, negociações, acordos e documentos'],
+    extrajudiciais:['Extrajudiciais','Casos sem processo judicial — notificações, acordos, negociações e órgãos'],
     djen:['DJEN','Publicações novas, pendentes, lidas e vinculadas'],
     atendimento:['Atendimento','Atendimentos, áudios e geração de documentos'],
     contratos:['Contratos','Módulo administrativo — contratos'],
@@ -2323,7 +2329,7 @@ function ir(pagina){
     movimentacoes:pMovimentacoes,prazos:pPrazos,audiencias:pAudiencias,publicacoes:pPublicacoes,'novos-negocios':pNovosNegocios,
     financeiro:pFinanceiro,documentos:pDocumentos,datajud:pDatajud,
     config:pConfig,contratos:pModuloSimples,cartorio:pModuloSimples,
-    nfe:pModuloSimples,documentacao:pModuloSimples,extrajudiciais:pModuloSimples,djen:pDjen,atendimento:pAtendimento,tarefas:pTarefas,alvaras:pAlvaras,
+    nfe:pModuloSimples,documentacao:pModuloSimples,extrajudiciais:pAdministrativos,djen:pDjen,atendimento:pAtendimento,tarefas:pTarefas,alvaras:pAlvaras,
     estatisticas:pDesempenho,desempenho:pDesempenho,cibele:pCibele,usuarios:pUsuarios,
     relatorios:pRelatorios,'becker-ia':pBeckerIA
   };
@@ -2375,7 +2381,11 @@ async function pDashboard(){
     safe(supa.from('clientes').select('id',{count:'exact'})),
     safe(somenteProcessosPrincipais(supa.from('processos').select('id,situacao',{count:'exact'}))),
     safe(supa.from('processos_adm').select('id',{count:'exact'})),
-    Promise.resolve({data:[],count:0}),
+    // Estava cravado em Promise.resolve({count:0}) — o card "Extrajudiciais" mostrava zero para
+    // sempre, mesmo com 30 casos no banco. Agora reaproveita a contagem de processos_adm logo
+    // acima (mesma tabela, mesma tela), em vez de uma segunda consulta que não fecharia com a
+    // lista: extrajudicial é um valor de `orgao`, não uma tabela à parte.
+    Promise.resolve(null),
     safe(supa.from('prazos').select('id,data,cumprido',{count:'exact'}).eq('cumprido',false).lte('data',hojeIso)),
     safe(supa.from('prazos').select('id,data,descricao,tipo,cumprido,processo_id,processos(numero,clientes(nome),advogado_responsavel)',{count:'exact'}).eq('cumprido',false).gte('data',hojeIso).lte('data',em7dIso).order('data').limit(5)),
     safe(supa.from('audiencias').select('id,data,hora,tipo,local,processo_id,processos(numero,clientes(nome))',{count:'exact'}).eq('data',hojeIso)),
@@ -2391,7 +2401,7 @@ async function pDashboard(){
   const totalClientes=countOf(clientes);
   const totalJudiciais=countOf(judiciais);
   const totalAdm=countOf(adm);
-  const totalExtra=countOf(extra);
+  const totalExtra=totalAdm; // mesma tabela — ver o comentário na consulta acima
   const totalPrazosHoje=countOf(prazosHoje);
   const totalAudHoje=countOf(audHoje);
   const totalPrazosAbertos=countOf(prazosAbertos);
@@ -2429,8 +2439,8 @@ async function pDashboard(){
     <div class="dash-kpi-grid">
       ${kpi('clientes','Clientes',totalClientes.toLocaleString('pt-BR'),'Clientes ativos','clientes')}
       ${kpi('judicial','Judiciais',totalJudiciais.toLocaleString('pt-BR'),'Processos ativos','processos')}
-      ${/* KPI Administrativos oculto (módulo sem uso) */ ''}
-      ${kpi('handshake','Extrajudiciais',totalExtra.toLocaleString('pt-BR'),'Casos ativos','extrajudiciais')}
+      ${/* Não existe card separado de Administrativos: é a mesma tabela do card Extrajudiciais. */ ''}
+      ${kpi('handshake','Extrajudiciais',totalExtra.toLocaleString('pt-BR'),'Casos sem processo judicial','extrajudiciais')}
       ${kpi('alvara','Alvarás',fmtMoeda(valorAlvaras),'Pendentes de finalização','alvaras')}
     </div>
 
@@ -4061,7 +4071,10 @@ function pProcessos(){pJudiciais();}
 
 // ---- ADMINISTRATIVOS ----
 let admFiltro={busca:'',situacao:''};
-async function pAdministrativos(){
+// Serve as páginas 'administrativos' e 'extrajudiciais': é a MESMA tabela (processos_adm), e
+// extrajudicial é um valor de `orgao`, não um módulo separado. Só o rótulo do botão muda.
+async function pAdministrativos(pagina){
+  const extra = pagina === 'extrajudiciais';
   const c=document.getElementById('conteudo');
   if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(500);clientesCache=data||[];}
   c.innerHTML=`
@@ -4072,7 +4085,7 @@ async function pAdministrativos(){
       <option value="">Todas as situações</option>
       <option>Em análise</option><option>Exigência</option><option>Recurso administrativo</option><option>Deferido</option><option>Indeferido</option>
     </select>
-    <button class="btn btn-primary" onclick="novoProcessoAdm()">+ Novo Administrativo</button>
+    <button class="btn btn-primary" onclick="novoProcessoAdm(${extra?"'EXTRAJUDICIAL'":'null'})">+ ${extra?'Novo Extrajudicial':'Novo Administrativo'}</button>
   </div>
   <div class="card"><div class="table-wrap"><table>
     <thead><tr><th>Nº Protocolo</th><th>Órgão</th><th>Cliente</th><th>Assunto</th><th>Responsável</th><th>Situação</th><th></th></tr></thead>
@@ -4113,12 +4126,22 @@ function formProcessoAdm(d={}){
   const opts=clientesCache.map(cl=>`<option value="${cl.id}" ${d.cliente_id==cl.id?'selected':''}>${cl.nome}</option>`).join('');
   const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
   const advsOpts=(sel)=>`<option value="">Selecione...</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
-  const orgaos=['INSS','Previdência Social','FGTS/Caixa Econômica','Receita Federal','Prefeitura Municipal','Governo do Estado','INSS — Aposentadoria','INSS — Benefício por Incapacidade','INSS — BPC/LOAS','Conselho Profissional','Outro'];
-  const orgOpts=(sel)=>orgaos.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
+  // Os 6 primeiros são os que REALMENTE existem no banco hoje — não tire nenhum sem conferir
+  // antes, ou volta a perda de dado do <select> fechado (ver comentário do commit).
+  const orgaos=['EXTRAJUDICIAL','GERID / Meu INSS','DETRAN DIGITAL','DETRAN','ASSESSORIA','ADMINISTRATIVO',
+    'INSS','Previdência Social','FGTS/Caixa Econômica','Receita Federal','Prefeitura Municipal',
+    'Governo do Estado','INSS — Aposentadoria','INSS — Benefício por Incapacidade','INSS — BPC/LOAS',
+    'Conselho Profissional','Cartório','Banco / Instituição financeira','Outro'];
+  const orgDatalist=`<datalist id="orgaos-adm">${orgaos.map(o=>`<option value="${escHtml(o)}"></option>`).join('')}</datalist>`;
   return`<form id="form-processo-adm">
-  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#52525B;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--cinza3)">Dados do Processo Administrativo</div>
+  ${orgDatalist}
+  <div style="background:rgba(200,167,91,0.06);border:1px solid rgba(200,167,91,0.15);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--azul3)">
+    ⚠️ Campos marcados com <strong>*</strong> são obrigatórios. O caso não pode ser salvo sem eles.
+  </div>
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#52525B;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--cinza3)">Dados do caso</div>
   <div class="form-row">
-    <div class="form-field"><label>Órgão *</label><select name="orgao"><option value="">Selecione...</option>${orgOpts(d.orgao)}</select></div>
+    <div class="form-field"><label>Órgão / Tipo *</label>
+      <input name="orgao" list="orgaos-adm" value="${escHtml(d.orgao||'')}" placeholder="Escolha da lista ou digite (ex.: EXTRAJUDICIAL)" autocomplete="off"></div>
     <div class="form-field"><label>Nº do Protocolo</label><input name="numero_protocolo" value="${d.numero_protocolo||''}" placeholder="Ex: 1234567/2024"></div>
   </div>
   <div class="form-row">
@@ -4135,10 +4158,11 @@ function formProcessoAdm(d={}){
   <div class="form-field"><label>Observações</label><textarea name="observacoes">${d.observacoes||''}</textarea></div>
 </form>`;
 }
-function novoProcessoAdm(){
-  abrirModal('Novo Processo Administrativo',formProcessoAdm({}),async()=>{
+function novoProcessoAdm(orgaoPadrao){
+  const titulo = orgaoPadrao==='EXTRAJUDICIAL' ? 'Novo Caso Extrajudicial' : 'Novo Processo Administrativo';
+  abrirModal(titulo,formProcessoAdm(orgaoPadrao?{orgao:orgaoPadrao}:{}),async()=>{
     const d=coletarForm('form-processo-adm');
-    if(!d.orgao){toast('Selecione o órgão.','erro');return false;}
+    if(!d.orgao){toast('Informe o órgão ou o tipo (ex.: EXTRAJUDICIAL).','erro');return false;}
     if(!d.cliente_id){toast('Selecione o cliente.','erro');return false;}
     if(!d.assunto){toast('Assunto é obrigatório.','erro');return false;}
     if(!d.responsavel){toast('Selecione o responsável.','erro');return false;}
@@ -5754,7 +5778,7 @@ async function pDesempenho(){
 
 // ---- MÓDULOS ADMINISTRATIVOS (placeholder) ----
 function pModuloSimples(pagina){
-  const nomes={contratos:'Contratos',cartorio:'Cartório',nfe:'NF-e',documentacao:'Documentação',atendimento:'Atendimento',djen:'DJEN',extrajudiciais:'Extrajudiciais'};
+  const nomes={contratos:'Contratos',cartorio:'Cartório',nfe:'NF-e',documentacao:'Documentação',atendimento:'Atendimento',djen:'DJEN'};
   const nome=nomes[pagina]||pagina;
   document.getElementById('conteudo').innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
