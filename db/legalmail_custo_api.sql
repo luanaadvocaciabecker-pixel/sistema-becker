@@ -1,0 +1,136 @@
+-- ============================================================================
+-- CUSTO DA API DO LEGAL MAIL — o incidente de R$ 461 e a tabela de preços
+-- 09/09/2026. Ver também LICOES.md (regras 1 a 7).
+-- ============================================================================
+--
+-- *** ANTES DE AGENDAR QUALQUER ROTINA QUE CHAME O LEGAL MAIL, LEIA ESTE ARQUIVO. ***
+--
+-- Fonte: painel da API + spec OpenAPI 3.1.1 "LegalMail Public API" v1.0.0, 70 endpoints,
+-- enviados pela Luana em 09/09/2026 e conferidos linha por linha contra a fatura.
+
+-- ---------------------------------------------------------------------------
+-- 1. O INCIDENTE
+-- ---------------------------------------------------------------------------
+-- Cron `legalmail-reconcile-horario` (`20 * * * *`) chamava GET /api/v1/notices SEM janela,
+-- puxando o acervo inteiro: 3.302 intimações / 50 por página = ~67 requisições de R$ 0,05
+-- = ~R$ 3,35 por execução, 24 vezes por dia. 112 execuções.
+--
+--   fatura (9.474 requisições)          R$ 478,26
+--     /api/v1/notices          9.362    R$ 461,40   <-- 96,5% de tudo
+--     case-files/download/request   5    R$  15,26
+--     lawsuit/detail               35    R$   1,60
+--     o resto (72 chamadas)              R$   0,00
+--
+--   por dia: 02/09 R$5 · 03/09 R$12 · 04/09 R$19 · 05/09 R$94 · 06/09 R$88
+--            07/09 R$96 · 08/09 R$102 · 09/09 R$61 (até desligar)
+--
+-- O salto está em 05/09, quando o cron horário começou. Nenhuma dessas 9.265 chamadas cobradas
+-- falhou (todas HTTP 200) — não houve erro de cobrança, e NÃO há base para contestar.
+--
+-- CRÉDITOS: assinatura de R$ 550/mês que EXPIRA ao fim do ciclo (o extrato tem a linha
+-- "Remoção de sobra da assinatura — créditos expirados ao fim do ciclo"). Não acumula. Então
+-- o dano não foi caixa, foi ORÇAMENTO QUEIMADO: sobrou R$ 65,69 para os 8 dias finais do ciclo,
+-- que era o dinheiro dos downloads de autos.
+
+-- ---------------------------------------------------------------------------
+-- 2. O QUE A DOCUMENTAÇÃO DELES JÁ DIZIA
+-- ---------------------------------------------------------------------------
+-- Na descrição do próprio GET /api/v1/notices:
+--   "Serve como ALTERNATIVA AO WEBHOOK (...): uma rotina DIÁRIA consegue puxar tudo o que foi
+--    capturado no dia filtrando por data_captura_inicio / data_captura_fim."
+--   "Cobrado POR REQUISIÇÃO (R$ 0,05), e não por intimação retornada — uma página com 50 custa
+--    o mesmo que uma com 1."
+--   "Janela de isenção de 5 MINUTOS (menor que o padrão de 24h da API)."
+--   "CONSEQUÊNCIA PRÁTICA: CONSULTAR EM LAÇO SAI CARO — a cada 5 minutos há nova cobrança, e
+--    nada é entregue que o puxão diário não entregue."
+-- Boas práticas, na introdução: "Prefira webhooks a polling — polling reincidente gera bloqueio
+-- progressivo." / "Monitore o saldo com GET /api/v1/balance."
+--
+-- O parâmetro `data_captura_inicio` JÁ ESTAVA implementado no nosso código (variável `since`),
+-- e o cron chamava sem ele.
+
+-- ---------------------------------------------------------------------------
+-- 3. LIMITE DE TAXA — e o bloqueio que eu mesmo causei consertando isto
+-- ---------------------------------------------------------------------------
+--   * 120 requisições/min, em janela DESLIZANTE de 60s ("esperar a virada do minuto não zera").
+--   * 3 respostas 429 em 10 minutos = "prática de polling" -> TIMEOUT PROGRESSIVO no workspace.
+--   * Cada 429 conta como violação individual; as três podem cair no mesmo minuto.
+--   * Durante bloqueio, tudo responde 429 com header Retry-After. Sai sozinho; a próxima
+--     punição reinicia em 10 minutos.
+--
+-- Em 09/09 eu rodei a validação do fechamento (87 chamadas) TRÊS VEZES em cinco minutos = 261
+-- chamadas. A terceira volta deu 0 de 87. Grátis não é ilimitado.
+--
+-- PIOR QUE O BLOQUEIO: naquela rodada cega a função respondeu "VENCENDO_HOJE_AINDA_ABERTOS: 0".
+-- Ela havia falhado em 87 de 87 consultas e ainda assim afirmou que não havia pendência. Por
+-- isso `prazos-fechar` agora devolve COMPLETO:false e contagens NULL quando qualquer consulta
+-- falha. *** RODADA INCOMPLETA NÃO REPORTA NÚMERO. ***
+
+-- ---------------------------------------------------------------------------
+-- 4. PREÇOS DOS ENDPOINTS QUE NÓS USAMOS (tabela oficial, 09/09/2026)
+-- ---------------------------------------------------------------------------
+--   GRÁTIS  GET  /api/v1/balance                       saldo; a doc chama de "ideal para
+--                                                      monitoramento automatizado"
+--   GRÁTIS  GET  /api/v1/pleading/notices-to-comply    intimações pendentes POR PROCESSO,
+--                                                      com tipo_prazo aberto/fechado
+--   GRÁTIS  GET  /api/v1/lawsuit/case-files            lista os autos (só conta)
+--   GRÁTIS  GET  /api/v1/lawsuit/case-files/download/status
+--   GRÁTIS  GET  /api/v1/lawsuit/all, /summary
+--   R$0,05  GET  /api/v1/notices                       POR PÁGINA de até 50. Isenção de 5 min.
+--   R$0,05  GET  /api/v1/lawsuit/detail                por processo
+--   R$0,07  GET  /api/v1/lawsuit/search                por página
+--   R$0,15  POST /api/v1/lawsuit/case-files/update
+--   R$0,02  POST /api/v1/lawsuit/case-files/download/request   *** POR AUTO DO PROCESSO INTEIRO
+--   R$0,02  GET  /api/v1/lawsuit/docket-entry/url             *** POR DOCUMENTO ESCOLHIDO
+--   R$0,25  POST /api/v1/pleading/send        R$1,00  POST /api/v1/complaint/send
+--
+-- SEM SALDO A REQUISIÇÃO NÃO É EXECUTADA: resposta 402.
+--
+-- PERGUNTA ANTIGA, RESPONDIDA: "download/request aceita subconjunto de documentos?" NÃO —
+-- ele cobra R$0,02 por auto do processo INTEIRO. Para poucas peças use docket-entry/url, que
+-- cobra R$0,02 só pelo documento pedido. A URL devolvida vale 6 DIAS: a doc avisa "guarde a URL
+-- enquanto válida — pedir de novo é cobrança nova por um link que você ainda tinha".
+-- Conferido no extrato: "Download completo dos autos (107 autos) — R$ 2,14" = 107 x R$ 0,02.
+
+-- ---------------------------------------------------------------------------
+-- 5. POR QUE O FECHAMENTO AUTOMÁTICO NUNCA FECHOU NADA (112 execuções, cumpridos:0)
+-- ---------------------------------------------------------------------------
+-- A spec define `prazo_status`:
+--     pendente  = ainda a cumprir
+--     cumprido  = *** VINCULADA A UMA PETIÇÃO PROTOCOLADA ***
+--     excedido  = prazo excedido ou dispensada manualmente
+--
+-- O escritório protocola no eProc/PJe, NÃO pelo Legal Mail. Logo nenhuma intimação vira
+-- `cumprido` lá: as 3.302 ficam `pendente` para sempre, o balde nunca esvazia — e era esse
+-- balde que a rotina relia de hora em hora. Não era bug de ninguém: era mecanismo esperando um
+-- sinal que o escritório nunca manda.
+--
+-- SOLUÇÃO (grátis): GET /api/v1/pleading/notices-to-comply usa o status do PRÓPRIO TRIBUNAL.
+-- Devolve por processo `intimacoes_prazo_fechado` e `intimacoes_prazo_aberto`, e o campo
+-- `idintimacoes` CASA EXATAMENTE com prazos.legalmail_id / publicacoes.legalmail_id
+-- (conferido 6 a 6). Medido em 87 processos: 87 HTTP 200, R$ 0,00, 123 prazos avaliados,
+-- 85 confirmados ABERTOS, 0 a fechar, 38 não listados.
+-- Implementado na edge function `prazos-fechar`, cron `prazos_fechar_1730` (20:30 UTC = 17:30
+-- BRT), com log em `prazo_fechamento_log`.
+--
+-- ATENÇÃO à nota antiga de db/legalmail_webhook.sql: ela dizia que notices-to-comply "veio
+-- vazio". Foi testado num processo do TRT (que o Legal Mail não gerencia) e generalizado.
+-- Nos processos do eProc responde com dados. Um caso não vira regra.
+
+-- ---------------------------------------------------------------------------
+-- 6. ESTADO DOS CRONS PAGOS
+-- ---------------------------------------------------------------------------
+--   legalmail-reconcile-horario   DESLIGADO (active=false) em 09/09  <-- causou os R$ 461
+--   legalmail_reconcile_diario    DESLIGADO (active=false) em 09/09
+--
+-- Só religar com: janela `data_captura_inicio`, 1x por dia, e consulta de saldo antes.
+-- Estimativa depois disso: 1 a 2 páginas/dia = R$ 0,05 a R$ 0,10/dia, contra os ~R$ 90/dia.
+--
+-- Crons ativos e o custo de cada um:
+--   prazos_fechar_1730     20:30  notices-to-comply + balance      R$ 0,00
+--   djen_fire_diario       10:00  API Comunica do CNJ              R$ 0,00
+--   djen_process_diario    10:06  SQL                              R$ 0,00
+--   polo_diario            10:12  SQL                              R$ 0,00
+--   trt_prazos_diario      10:20  SQL                              R$ 0,00
+--   prazos_auditoria_mensal 11:00 dia 1  DataJud/CNJ               R$ 0,00
+--   infinitum_sync_horario  :15   API do Infinitum (não Legal Mail) R$ 0,00
