@@ -25,6 +25,12 @@
 -- Agrega processo_id e prazo_gerado do ato inteiro, porque o vínculo às vezes está preenchido em
 -- só uma das cópias.
 --
+-- `legalmail_id_do_ato` (acrescentado em 09/09/2026): qualquer legalmail_id do grupo. A linha
+-- canônica é a de texto mais longo, que costuma ser a cópia do DJEN e tem legalmail_id NULO —
+-- então quem precisa do vínculo para o fechamento automático tem de olhar o grupo, não a linha
+-- canônica. É por esse campo que trt_gera_prazos liga o prazo ao aviso e lm_reconcile consegue
+-- fechá-lo depois.
+--
 -- É VIEW, não DELETE: o histórico das publicações fica intacto.
 --
 -- Conferir:

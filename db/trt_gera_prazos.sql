@@ -55,5 +55,29 @@
 --   revelar. Não são ruído — precisam ser conferidos um a um.
 --   Nenhum outro status de prazo se moveu (conferido antes/depois): só estimado, +71.
 --
+-- FECHAMENTO AUTOMÁTICO (corrigido em 09/09/2026):
+-- O prazo nasce com `legalmail_id` do aviso do Legal Mail que cobre o MESMO ato, porque
+-- lm_reconcile() — quem fecha prazo quando o tribunal informa cumprido/excedido — casa por
+-- legalmail_id e não por ato_chave. Os 71 primeiros nasceram sem esse vínculo e ficariam
+-- abertos para sempre mesmo depois de cumpridos; foram ligados na mão e a função corrigida.
+-- A view publicacoes_atos expõe `legalmail_id_do_ato` (qualquer cópia do grupo serve: o status
+-- vem do tribunal e é igual para todas). O vínculo só é gravado se nenhum outro prazo já usar
+-- aquele id, porque uq_prazos_legalmail é único.
+--
+-- LIMITE CONHECIDO, medido em 09/09/2026: para o TRT o Legal Mail NÃO reporta prazo_status.
+-- Rodada completa de reconciliação (5.449 avisos) fechou 15 prazos de outros tribunais
+-- (12 cumpridos, 3 excedidos) e ZERO dos 71 do TRT. É a mesma causa raiz: sem "Data final" o
+-- Legal Mail nunca registrou prazo para o TRT, então não tem status para informar.
+-- Quem fecha prazo trabalhista, então:
+--   1. Export "Meus Expedientes" do PJe: o que NÃO está na lista já foi cumprido. Autoritativo
+--      e grátis, mas manual.
+--   2. Domicílio Eletrônico da PDPJ: campos ciente, dataCiente, emCurso, status. Precisa de
+--      credencial do CNJ (ver db/pje_comunica_20260908.sql).
+--   3. MNI-REST consultar-avisos-pendentes: autentica com usuário/senha do próprio tribunal.
+--      "Avisos pendentes" é exatamente a lista inversa — o que sumiu dela, fechou.
+-- NÃO usar "houve movimento posterior no processo" para fechar: em 09/09 isso valia para 10 dos
+-- 39 vencidos, e é indício, não prova de cumprimento. Fechar prazo por indício é pior do que
+-- deixar aberto.
+--
 -- AGENDADO em cron.job (nada disso rodava antes — ver db/djen_supabase_pgcron.sql):
 --   trt_prazos_diario  '20 10 * * *'  select trt_gera_prazos(current_date-15, current_date, true)
