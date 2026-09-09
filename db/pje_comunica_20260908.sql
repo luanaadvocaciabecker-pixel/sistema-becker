@@ -80,8 +80,14 @@
 -- Outros serviços que valem nota:
 --   MNI-REST  -> POST /api/v1/mni3/{siglaEntidade}/consultar-avisos-pendentes
 --                POST /api/v1/mni3/{siglaEntidade}/consultar-teor-comunicacao
---                autentica com usuario/senha do tribunal (não precisa de credencial do CNJ) —
---                caminho alternativo a investigar se o CNJ demorar.
+--                O corpo do pedido leva usuario/senha DO TRIBUNAL, o que me fez achar que era
+--                uma alternativa independente do CNJ. TESTADO EM 09/09/2026: NÃO É.
+--                O gateway responde 401 com WWW-Authenticate: Bearer realm="Unknown" antes de
+--                sequer olhar o corpo — precisa do mesmo token OAuth2 do CNJ. Em produção o
+--                serviço devolve 500 "GENERAL" (o Eureka que eu li é de homologação).
+--                E direto no tribunal não há rota: pje.trt12.jus.br devolve 403 do CloudFront
+--                em tudo, inclusive na home, por ser tráfego de datacenter — enquanto
+--                www.trt12.jus.br (outra infra) responde 200. Não se contorna isso.
 --   COMUNICACAO-PROCESSUAL -> só 1 endpoint (POST/PATCH /api/v1/notificacao). Não serve.
 --   NOTIFICACAO            -> api-docs devolve 401, não deu para inspecionar.
 --   CABECALHO-PROCESSUAL, PESSOAS-API, ENDERECOS, TPU -> dado cadastral/referência.

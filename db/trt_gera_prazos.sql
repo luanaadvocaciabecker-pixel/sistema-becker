@@ -73,8 +73,19 @@
 --      e grátis, mas manual.
 --   2. Domicílio Eletrônico da PDPJ: campos ciente, dataCiente, emCurso, status. Precisa de
 --      credencial do CNJ (ver db/pje_comunica_20260908.sql).
---   3. MNI-REST consultar-avisos-pendentes: autentica com usuário/senha do próprio tribunal.
---      "Avisos pendentes" é exatamente a lista inversa — o que sumiu dela, fechou.
+--   3. MNI-REST consultar-avisos-pendentes: DESCARTADO em 09/09/2026, depois de testar.
+--      A ideia era boa (a lista de avisos pendentes é o inverso do que fechou, e o corpo do
+--      pedido leva usuario/senha DO TRIBUNAL, não do CNJ), mas não se chega lá:
+--        - via gateway da PDPJ: 401 com WWW-Authenticate: Bearer realm="Unknown" — o gateway
+--          exige token OAuth2 do CNJ ANTES de olhar o usuario/senha do corpo. Mesmo bloqueio
+--          do caminho 2, então não é alternativa a ele.
+--        - em produção o mni-rest responde 500 "GENERAL" (o registro do Eureka que eu li é de
+--          homologação; não parece publicado em produção).
+--        - direto no tribunal (pje.trt12.jus.br/.../intercomunicacao): 403 do CloudFront em
+--          TUDO, inclusive na home. É bloqueio de tráfego de datacenter, não da API: o
+--          www.trt12.jus.br (outra infra) responde 200 normalmente. Ou seja, integração
+--          servidor-a-servidor não alcança o PJe do TRT12 de forma alguma.
+--      Não se tenta contornar o bloqueio deles.
 -- NÃO usar "houve movimento posterior no processo" para fechar: em 09/09 isso valia para 10 dos
 -- 39 vencidos, e é indício, não prova de cumprimento. Fechar prazo por indício é pior do que
 -- deixar aberto.
