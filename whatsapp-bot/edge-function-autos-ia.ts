@@ -9,7 +9,11 @@
 //                         A parte pesada roda em background (EdgeRuntime.waitUntil) pra não estourar o timeout.
 //   4) get      (GRÁTIS): devolve o estado atual + URL assinada do PDF (para a tela mostrar sem reprocessar).
 //
-// Auth: verify_jwt=true (só usuário logado dispara gasto). Escreve no banco/Storage com service role.
+// Auth: verify_jwt=true. CONFERIDO em 09/09/2026 que estava FALSE em produção: um POST sem
+// nenhum token respondia 200 no `preview`, devolvendo número do CNJ, contagem de documentos e o
+// resumo por IA, e gastando a nossa chave do Legal Mail. Nenhum cron chama esta função — só a
+// tela, sempre com o token do login — então fechar não quebra nada. NÃO reabrir.
+// A ação PAGA tem, além disso, a checagem de role='authenticated' no código.
 // Segredos: LEGALMAIL_API_KEY, GEMINI_API_KEY (+ GEMINI_MODEL), SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
@@ -109,6 +113,42 @@ async function uploadPdf(bytes: Uint8Array): Promise<string | null> {
   return state === "ACTIVE" ? uri : null;
 }
 
+// De que LADO nós estamos. Sem isto, o modelo adota o protagonista dos documentos: no processo
+// 6618 ele escreveu a estratégia do EXEQUENTE quando o nosso cliente é o EXECUTADO, e mandou
+// "aguardar a preclusão" de uma decisão contra nós cujo prazo vencia naquele dia. Não era
+// alucinação — era ausência de instrução. O polo vem de processos.polo_cliente, deduzido do
+// texto da própria intimação (becker_deriva_polo). MESMO BLOCO do autos-anexo-ia, de propósito:
+// o resumo tem de sair igual venha do download pago ou da íntegra anexada.
+function blocoPolo(cliente: string | null, polo: string | null, papeis: string | null): string {
+  const nome = cliente || "o cliente do escritório";
+  if (!polo) {
+    return [
+      `QUEM NÓS REPRESENTAMOS: ${nome}. O POLO PROCESSUAL DELE NÃO ESTÁ IDENTIFICADO no sistema.`,
+      "NÃO afirme de que lado estamos e NÃO escreva estratégia como se soubesse.",
+      "Diga no primeiro item de pontos_atencao que o polo não está identificado e precisa ser conferido nos autos.",
+    ].join(" ");
+  }
+  const extra = papeis && papeis !== polo ? ` (papéis já vistos neste processo: ${papeis})` : "";
+  return [
+    `QUEM NÓS REPRESENTAMOS: ${nome} — polo processual: ${polo}${extra}.`,
+    "Escreva SEMPRE do ponto de vista DESTE lado.",
+    "Decisão contrária a ele é DERROTA NOSSA: nesse caso o próximo passo é o recurso ou a medida cabível, com o prazo a conferir — NUNCA 'aguardar a preclusão'.",
+    "Pedido formulado pela parte adversa NÃO é pedido nosso; levantamento ou alvará em favor dela NÃO é providência nossa.",
+    "Se os autos contradisserem este polo, DIGA ISSO no primeiro item de pontos_atencao — não escolha um lado em silêncio.",
+  ].join(" ");
+}
+
+async function poloDoProcesso(processoId: number): Promise<string> {
+  try {
+    const r = await sb(`processos?id=eq.${processoId}&select=polo_cliente,polo_papeis,clientes(nome)`);
+    const p0 = Array.isArray(r) ? r[0] : null;
+    return blocoPolo(p0?.clientes?.nome || null, p0?.polo_cliente || null, p0?.polo_papeis || null);
+  } catch {
+    // Sem o polo, o prompt tem de dizer que NÃO sabe — nunca cair no silêncio que causou o erro.
+    return blocoPolo(null, null, null);
+  }
+}
+
 const PROMPT = [
   "Você é advogado(a) analisando os autos COMPLETOS de um processo judicial brasileiro (documentos do mais recente ao mais antigo).",
   "Produza um resumo executivo ÚTIL para a equipe do escritório. Foque no último ato decisório, mas também recupere a trajetória do processo.",
@@ -129,7 +169,7 @@ const PROMPT = [
   "REGRAS: não invente fatos, números de processo, valores, datas ou jurisprudência. Se algo não estiver nos autos, omita o item (não preencha com suposição). Se o ato não fixa prazo para o escritório, use prazo_dias e data_final null. Português claro, sem juridiquês desnecessário. Cada lista com no máximo 6 itens.",
 ].join(" ");
 
-async function lerComIA(pdfUrl: string): Promise<{ ok: boolean, mb: number, obj: any, err?: string }> {
+async function lerComIA(pdfUrl: string, processoId: number): Promise<{ ok: boolean, mb: number, obj: any, err?: string }> {
   const pr = await fetch(pdfUrl);
   if (!pr.ok) return { ok: false, mb: 0, obj: null, err: `pdf http ${pr.status}` };
   const buf = new Uint8Array(await pr.arrayBuffer());
@@ -139,7 +179,7 @@ async function lerComIA(pdfUrl: string): Promise<{ ok: boolean, mb: number, obj:
   const g = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GMODEL}:generateContent?key=${encodeURIComponent(GKEY)}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ fileData: { fileUri: uri, mimeType: "application/pdf" } }, { text: PROMPT }] }],
+      contents: [{ role: "user", parts: [{ fileData: { fileUri: uri, mimeType: "application/pdf" } }, { text: `${await poloDoProcesso(processoId)}\n\n${PROMPT}` }] }],
       generationConfig: { temperature: 0, maxOutputTokens: 3200, responseMimeType: "application/json" },
     }),
   });
@@ -167,7 +207,7 @@ async function processarConcluido(row: any, outputUrl: string) {
       });
     }
     // 2) IA lê o último ato
-    const ia = await lerComIA(outputUrl);
+    const ia = await lerComIA(outputUrl, row.processo_id);
     // 3) grava resultado
     await sb(`processo_autos?id=eq.${row.id}`, {
       method: "PATCH", headers: { Prefer: "return=minimal" },
@@ -297,7 +337,7 @@ Deno.serve(async (req) => {
       if (!atual || !atual.pdf_path) return json({ erro: "não há PDF guardado para este processo" }, 400);
       const signed = await urlAssinada(atual.pdf_path);
       if (!signed) return json({ erro: "falha ao acessar o PDF guardado" }, 502);
-      const ia = await lerComIA(signed);
+      const ia = await lerComIA(signed, processoId);
       if (!ia.ok) return json({ erro: ia.err || "falha da IA" }, 502);
       await sb(`processo_autos?id=eq.${atual.id}`, {
         method: "PATCH", headers: { Prefer: "return=minimal" },

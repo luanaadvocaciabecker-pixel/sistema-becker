@@ -82,6 +82,30 @@ async function subirPdf(bytes: Uint8Array): Promise<string | null> {
   return state === "ACTIVE" ? uri : null;
 }
 
+// De que LADO nós estamos. Sem isto, o modelo adota o protagonista dos documentos: no processo
+// 6618 ele escreveu a estratégia do EXEQUENTE quando o nosso cliente é o EXECUTADO, e mandou
+// "aguardar a preclusão" de uma decisão contra nós cujo prazo vencia naquele dia. Não era
+// alucinação — era ausência de instrução. O polo vem de processos.polo_cliente, deduzido do
+// texto da própria intimação (becker_deriva_polo).
+function blocoPolo(cliente: string | null, polo: string | null, papeis: string | null): string {
+  const nome = cliente || "o cliente do escritório";
+  if (!polo) {
+    return [
+      `QUEM NÓS REPRESENTAMOS: ${nome}. O POLO PROCESSUAL DELE NÃO ESTÁ IDENTIFICADO no sistema.`,
+      "NÃO afirme de que lado estamos e NÃO escreva estratégia como se soubesse.",
+      "Diga no primeiro item de pontos_atencao que o polo não está identificado e precisa ser conferido nos autos.",
+    ].join(" ");
+  }
+  const extra = papeis && papeis !== polo ? ` (papéis já vistos neste processo: ${papeis})` : "";
+  return [
+    `QUEM NÓS REPRESENTAMOS: ${nome} — polo processual: ${polo}${extra}.`,
+    "Escreva SEMPRE do ponto de vista DESTE lado.",
+    "Decisão contrária a ele é DERROTA NOSSA: nesse caso o próximo passo é o recurso ou a medida cabível, com o prazo a conferir — NUNCA 'aguardar a preclusão'.",
+    "Pedido formulado pela parte adversa NÃO é pedido nosso; levantamento ou alvará em favor dela NÃO é providência nossa.",
+    "Se os autos contradisserem este polo, DIGA ISSO no primeiro item de pontos_atencao — não escolha um lado em silêncio.",
+  ].join(" ");
+}
+
 // Mesmo prompt do autos-ia, de propósito: o resumo tem de sair igual, venha do download pago ou
 // da íntegra anexada. Se um dia mudar lá, mudar aqui também.
 const PROMPT = [
@@ -104,7 +128,7 @@ const PROMPT = [
   "REGRAS: não invente fatos, números de processo, valores, datas ou jurisprudência. Se algo não estiver nos autos, omita o item (não preencha com suposição). Se o ato não fixa prazo para o escritório, use prazo_dias e data_final null. Português claro, sem juridiquês desnecessário. Cada lista com no máximo 6 itens.",
 ].join(" ");
 
-async function lerComIA(pdfUrl: string): Promise<{ ok: boolean, mb: number, obj: any, err?: string }> {
+async function lerComIA(pdfUrl: string, polo: string): Promise<{ ok: boolean, mb: number, obj: any, err?: string }> {
   const pr = await fetch(pdfUrl);
   if (!pr.ok) return { ok: false, mb: 0, obj: null, err: `pdf http ${pr.status}` };
   const buf = new Uint8Array(await pr.arrayBuffer());
@@ -114,7 +138,7 @@ async function lerComIA(pdfUrl: string): Promise<{ ok: boolean, mb: number, obj:
   const g = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GMODEL}:generateContent?key=${encodeURIComponent(GKEY)}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ fileData: { fileUri: uri, mimeType: "application/pdf" } }, { text: PROMPT }] }],
+      contents: [{ role: "user", parts: [{ fileData: { fileUri: uri, mimeType: "application/pdf" } }, { text: `${polo}\n\n${PROMPT}` }] }],
       generationConfig: { temperature: 0, maxOutputTokens: 3200, responseMimeType: "application/json" },
     }),
   });
@@ -165,7 +189,11 @@ Deno.serve(async (req) => {
     const assinada = await urlAssinada(decodeURIComponent(m[1]));
     if (!assinada) return json({ erro: "falha ao acessar o anexo" }, 502);
 
-    const ia = await lerComIA(assinada);
+    const prs = await sb(`processos?id=eq.${processoId}&select=polo_cliente,polo_papeis,clientes(nome)`);
+    const pr0 = Array.isArray(prs) ? prs[0] : null;
+    const polo = blocoPolo(pr0?.clientes?.nome || null, pr0?.polo_cliente || null, pr0?.polo_papeis || null);
+
+    const ia = await lerComIA(assinada, polo);
     if (!ia.ok) return json({ erro: ia.err || "falha da IA", mb: ia.mb }, 502);
 
     // Grava com fonte='anexo' e SEM tocar em n_autos/job_id/pdf_path, que pertencem ao caminho
