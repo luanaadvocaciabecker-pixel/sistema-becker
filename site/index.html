@@ -4265,6 +4265,10 @@ function _classPrazo(p){
   // com cumprido=true para sair das listas em aberto — mas ela não foi cumprida, foi descartada,
   // e mostrar "CUMPRIDO" nela seria mentira.
   if((p.status||'').toLowerCase()==='descartado')return'descartado';
+  // Encerrado em bloco sem conferência (decisão de 09/09: "o que foi foi já"). Vem antes de
+  // cumprido pelo mesmo motivo do descartado: a linha fica cumprido=true para sair das listas
+  // em aberto, mas ninguém verificou se foi cumprida — escrever "CUMPRIDO" nela seria mentira.
+  if((p.status||'').toLowerCase()==='encerrado')return'encerrado';
   if(p.cumprido)return'cumprido';
   // Perdido: o tribunal marcou o prazo como excedido (não cumprido a tempo). Precisa de conferência.
   if((p.status||'').toLowerCase()==='excedido')return'excedido';
@@ -4461,7 +4465,7 @@ function renderPrazos(){
   [['prazo-f-dia','dia'],['prazo-f-mesano','mesano'],['prazo-f-datas','custom']].forEach(([id,modo])=>{
     const b=document.getElementById(id); if(b)b.style.display=prazoPeriodo===modo?'flex':'none';
   });
-  const g={hoje:[],vencido:[],aberto:[],cumprido:[],excedido:[],descartado:[]};
+  const g={hoje:[],vencido:[],aberto:[],cumprido:[],excedido:[],descartado:[],encerrado:[]};
   // Toda classe devolvida por _classPrazo precisa existir aqui, senão o push estoura e a tela
   // de Prazos fica em branco. O balde `descartado` foi acrescentado junto com a fila de
   // conferência; se _classPrazo ganhar outra classe, acrescente o balde no mesmo commit.
@@ -4493,7 +4497,7 @@ function renderPrazos(){
   else if(prazoBucket==='excedido'){lista=g.excedido;vazio='Nenhum prazo perdido. 👍';}
   else if(prazoBucket==='conferir'){lista=aConferir;vazio='Nada a conferir — todas as datas foram confirmadas. 👍';}
   else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
-  else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.excedido,...g.cumprido,...g.descartado];
+  else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.excedido,...g.cumprido,...g.descartado,...g.encerrado];
   else lista=[...g.hoje,...g.aberto]; // 'ativos' (padrão): hoje + futuros. Vencidos saem daqui ("esquece o que já passou") e ficam só no card Vencidos.
   prazosVisiveis=lista;   // o botão "Planilha" exporta exatamente esta seleção
   // Alerta vermelho de perdidos (excedido) — sempre visível no topo (menos quando já se está vendo eles).
@@ -4524,15 +4528,15 @@ function renderPrazos(){
 }
 function renderPrazosLista(lista,comAcoes=false){
   if(!lista?.length)return'<div class="empty-state"><div class="icon">✅</div><p>Nenhum prazo.</p></div>';
-  const badge={hoje:['HOJE','#f87171'],vencido:['DECORRIDO','#fbbf24'],aberto:['EM ABERTO','#60a5fa'],cumprido:['CUMPRIDO','#4ade80'],excedido:['⚠️ PERDIDO','#dc2626'],descartado:['DESCARTADO','#94a3b8']};
-  const boxCls={hoje:'urgente',vencido:'urgente',aberto:'proximo',cumprido:'ok',excedido:'urgente',descartado:'ok'};
+  const badge={hoje:['HOJE','#f87171'],vencido:['DECORRIDO','#fbbf24'],aberto:['EM ABERTO','#60a5fa'],cumprido:['CUMPRIDO','#4ade80'],excedido:['⚠️ PERDIDO','#dc2626'],descartado:['DESCARTADO','#94a3b8'],encerrado:['ENCERRADO S/ CONFERIR','#94a3b8']};
+  const boxCls={hoje:'urgente',vencido:'urgente',aberto:'proximo',cumprido:'ok',excedido:'urgente',descartado:'ok',encerrado:'ok'};
   return lista.map(p=>{
     const dt=new Date((p.data||'')+'T12:00:00');
     const cls=_classPrazo(p);const[bl,bc]=badge[cls];
     const dRest=_diasAte(p);
     // prazo em aberto mas a ≤3 dias já entra no visual de urgência (não espera "vencer hoje")
     const boxK=(cls==='aberto'&&dRest!==null&&dRest<=3)?'urgente':boxCls[cls];
-    const chip=(cls!=='cumprido'&&cls!=='descartado')?_chipDias(p):'';
+    const chip=(cls!=='cumprido'&&cls!=='descartado'&&cls!=='encerrado')?_chipDias(p):'';
     // Sugestão da IA (só quando ainda não confirmada por humano e a categoria está em aberto/geral)
     const semCat=(!p.categoria||p.categoria==='geral');
     const sug=(!p.cumprido&&semCat&&p.categoria_fonte!=='humano'&&(p.categoria_sugerida==='custas'||p.categoria_sugerida==='documentos'))?p.categoria_sugerida:'';
