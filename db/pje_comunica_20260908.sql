@@ -29,10 +29,10 @@
 --   motivo_cancelamento, nomeClasse, nomeOrgao, numeroComunicacao, numero_processo,
 --   numeroprocessocommascara, siglaTribunal, status, texto, tipoComunicacao, tipoDocumento
 --
---   NÃO EXISTE CAMPO DE PRAZO. Nem data-limite, nem data de ciência, nem contagem de dias.
---   0 de 552 têm "Data final" ou "Prazo final" no texto. A fonte oficial não publica a
---   data-limite — ela existe só na tela "Meus Expedientes" do PJe, que não tem API aberta.
---   Não gaste tempo procurando prazo aqui de novo.
+--   NESTE ENDPOINT não existe campo de prazo. Nem data-limite, nem data de ciência, nem
+--   contagem de dias. 0 de 552 têm "Data final" ou "Prazo final" no texto.
+--   ATENÇÃO: isso vale só para o Comunica/DJEN. O prazo EXISTE noutro serviço da PDPJ —
+--   ver o bloco 3. Não repita o meu erro de generalizar de um endpoint para a plataforma.
 --
 -- O que a API é boa para: cobertura. 552 comunicações em 39 dias para a OAB 40082/SC, em
 -- 15 tribunais (TJSC 228, TRT12 213, TRF4 26, TST 25, TRT15 21, TRT9 8, TJSP/TJPR/STJ 7...).
@@ -40,17 +40,59 @@
 -- perde-se.
 --
 -- ===========================================================================================
--- 3. PDPJ — não resolve
+-- 3. PDPJ — AQUI ESTÁ O PRAZO.  *** CORRIGE A CONCLUSÃO ANTERIOR DESTE ARQUIVO ***
 -- ===========================================================================================
--- sso.cloud.pje.jus.br (Keycloak, realm `pje`): responde 200, suporta client_credentials e
--- tls_client_auth. Ou seja, se derem credencial a integração é padrão.
--- gateway.cloud.pje.jus.br: 404 sem token (vivo, mas sem credencial não serve).
--- discovery.stg.cloud.pje.jus.br: 200, é um Swagger UI.
--- MNI do TRT12 (pje.trt12.jus.br/pje-web/intercomunicacao?wsdl): 403 em tudo, de qualquer lugar.
+-- Levantamento de 09/09/2026, depois de a Luana cobrar: "a api do pje é bem extensa, tem que
+-- analisar o que realmente tem". Ela estava certa e eu estava errado: eu havia sondado UM
+-- endpoint (o /api/v1/comunicacao do Comunica/DJEN) e generalizado para "o PJe não tem prazo".
 --
--- Conclusão: credencial do PDPJ NÃO resolveria este problema, porque o campo de prazo não
--- existe na fonte. O e-mail ao integracaopdpj@cnj.jus.br perde urgência.
+-- Como se acha o resto: o discovery da PDPJ é um EUREKA (registro de serviços da Netflix) e
+-- responde sem autenticação:
+--     GET https://discovery.stg.cloud.pje.jus.br/eureka/apps      -> 422 serviços
+-- Cada serviço traz o homePageUrl com o caminho real no gateway. E o OpenAPI de cada um é
+-- PÚBLICO (só a chamada de dados é que exige token):
+--     GET https://gateway.cloud.pje.jus.br/<servico>/v3/api-docs
 --
+-- O SERVIÇO QUE RESOLVE: Domicílio Eletrônico (PDPJ). 57 endpoints, spec pública.
+--     GET https://gateway.cloud.pje.jus.br/domicilio-eletronico/api/v1/comunicacoes
+--     (produção, viva; sem token responde 401, não 404)
+--
+-- O schema ComunicacaoProcessualViewModel tem 67 campos, e entre eles exatamente o que faltava:
+--     prazo             [integer] "Data limite para cumprimento da intimação"   <-- ESTE
+--     dataFinalCiencia  [string]  "Data final para ciência"
+--     tipoPrazo         [string]  "Tipo de prazo"
+--     ciente, dataCiente, foiCienciaAutomatica, cienciaAutomatica, emCurso, status
+--     tipoIntimacao ("Liminar, obrigação de fazer, sentença, acórdão, trânsito em julgado...")
+--     linksDocumentos, linksDocumentosAdicionais  (inteiro teor)
+--     autoresReclamantes[], reus[], representantes[]   <-- qualificação de parte, que eu também
+--                                                          havia dito não existir em lugar nenhum
+--     magistrado, valorCausa, dataAjuizamento, audiencia, varaJudicial, instancia, segredoJustica
+--
+-- AUTENTICAÇÃO: OAuth2 client_credentials (máquina-a-máquina, sem login humano por trás):
+--     tokenUrl = https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/token
+--     Bearer JWT. O realm `pje` aceita client_credentials e também tls_client_auth (certificado).
+--
+-- FALTA SÓ A CREDENCIAL (client_id/client_secret) do CNJ. Não há obstáculo técnico:
+-- é OAuth2 padrão + REST. É isso que o e-mail ao integracaopdpj@cnj.jus.br deve pedir, e agora
+-- o pedido é preciso: acesso de client_credentials ao serviço `domicilio-eletronico`,
+-- endpoint GET /api/v1/comunicacoes.
+--
+-- Outros serviços que valem nota:
+--   MNI-REST  -> POST /api/v1/mni3/{siglaEntidade}/consultar-avisos-pendentes
+--                POST /api/v1/mni3/{siglaEntidade}/consultar-teor-comunicacao
+--                autentica com usuario/senha do tribunal (não precisa de credencial do CNJ) —
+--                caminho alternativo a investigar se o CNJ demorar.
+--   COMUNICACAO-PROCESSUAL -> só 1 endpoint (POST/PATCH /api/v1/notificacao). Não serve.
+--   NOTIFICACAO            -> api-docs devolve 401, não deu para inspecionar.
+--   CABECALHO-PROCESSUAL, PESSOAS-API, ENDERECOS, TPU -> dado cadastral/referência.
+--
+-- MNI do TRT12 direto (pje.trt12.jus.br/.../intercomunicacao?wsdl): 403 de qualquer origem.
+--
+-- O QUE ISSO NÃO MUDA: o cálculo continua valendo e continua ligado, porque não depende de
+-- autorização de ninguém e já está acertando (6/6 contra o PJe). Quando a credencial existir,
+-- troca-se a data calculada pela data oficial do campo `prazo` — a arquitetura já suporta,
+-- porque o prazo nasce com status 'estimado' e a ato_chave identifica o ato.
+
 -- ===========================================================================================
 -- 4. A FÓRMULA QUE SUBSTITUI O CAMPO QUE NÃO EXISTE
 -- ===========================================================================================

@@ -3,7 +3,13 @@
 --
 -- POR QUE EXISTE: o diário do TRT nunca traz "Data final", e lm_upsert_prazo_por_texto() aborta
 -- sem esse campo (`if dfinal is null then return 0`). Resultado: 3.245 intimações do TRT e 0
--- prazos. Ver db/pje_comunica_20260908.sql para a sondagem completa.
+-- prazos. Ver db/pje_comunica_20260908.sql para o levantamento completo.
+--
+-- ISTO É O CAMINHO QUE NÃO DEPENDE DE NINGUÉM, NÃO É O IDEAL. A data-limite oficial existe na
+-- API do Domicílio Eletrônico da PDPJ (campo `prazo` do ComunicacaoProcessualViewModel), que só
+-- falta credencial do CNJ para consumir. Quando ela vier, o certo é trocar a data calculada
+-- pela oficial e deixar o cálculo como reserva para o que a PDPJ não cobrir. A troca é simples:
+-- o prazo nasce com status 'estimado' e a ato_chave identifica o ato de origem.
 --
 -- COMO CALCULA:
 --   data_prazo = becker_dias_uteis(becker_dias_uteis(disponibilizacao, 1), 5)
