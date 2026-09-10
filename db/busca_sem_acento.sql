@@ -1,0 +1,113 @@
+-- ===========================================================================
+-- Busca do sistema: por que ela "não achava o nome da pessoa"
+-- Migration: busca_sem_acento   ·   aplicada em 10/09/2026
+-- ===========================================================================
+-- Pedido da Luana (10/09/2026, com print da busca do topo):
+--   "não tá dando para ver as escritas e na parte de processo quando eu procuro
+--    pelo nome da pessoa não aparece"
+--
+-- A parte de contraste era CSS (registrada em LICOES.md). Esta é a parte de dados:
+-- eram QUATRO defeitos somados, todos medidos antes de mexer.
+
+-- ---------------------------------------------------------------------------
+-- 1. O filtro não olhava o cliente -- apesar de o campo prometer que olhava
+-- ---------------------------------------------------------------------------
+-- O placeholder dizia "Buscar número, cliente, assunto..." e o código era:
+--   q.or(`numero.ilike.%B%,assunto.ilike.%B%,parte_contraria.ilike.%B%`)
+-- O `select` trazia `clientes(nome)` só para EXIBIR na tabela. Nada filtrava por ele.
+-- `buscarAdministrativos()` tinha o mesmo defeito e a mesma promessa.
+--
+--   digitado    achava    acharia pelo nome do cliente
+--   miraci        0                2
+--   juarez        0                2
+--   flavio        0                1
+--   gabriel       2               11
+--   agro          4               24
+
+-- ---------------------------------------------------------------------------
+-- 2. Acento -- `ilike` é literal
+-- ---------------------------------------------------------------------------
+--   digitado      ilike cru   sem acento
+--   sebastiao         0            3      <- SEBASTIÃO MARCAL tem prazo esta semana
+--   joao              9           17
+--   jose             31           42
+--   antonio          17           18
+
+-- ---------------------------------------------------------------------------
+-- 3. Vírgula arrebentava a consulta, e a tela dizia "Nenhum processo"
+-- ---------------------------------------------------------------------------
+-- O termo era interpolado CRU dentro do `or=(...)` do PostgREST, onde a vírgula é
+-- SEPARADOR. Digitar "OLIVEIRA, FLAVIO" corrompia o filtro. Não era falha de
+-- segurança (a RLS continua valendo), mas quebrava a busca em silêncio -- que é
+-- pior, porque parece que o sistema não acha.
+
+-- ---------------------------------------------------------------------------
+-- 4. Duas palavras fora de ordem
+-- ---------------------------------------------------------------------------
+-- Buscar a frase inteira não casa nome em ordem diferente. Medido nos clientes:
+--
+--   digitado            frase exata   todas as palavras
+--   OLIVEIRA FLAVIO          0               1      (o nome é FLAVIO RIBEIRO DE OLIVEIRA...)
+--   FLAVIO OLIVEIRA          0               1
+--   SILVA JOSE               0               6
+--   MARCAL SEBASTIAO         0               1
+--   GABRIEL                 27              27      <- uma palavra não muda
+--
+-- Frase exata deu 0 em TODOS os casos de duas palavras. Por isso a regra passou a ser
+-- "todas as palavras, em qualquer ordem".
+
+-- ---------------------------------------------------------------------------
+-- O QUE A MIGRATION FEZ
+-- ---------------------------------------------------------------------------
+-- Uma coluna GERADA por tabela, com o texto buscável em MAIÚSCULA, sem acento, e com
+-- uma cópia só-dígitos (para CNJ/CPF digitados sem pontuação):
+--
+--   clientes.busca       <- nome, cpf_cnpj, email, telefone, whatsapp + dígitos
+--   processos.busca      <- numero, assunto, classe_processual, parte_contraria,
+--                           comarca + dígitos do numero
+--   processos_adm.busca  <- numero_protocolo, orgao, assunto + dígitos do protocolo
+--
+-- Reusa public.becker_sem_acento(text), que já existia e já é IMMUTABLE -- requisito
+-- da coluna gerada. Ela devolve MAIÚSCULA, então a tela normaliza o termo do mesmo
+-- jeito (NFD + strip de diacrítico + toUpperCase) em `_termoBusca()`. Mesma regra nos
+-- dois lados, como no `becker_html_texto`.
+--
+-- SEM ÍNDICE, de propósito: pg_trgm NÃO está instalado (conferido) e as tabelas têm
+-- 1.515 / 758 / 30 linhas, onde varredura é instantânea. Instalar extensão aqui seria
+-- risco sem ganho. Se a base crescer uma ordem de grandeza, o certo é pg_trgm + índice
+-- GIN, não aumentar teto calado.
+--
+-- Conferência depois de aplicar:
+--   JOSÉ JUAREZ DA SILVEIRA  ->  "JOSE JUAREZ DA SILVEIRA ... 47988688250"
+--   0002960-72.2025.8.16.0149 -> "0002960-72.2025.8.16.0149 PAGAMENTO ... 0002960722025"
+
+-- ---------------------------------------------------------------------------
+-- O NOME DO CLIENTE FICA FORA DA COLUNA GERADA -- e por quê
+-- ---------------------------------------------------------------------------
+-- Coluna gerada não pode ler outra tabela. Então a tela resolve em dois passos, em
+-- `_condicoesBusca()`:
+--   1) acha os ids de cliente cujo `busca` casa com TODAS as palavras (ilike encadeado
+--      é AND no PostgREST), teto de 300;
+--   2) monta `or=(and(busca.ilike.*A*,busca.ilike.*B*),cliente_id.in.(...))`.
+--
+-- `and(...)` aninhado dentro de `or(...)` é sintaxe válida, e por isso `count` e
+-- paginação continuam funcionando sem tocar na plumbagem.
+--
+-- CONFERIDO CONTRA A API em 10/09/2026, porque eu não podia só supor:
+--   * PostgREST ANALISA ANTES de checar permissão -- grupo malformado devolve
+--     400/PGRST100 ("unexpected end of input"), operador inexistente também 400.
+--   * O grupo que a tela gera devolve 401 (permission denied para `anon`), ou seja,
+--     PASSOU pela análise. É a prova de que a sintaxe está certa.
+--   * `cliente_id.in.()` vazio NÃO é erro de sintaxe -- eu havia escrito no código que
+--     era. Ele analisa e só não casa nada. A guarda `if(ids.length)` ficou, mas o
+--     motivo é não mandar lista vazia à toa, não evitar erro.
+--
+-- Conferido também que `anon` não lê `processos` (42501) -- a RLS segue fechada.
+
+-- ---------------------------------------------------------------------------
+-- FILA
+-- ---------------------------------------------------------------------------
+--   * O teto de 300 ids: em 1.515 clientes é folgado, mas se estourar o certo é virar
+--     RPC no banco, não aumentar o número em silêncio.
+--   * Coluna gerada é recalculada em todo UPDATE da linha. Nas três tabelas o volume
+--     de escrita é baixo (rotinas diárias), então não pesa.

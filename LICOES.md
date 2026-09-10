@@ -9,6 +9,97 @@ Quem for mexer em rotina automática ou em qualquer chamada de API paga: leia as
 
 ---
 
+## 10/09/2026 — tema claro colado por cima do escuro, e a busca que prometia o que não fazia
+
+**O que aconteceu.** Ela mandou print da busca do topo: *"não tá dando para ver as escritas e na
+parte de processo quando eu procuro pelo nome da pessoa não aparece"*. Dois defeitos sem relação
+entre si, no mesmo lugar da tela.
+
+**Custo.** Nenhum em dinheiro, e é o pior tipo de defeito: **ela não confia mais na busca**. Quem
+digita um nome, não acha, e conclui que o processo não está cadastrado — quando está.
+
+**Causa 1 — cascata.** O sistema nasceu escuro e o tema claro entrou **por sobreposição**, com
+`body{...}` redefinindo as variáveis mais adiante no arquivo. Quem tinha fundo escuro cravado em
+hex precisou de uma linha de correção. Ela existe, e **três lugares ficaram fora da lista**: o
+campo do topo escurecia **ao receber foco** (ela não via o que digitava), o painel de resultados
+ficava a ~1,1:1 de contraste, e a lista de opção de **todo** `select` do sistema abria escura com
+texto escuro. Existia até um neutralizador de estilo escuro — mas **escopado em `#conteudo`**, e
+a barra do topo fica fora dele.
+
+**Causa 2 — a busca.** Quatro defeitos somados, todos medidos antes de mexer:
+
+| | digitado | achava | devia achar |
+|---|---|---|---|
+| não filtrava pelo cliente, apesar do campo dizer "Buscar número, **cliente**, assunto" | `miraci` | 0 | 2 |
+| acento: `ilike` é literal | `sebastiao` (clientes) | 0 | 3 |
+| vírgula é separador no `or=(...)` do PostgREST e corrompia a consulta | `OLIVEIRA, FLAVIO` | erro silencioso | — |
+| frase exata não casa nome fora de ordem | `SILVA JOSE` (clientes) | 0 | 6 |
+
+**REGRAS:**
+19. **Placeholder é promessa: o que o campo diz que busca, tem de buscar.** "Buscar número,
+    cliente, assunto" com o cliente de fora é a tela mentindo para quem usa. Ao mexer num
+    filtro, ler o texto do campo e conferir item por item.
+20. **Tema por sobreposição precisa de lista fechada, não de memória.** A correção do tema claro
+    é uma lista de seletores escrita à mão — o que não entrar nela fica quebrado e ninguém vê.
+    Ao acrescentar componente com fundo em hex, entrar na lista no mesmo commit. E cuidado com
+    neutralizador escopado (`#conteudo`): topo e rodapé ficam fora.
+21. **`:hover`/`:focus` também são estado visual.** Os três lugares quebrados incluíam um
+    `:focus` — a tela parecia certa parada e quebrava ao ser usada. Conferir o estado ativo.
+22. **Termo digitado nunca vai cru para dentro de `or=(...)`.** Vírgula e parêntese são sintaxe
+    ali. Normalizar num lugar só (`_termoBusca()`), usado por todas as buscas.
+23. **Busca de nome próprio é "todas as palavras, em qualquer ordem".** Frase exata deu 0 em
+    todos os casos de duas palavras que eu testei. Ninguém digita o nome na ordem do cadastro.
+24. **Verdade repetida em três lugares divergiu em três lugares.** O mapa de quem-é-quem existia
+    no JS *e* em duas tabelas escritas à mão na tela; a Alana aparecia num e-mail que não existe
+    e a Samaira não existia em lugar nenhum. Agora as tabelas são renderizadas do mapa. Fonte
+    única, ou não é fonte.
+
+Detalhe: `db/busca_sem_acento.sql`
+
+---
+
+## 10/09/2026 — desliguei o gasto e desliguei, sem ver, a entrada de prazo de 5 tribunais
+
+**O que aconteceu.** Para estancar os R$ 461 acima, desliguei os dois crons do Legal Mail em
+09/09 às 18:20. No dia seguinte a Luana perguntou *"os prazos de hoje e de amanhã de todos os
+tribunais já estão no sistema?"* e a medição mostrou que **nenhum prazo novo de tribunal
+não-trabalhista havia nascido desde o desligamento**: entraram 60 publicações no dia, 0 com
+"Data final", e os 3 prazos criados eram todos do caminho calculado do TRT.
+
+**Custo.** 18 prazos (vencimentos de 16/09 a 01/10, incluindo sentenças) ficaram fora do sistema
+por ~16 horas. Não perdeu prazo porque nenhum era de hoje ou amanhã — **foi sorte, não desenho.**
+
+**Causa.** Só existem dois caminhos que criam prazo, e eu conhecia os dois sem ter cruzado o
+escopo deles:
+
+| caminho | exige | cobre |
+|---|---|---|
+| `lm_upsert_prazo_por_texto` | texto com "Data final" | qualquer tribunal |
+| `trt_gera_prazos` | `tribunal ~ '^(TRT|TST)'` | só trabalhista |
+
+E o dado que fecha a conta: em 01/08–10/09, a "Intimação por sistema" do eProc (a única que traz
+"Data final") aparece **757 vezes, e 0 delas pelo DJEN**. O DJEN do CNJ não traz "Data final" em
+nenhuma das 1.199 linhas. Ou seja: o `notices` pago era o **único** alimentador de TJSC (490
+processos ativos!), TJSP, TJPR, TRF-4 e STJ, e eu tratei ele como "a rotina que só gastava".
+
+**REGRAS:**
+15. **Antes de desligar rotina, listar o que mais ela sustenta.** A pergunta não é "quanto isso
+   gasta?", é "**o que para de funcionar se isso parar?**". Desligar é mudança de
+   comportamento, não pausa neutra.
+16. **Rotina desligada por custo tem de virar item com prazo, não estado permanente.** Ficou
+   ~16 h desligada sem substituto porque não havia nada obrigando a voltar.
+17. **Resposta de rotina de custo precisa dizer o preço da própria rodada.** O
+   `legalmail-reconcile` agora devolve `paginas_cobradas` e `custo_estimado_brl` — o gasto fica
+   no log de `net._http_response`, sem depender de alguém abrir o painel do fornecedor.
+18. **Janela é o padrão, acervo inteiro é exceção explícita.** Inverti o padrão da função: sem
+   parâmetro ela filtra por captura; puxar tudo exige `?tudo=1`, e há teto de páginas por rodada
+   (R$ 1,50) para que laço com defeito não vire fatura.
+
+Detalhe: `whatsapp-bot/edge-function-legalmail-reconcile.ts` (cabeçalho) e
+`db/legalmail_custo_api.sql`
+
+---
+
 ## 09/09/2026 — R$ 461 em 5 dias relendo o que já estava no banco
 
 **O que aconteceu.** O cron `legalmail-reconcile-horario` puxava o acervo inteiro de intimações
@@ -28,9 +119,23 @@ já estava gravado.
 > *"Serve como alternativa ao webhook (...): uma rotina **diária** consegue puxar tudo o que foi
 > capturado no dia filtrando por `data_captura_inicio`."*
 
-O parâmetro de janela **já existia no nosso código** e não estava sendo usado. E o cron **não
-estava versionado em lugar nenhum do repositório** — foi criado direto no banco, sem commit,
-sem arquivo, sem revisão.
+**Correção de 10/09 a esta lição:** eu escrevi acima que *"o parâmetro de janela já existia e não
+estava sendo usado"*. Fui ler o código e **estava sendo usado** — só não no lugar que gastava. A
+lista de coleta era:
+```ts
+const plano = [
+  ["pendente", null, MAX_PAGES_PENDENTE],   // <- null CRAVADO, ignora a janela
+  ["cumprido", since, MAX_PAGES_FECHADOS],
+  ["excedido", since, MAX_PAGES_FECHADOS],
+];
+```
+O cron chamava `?janela=1&dias=3` e a janela valia para cumprido/excedido; o `pendente` — que é
+justamente o volumoso e o único que cria prazo — vinha inteiro. Diagnóstico vago ("não usava a
+janela") quase virou conserto no lugar errado: **o defeito estava numa palavra, `null`, na linha
+de um dos três status.**
+
+E o cron **não estava versionado em lugar nenhum do repositório** — foi criado direto no banco,
+sem commit, sem arquivo, sem revisão.
 
 **REGRAS:**
 1. **Cron que chama API paga tem de estar versionado no repositório, com o preço por chamada

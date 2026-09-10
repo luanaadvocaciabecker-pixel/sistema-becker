@@ -121,10 +121,31 @@
 -- 6. ESTADO DOS CRONS PAGOS
 -- ---------------------------------------------------------------------------
 --   legalmail-reconcile-horario   DESLIGADO (active=false) em 09/09  <-- causou os R$ 461
---   legalmail_reconcile_diario    DESLIGADO (active=false) em 09/09
+--                                 NÃO RELIGAR: o diário abaixo faz o mesmo trabalho. Se alguém
+--                                 religar por engano hoje custa ~R$ 0,20/hora (a janela virou
+--                                 padrão no código), não mais R$ 3,35/hora — mas continua sem
+--                                 servir para nada.
+--   legalmail_reconcile_diario    LIGADO em 10/09, `30 10 * * *` (07:30 BRT), URL com `?dias=3`
+--                                 jobid 3. É a ÚNICA rotina que cria prazo de tribunal
+--                                 não-trabalhista (ver seção 7). ~4 páginas = R$ 0,20/dia.
 --
--- Só religar com: janela `data_captura_inicio`, 1x por dia, e consulta de saldo antes.
--- Estimativa depois disso: 1 a 2 páginas/dia = R$ 0,05 a R$ 0,10/dia, contra os ~R$ 90/dia.
+-- POR QUE RELIGAR (10/09) — ver seção 7. Resumo: com os dois desligados, TJSC/TJSP/TJPR/TRF-4/
+-- STJ pararam de gerar prazo, porque o DJEN do CNJ não traz "Data final" em nenhuma linha.
+--
+-- Conserto do código, na mesma data (whatsapp-bot/edge-function-legalmail-reconcile.ts):
+--   * `pendente` passou a respeitar a janela — era `null` cravado, e era isso que gastava;
+--   * janela virou o PADRÃO (`?tudo=1` para desligar), com DIAS_PADRAO=3;
+--   * TETO_PAGINAS=30 por rodada (R$ 1,50) — laço com defeito não vira mais fatura;
+--   * aborta no primeiro 429 (Retry-After) e no 402 (sem saldo);
+--   * a resposta devolve `paginas_cobradas` e `custo_estimado_brl`, então o gasto fica no log
+--     de `net._http_response` sem depender do painel deles;
+--   * cumprido/excedido saíram do plano padrão (`?fechados=1` religa): davam `cumpridos: 0`
+--     em 112 execuções, e quem fecha prazo é o `prazos_fechar_1730`, de graça.
+--
+-- MEDIDO na primeira chamada consertada (10/09, ?dias=1&debug=1):
+--   total 94 na janela · 2 páginas · R$ 0,10 · 94 publicações · 30 prazos criados/atualizados,
+--   dos quais 18 PRAZOS NOVOS (16/09 a 01/10) que não estavam no sistema. Nenhum vencendo
+--   hoje ou amanhã — o buraco de 16 h não custou prazo, por sorte.
 --
 -- Crons ativos e o custo de cada um:
 --   prazos_fechar_1730     20:30  notices-to-comply + balance      R$ 0,00
@@ -134,3 +155,35 @@
 --   trt_prazos_diario      10:20  SQL                              R$ 0,00
 --   prazos_auditoria_mensal 11:00 dia 1  DataJud/CNJ               R$ 0,00
 --   infinitum_sync_horario  :15   API do Infinitum (não Legal Mail) R$ 0,00
+
+-- ---------------------------------------------------------------------------
+-- 7. O DJEN NÃO SUBSTITUI O `notices` — medido em 10/09/2026
+-- ---------------------------------------------------------------------------
+-- Pergunta que originou a medição: "os prazos de hoje e de amanhã de todos os tribunais já
+-- estão no sistema?"
+--
+-- Só existem DOIS caminhos que criam prazo:
+--   lm_upsert_prazo_por_texto  exige "Data final" no texto   -> qualquer tribunal
+--   trt_gera_prazos            tribunal ~ '^(TRT|TST)'       -> só trabalhista
+--
+-- `publicacoes` entre 01/08 e 10/09, por tipo:
+--
+--   tipo                                    linhas   com "Data final"   via DJEN   via LegalMail
+--   Intimação por sistema (eProc)              757              265            0            757
+--   DJEN/PJe + Diário Nacional + Intimação   1.199                0        1.195              4
+--   Publicação                                 564                0            0            564
+--
+-- 0 de 757. A intimação eletrônica do eProc — a única que carrega a data-limite oficial do
+-- tribunal — NÃO aparece no DJEN, nunca. Ela só chega pelo `notices` (pago).
+--
+-- Prova pelo efeito, no dia em que os dois crons estavam desligados (10/09 até 11h):
+--   60 publicações novas (31 TJSC, 3 TJPR, 1 STJ, 25 trabalhistas), 0 com "Data final";
+--   3 prazos criados, TODOS com fonte='DJEN/calculado' (caminho do TRT). Zero para TJSC.
+--
+-- CONCLUSÃO: o `notices` diário com janela não é luxo, é o alimentador de 490 processos ativos
+-- do TJSC mais TJSP, TJPR, TRF-4 e STJ. R$ 0,20/dia. Cortar isso é cortar a entrada de prazo.
+--
+-- Conferência do acervo já existente (mesma data): TODAS as intimações com "Data final" oficial
+-- de 10/09 ou 11/09 já tinham prazo — 19 de 19, 0 sem prazo (TJSC 7, TJSP 10, TRF-4 2). E o
+-- dry-run `trt_gera_prazos('2026-08-25','2026-09-10',false)` voltou vazio. Ou seja: o que já
+-- havia chegado estava completo; o problema era só a entrada NOVA.
