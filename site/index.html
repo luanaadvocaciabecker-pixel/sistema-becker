@@ -3663,8 +3663,22 @@ function tagSituacaoProcesso(s){
   if(r==='Arquivado')return'arquivado';
   return'andamento';
 }
+// Busca de cliente por nome (datalist) em vez de <select> com 1500+ opções — mais
+// rápido de achar e a lista não corre risco de aparecer cortada por algum .limit().
+let _cliSearchSeq=0;
+function clienteSearchHtml(selectedId,nomeInicial){
+  const dl='cli-dl-'+(_cliSearchSeq++);
+  const nome=nomeInicial||(clientesCache.find(c=>c.id==selectedId)||{}).nome||'';
+  return`<input type="text" list="${dl}" value="${escHtml(nome)}" placeholder="Digite para buscar o cliente..." autocomplete="off" oninput="_cliSearchPick(this)" data-clihidden="${dl}-id">
+    <datalist id="${dl}">${clientesCache.map(c=>`<option value="${escHtml(c.nome)}">`).join('')}</datalist>
+    <input type="hidden" name="cliente_id" id="${dl}-id" value="${selectedId||''}">`;
+}
+function _cliSearchPick(inp){
+  const hidden=document.getElementById(inp.dataset.clihidden);if(!hidden)return;
+  const match=clientesCache.find(c=>c.nome===inp.value);
+  hidden.value=match?match.id:'';
+}
 function formProcesso(d={}){
-  const opts=clientesCache.map(cl=>`<option value="${cl.id}" ${d.cliente_id==cl.id?'selected':''}>${cl.nome}</option>`).join('');
   const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   const advsOpts=(sel,req)=>`<option value="">${req?'Selecione...':'— Nenhum —'}</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
   return`<form id="form-processo">
@@ -3677,7 +3691,7 @@ function formProcesso(d={}){
     <div class="form-field"><label>Tribunal *</label><input name="tribunal" value="${d.tribunal||'TJSC'}" placeholder="Ex: TJSC, TRT 12ª, STJ..."></div>
   </div>
   <div class="form-row">
-    <div class="form-field"><label>Cliente *</label><select name="cliente_id"><option value="">Selecione...</option>${opts}</select></div>
+    <div class="form-field"><label>Cliente *</label>${clienteSearchHtml(d.cliente_id)}</div>
     <div class="form-field"><label>Vara</label><input name="vara" value="${d.vara||''}"></div>
   </div>
   <div class="form-row">
@@ -4284,7 +4298,6 @@ async function buscarAdministrativos(){
   if(document.getElementById('adm-pag'))document.getElementById('adm-pag').textContent=`${data.length} de ${count||0} processos administrativos`;
 }
 function formProcessoAdm(d={}){
-  const opts=clientesCache.map(cl=>`<option value="${cl.id}" ${d.cliente_id==cl.id?'selected':''}>${cl.nome}</option>`).join('');
   const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   const advsOpts=(sel)=>`<option value="">Selecione...</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
   // Os 6 primeiros são os que REALMENTE existem no banco hoje — não tire nenhum sem conferir
@@ -4307,7 +4320,7 @@ function formProcessoAdm(d={}){
   </div>
   <div class="form-row">
     <div class="form-field"><label>Data do Protocolo</label><input type="date" name="data_protocolo" value="${d.data_protocolo||''}"></div>
-    <div class="form-field"><label>Cliente *</label><select name="cliente_id"><option value="">Selecione...</option>${opts}</select></div>
+    <div class="form-field"><label>Cliente *</label>${clienteSearchHtml(d.cliente_id)}</div>
   </div>
   <div class="form-field"><label>Assunto / Objeto *</label><input name="assunto" value="${d.assunto||''}" placeholder="Ex: Aposentadoria por tempo de contribuição"></div>
   <div class="form-row">
@@ -5312,9 +5325,7 @@ const filtrarHon=v=>carregarHon(v);
 async function novoHon(){
   if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
   abrirModal('Novo Honorário',`<form id="form-hon">
-    <div class="form-field"><label>Cliente *</label>
-      <select name="cliente_id"><option value="">Selecione...</option>${clientesCache.map(cl=>`<option value="${cl.id}">${cl.nome}</option>`).join('')}</select>
-    </div>
+    <div class="form-field"><label>Cliente *</label>${clienteSearchHtml()}</div>
     <div class="form-field"><label>Descrição</label><input name="descricao"></div>
     <div class="form-row">
       <div class="form-field"><label>Valor Total (R$) *</label><input type="number" step="0.01" name="valor_total"></div>
@@ -5414,9 +5425,7 @@ async function novoDoc(){
       <select name="tipo"><option>Petição</option><option>Sentença</option><option>Acórdão</option><option>Contrato</option><option>Procuração</option><option>Documento Pessoal</option><option>Comprovante</option><option>Outro</option></select>
     </div>
     <div class="form-field"><label>URL / Link do Arquivo (Google Drive, OneDrive...)</label><input name="url" placeholder="https://drive.google.com/..."></div>
-    <div class="form-field"><label>Cliente</label>
-      <select name="cliente_id"><option value="">—</option>${clientesCache.map(cl=>`<option value="${cl.id}">${cl.nome}</option>`).join('')}</select>
-    </div>
+    <div class="form-field"><label>Cliente</label>${clienteSearchHtml()}</div>
     <div class="form-field"><label>Processo</label>
       <select name="processo_id"><option value="">—</option>${(procs||[]).map(p=>`<option value="${p.id}">${p.numero||'Sem nº'}</option>`).join('')}</select>
     </div>
@@ -7402,9 +7411,7 @@ async function novoAlvara(){
       <div class="form-field"><label>Processo *</label>
         <select name="processo_id"><option value="">Selecione...</option>${(procs||[]).map(p=>`<option value="${p.id}">${p.numero||'Sem nº'}</option>`).join('')}</select>
       </div>
-      <div class="form-field"><label>Cliente</label>
-        <select name="cliente_id"><option value="">—</option>${clientesCache.map(cl=>`<option value="${cl.id}">${cl.nome}</option>`).join('')}</select>
-      </div>
+      <div class="form-field"><label>Cliente</label>${clienteSearchHtml()}</div>
     </div>
     <div class="form-row">
       <div class="form-field"><label>Valor (R$) *</label><input type="number" step="0.01" name="valor"></div>
@@ -7446,9 +7453,7 @@ async function editarAlvara(id){
       <div class="form-field"><label>Processo</label>
         <select name="processo_id"><option value="">—</option>${(procs||[]).map(p=>`<option value="${p.id}" ${a.processo_id===p.id?'selected':''}>${p.numero||'Sem nº'}</option>`).join('')}</select>
       </div>
-      <div class="form-field"><label>Cliente</label>
-        <select name="cliente_id"><option value="">—</option>${clientesCache.map(cl=>`<option value="${cl.id}" ${a.cliente_id===cl.id?'selected':''}>${cl.nome}</option>`).join('')}</select>
-      </div>
+      <div class="form-field"><label>Cliente</label>${clienteSearchHtml(a.cliente_id)}</div>
     </div>
     <div class="form-row">
       <div class="form-field"><label>Valor (R$)</label><input type="number" step="0.01" name="valor" value="${a.valor||''}"></div>
