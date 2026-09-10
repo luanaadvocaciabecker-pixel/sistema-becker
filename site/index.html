@@ -1923,6 +1923,29 @@ function linhasUsuariosCurtas(){
         <td style="padding:8px"><span class="tag ${cls}">${escHtml(papel)}</span></td></tr>`;
     }).join('');
 }
+// RESPONSÁVEIS — derivado do USUARIOS_BECKER, que já é a fonte única de quem é quem.
+// A mesma lista de 5 nomes estava escrita à mão em NOVE lugares (formulário de processo, de
+// extrajudicial, alvarás, tarefas...) e a Ana Beatriz Muller não estava em NENHUM deles — foi
+// o pedido da Luana em 10/09: "novos negócios tem que por para colocar com a Ana também e
+// extras etc que ela mexe antes de todo mundo".
+// Nome COMPLETO de propósito: é a grafia gravada em processos.advogado_responsavel (conferido:
+// Samaira Leite da Silva 181, Luana Fernandes 170, Maria Helena 161, Alana Pais Lemos 142,
+// Cibele Becker 1) e em processos_adm.responsavel (Alana 27, Maria Helena 4, Cibele 2, Luana 1).
+// Entrou alguém no mapa de usuários? aparece nos nove formulários, sem tocar em mais nada.
+function respNomes(){
+  return Object.values(USUARIOS_BECKER).filter(u=>!u.apelido).map(u=>u.nome);
+}
+// Nomes que apareciam só na lista de Novos Negócios e NÃO são usuários do sistema (zero uso em
+// dado: conferido, `novos_negocios.responsavel` está vazio nas 80 linhas). Ficam como sugestão
+// porque o campo é texto livre e alguém pode usá-los; separados para dar para remover sem
+// mexer na lista de verdade.
+const RESP_EXTRAS=['Aline','Karina','Magalhães'];
+// Substitui as nove cópias de `advsOpts`. Começa em "Selecione..." — decisão dela em 10/09: a
+// Ana entra na lista mas NÃO vira padrão, para ninguém receber trabalho sem saber.
+function respOpts(sel){
+  return `<option value="">Selecione...</option>`
+       + respNomes().map(o=>`<option ${sel===o?'selected':''}>${escHtml(o)}</option>`).join('');
+}
 function perfilPadraoUsuario(){
   const email=(usuarioAtual?.email||'').toLowerCase().trim();
   if(USUARIOS_BECKER[email]) return{...USUARIOS_BECKER[email],foto:''};
@@ -3128,7 +3151,7 @@ function formCliente(d={}){return`<form id="form-cliente">
     <div class="form-field"><label>Estado</label><input name="estado" id="campo-estado" value="${d.estado||'SC'}"></div>
     <div class="form-field"><label>Responsável</label>
       <select name="responsavel">
-        ${['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'].map(o=>`<option ${(d.responsavel||'Cibele Becker')===o?'selected':''}>${o}</option>`).join('')}
+        ${respNomes().map(o=>`<option ${(d.responsavel||'Cibele Becker')===o?'selected':''}>${o}</option>`).join('')}
       </select>
     </div>
   </div>
@@ -3642,7 +3665,7 @@ function tagSituacaoProcesso(s){
 }
 function formProcesso(d={}){
   const opts=clientesCache.map(cl=>`<option value="${cl.id}" ${d.cliente_id==cl.id?'selected':''}>${cl.nome}</option>`).join('');
-  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   const advsOpts=(sel,req)=>`<option value="">${req?'Selecione...':'— Nenhum —'}</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
   return`<form id="form-processo">
   <div style="background:rgba(200,167,91,0.06);border:1px solid rgba(200,167,91,0.15);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--azul3)">
@@ -3693,7 +3716,10 @@ function formProcesso(d={}){
 // NOVOS NEGÓCIOS — triagem de novos casos (checklist de documentos + handoff)
 // ══════════════════════════════════════════════════════════════════════════
 const NN_LABEL={universal:'Universal',inventario:'Inventário Extrajudicial',previdenciario:'Previdenciário',notificacao:'Notificação Extrajudicial',revisional:'Revisional / Superendividamento',trabalhista:'Trabalhista',divorcio:'Divórcio',escritura:'Escritura / Registro de Imóvel',contrato:'Contrato (elaboração/análise)',usucapiao:'Usucapião',prova:'Produção Antecipada de Provas',defesa_civel:'Defesa Cível (processo em andamento)',alvara:'Alvará Judicial',civel_geral:'Cível (geral)',outro:'Outro'};
-const NN_RESP=['Luana','Cibele','Alana','Aline','Maria Helena','Karina','Samaira','Ana','Magalhães'];
+// Era a SEGUNDA lista de pessoas do sistema, e em PRIMEIRO NOME — enquanto todo o resto
+// grava nome completo. Duas grafias para as mesmas pessoas, sem nada garantindo que casem.
+// Agora sai da mesma fonte; os três que não são usuários vêm depois, em RESP_EXTRAS.
+const NN_RESP=respNomes().concat(RESP_EXTRAS);
 const NN_DRIVE_RAIZ='https://1drv.ms/f/c/50bce61748c202f9/IgD5AsJIF-a8IIBQmQEAAAAAAbje9iwXxDmisMHX8NvvBtU?e=oiJauu';
 function abrirPastaNN(link){ window.open(link||NN_DRIVE_RAIZ,'_blank','noopener'); }
 function editarLinkNN(id){
@@ -3708,7 +3734,10 @@ function editarLinkNN(id){
       if(n)n.link_pasta=v||null; toast('Link salvo.','ok'); abrirNovoNegocio(id,'dados');
     });
 }
-let _nnCache=[], _nnFiltro='todos', _nnBusca='';
+// `_nnResp` = filtro por responsável. As 80 linhas de `novos_negocios` estão com responsavel
+// VAZIO: o campo existe desde sempre e nunca foi preenchido, e a lista também não o mostrava,
+// então não havia como notar. Decisão dela em 10/09: mostrar e deixar filtrar, sem obrigar.
+let _nnCache=[], _nnFiltro='todos', _nnBusca='', _nnResp='';
 function _nnEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function _nnStatus(neg){
   const itens=neg.nn_itens||[];
@@ -3754,6 +3783,11 @@ function renderNovosNegocios(){
       <h3 style="margin:0">Novos Negócios ${conclCount?`<span style="font-size:12px;color:#64748b;font-weight:500">· ${conclCount} já concluídos</span>`:''}</h3>
       <div style="display:flex;gap:8px;align-items:center">
         <input id="nn-busca" placeholder="🔍 Buscar cliente ou ação..." value="${_nnEsc(_nnBusca)}" oninput="_nnBusca=this.value;renderNovosNegociosLista()" style="padding:7px 12px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto);min-width:220px">
+        <select class="filtro" onchange="_nnResp=this.value;renderNovosNegociosLista()" style="padding:7px 10px">
+          <option value="">Todos os responsáveis</option>
+          ${respNomes().map(r=>`<option ${_nnResp===r?'selected':''}>${escHtml(r)}</option>`).join('')}
+          <option value="__SEM__" ${_nnResp==='__SEM__'?'selected':''}>⚠️ Sem responsável</option>
+        </select>
         <button class="btn btn-primary btn-sm" onclick="novoNegocio()">+ Novo</button>
       </div>
     </div>
@@ -3768,8 +3802,10 @@ function renderNovosNegociosLista(){
   if(_nnFiltro==='completos')lista=lista.filter(x=>x.s.cls==='verde');
   else if(_nnFiltro==='faltando')lista=lista.filter(x=>x.s.cls==='amarelo');
   else if(_nnFiltro==='sempasta')lista=lista.filter(x=>x.s.cls==='vermelho');
+  if(_nnResp==='__SEM__')lista=lista.filter(x=>!(x.n.responsavel||'').trim());
+  else if(_nnResp)lista=lista.filter(x=>(x.n.responsavel||'').trim()===_nnResp);
   const q=_nnBusca.trim().toLowerCase();
-  if(q)lista=lista.filter(x=>(x.n.cliente_nome||'').toLowerCase().includes(q)||(x.n.acao||'').toLowerCase().includes(q));
+  if(q)lista=lista.filter(x=>(x.n.cliente_nome||'').toLowerCase().includes(q)||(x.n.acao||'').toLowerCase().includes(q)||(x.n.responsavel||'').toLowerCase().includes(q));
   if(!lista.length){el.innerHTML='<div class="empty-state" style="padding:30px;text-align:center;color:#64748b"><div style="font-size:34px">📭</div><p>Nenhum novo negócio neste filtro.</p></div>';return;}
   el.innerHTML=lista.map(({n,s})=>`
     <div onclick="abrirNovoNegocio(${n.id})" style="display:flex;align-items:center;gap:12px;padding:12px 10px;border-bottom:1px solid var(--border);cursor:pointer" onmouseover="this.style.background='rgba(0,0,0,.035)'" onmouseout="this.style.background='none'">
@@ -3777,6 +3813,9 @@ function renderNovosNegociosLista(){
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;color:var(--texto);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.cliente_nome)}</div>
         <div style="font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_nnEsc(n.acao||'—')}</div>
+        <div style="font-size:11px;margin-top:2px">${(n.responsavel||'').trim()
+          ? `<span style="color:#334155;font-weight:600">👤 ${_nnEsc(n.responsavel)}</span>`
+          : `<span style="color:#B91C1C;font-weight:600">⚠️ sem responsável</span>`}</div>
       </div>
       ${!((n.whatsapp||n.clientes?.telefone||n.clientes?.whatsapp||'').trim())?`<span class="tag" style="background:rgba(220,38,38,.12);color:#b91c1c;font-size:11px;flex-shrink:0" title="Sem número de contato — clique para preencher">📱 sem WhatsApp</span>`:''}
       ${n.status==='repassado'?`<span class="tag" style="background:rgba(37,99,235,.12);color:#1d4ed8;font-size:11px;flex-shrink:0" title="Repassado para ${_nnEsc(n.responsavel||'')}">📨 ${_nnEsc(n.responsavel||'repassado')}</span>`:''}
@@ -4246,7 +4285,7 @@ async function buscarAdministrativos(){
 }
 function formProcessoAdm(d={}){
   const opts=clientesCache.map(cl=>`<option value="${cl.id}" ${d.cliente_id==cl.id?'selected':''}>${cl.nome}</option>`).join('');
-  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   const advsOpts=(sel)=>`<option value="">Selecione...</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
   // Os 6 primeiros são os que REALMENTE existem no banco hoje — não tire nenhum sem conferir
   // antes, ou volta a perda de dado do <select> fechado (ver comentário do commit).
@@ -4317,7 +4356,7 @@ async function converterParaJudicial(admId){
   const{data:adm}=await supa.from('processos_adm').select('*,clientes(nome)').eq('id',admId).single();
   if(!adm)return;
   if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(500);clientesCache=data||[];}
-  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   const advsOpts=(sel)=>`<option value="">Selecione...</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
   const formHtml=`<form id="form-converter">
     <div style="background:rgba(61,142,240,0.08);border:1px solid rgba(61,142,240,0.2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#93c5fd">
@@ -5876,7 +5915,7 @@ async function pCibele(){
   const ha30d=new Date(hoje.getTime()-30*86400000);
   const em7Str=new Date(hoje.getTime()+7*86400000).toISOString().split('T')[0];
   const hojStr=hoje.toISOString().split('T')[0];
-  const ADVS=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
+  const ADVS=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   const [rCl,rPr,rPz,rTk,rHon,rAlv,rAud]=await Promise.all([
     supa.from('clientes').select('id',{count:'exact'}),
     somenteProcessosPrincipais(supa.from('processos').select('id,situacao,advogado_responsavel,updated_at')),
@@ -5979,7 +6018,7 @@ async function pDesempenho(){
   const c=document.getElementById('conteudo');
   c.innerHTML='<p style="text-align:center;padding:60px;color:rgba(255,255,255,.2)">Carregando indicadores...</p>';
   const hoje=new Date();hoje.setHours(0,0,0,0);
-  const ADVS=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
+  const ADVS=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   // Filtro por advogado empurrado pro servidor (.in(...)/embed !inner) em vez de
   // buscar a tabela inteira e casar no cliente — senão um limite fixo bate no total
   // do escritório, não no que interessa, e pode deixar de fora justamente o
@@ -7130,7 +7169,7 @@ async function beckerIASalvarDoc(){
 let tarefasFiltro={status:'',responsavel:''};
 async function pTarefas(){
   const c=document.getElementById('conteudo');
-  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   c.innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div class="toolbar">
@@ -7198,7 +7237,7 @@ async function carregarTarefas(){
   }).join('');
 }
 async function novaTarefa(){
-  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
   abrirModal('Nova Tarefa',`<form id="form-tarefa">
     <div class="form-field"><label>Título *</label><input name="titulo" placeholder="Ex: Protocolar recurso"></div>
@@ -7234,7 +7273,7 @@ async function novaTarefa(){
 async function editarTarefa(id){
   const{data:t}=await supa.from('tarefas').select('*').eq('id',id).single();
   if(!t){toast('Tarefa não encontrada.','erro');return;}
-  const advs=['Cibele Becker','Alana Pais Lemos','Maria Helena','Luana Fernandes','Samaira Leite da Silva'];
+  const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
   abrirModal('Editar Tarefa',`<form id="form-tarefa">
     <div class="form-field"><label>Título *</label><input name="titulo" value="${escHtml(t.titulo||'')}"></div>
