@@ -288,3 +288,87 @@
 -- Terceiro sinal testado e descartado: `movimentacoes` esta CONGELADA em 15/08/2026 (0 linhas
 -- nos ultimos 7 dias, 81 nos ultimos 30, de 44.544). Nenhum dos 4 processos tem movimentacao
 -- depois da intimacao. A sincronia do DataJud nao esta rodando -- problema separado, anotado.
+
+-- ---------------------------------------------------------------------------
+-- 9. O TESTE DA REGRA DELA -- e o que o tribunal realmente diz (10/09/2026)
+-- ---------------------------------------------------------------------------
+-- Regra que ela propos: "nao aparece prazo em aberto no tribunal, sinal que fechamos".
+-- Testada com gabarito de 7 prazos fechados COM prova, via `prazos-fechar?gabarito=&commit=0`,
+-- custo R$ 0,00. Resultado 4/7 -- e os 3 que "erraram" foram a boa noticia:
+--
+--   prazo   vence      tribunal disse   eu esperava
+--   5425    29/07      FECHADO          nao listado
+--   5429    29/07      FECHADO          nao listado
+--   5435    07/08      FECHADO          nao listado
+--   5440    21/07      nao listado      nao listado   OK
+--   5441    21/07      nao listado      nao listado   OK
+--   5474    24/08      nao listado      nao listado   OK
+--   5688    24/09      nao listado      nao listado   OK
+--
+-- CONCLUSAO 1: `intimacoes_prazo_fechado` FUNCIONA. Minha expectativa estava errada, nao o
+-- endpoint. O `a_fechar_detectados: 0` de todas as rodadas anteriores tinha causa banal: a
+-- consulta busca prazos abertos, e os abertos estavam genuinamente abertos. Nunca houve nada
+-- fechado para achar.
+--
+-- CONCLUSAO 2: AUSENCIA NAO E FECHAMENTO. Dos 9 prazos que venciam em 10/09, o tribunal so
+-- confirmou 3; os outros 6 nao foram mencionados e CINCO SAO DO TRT12, que o eProc do TJSC nao
+-- conhece. Aplicar a regra da ausencia fecharia esses cinco indevidamente. A regra dela vale
+-- para o caso que ela tinha em mente (TJSC), mas nao sobrevive ao TRT.
+--
+-- CONCLUSAO 3: QUANDO o tribunal fecha. O unico motivo de fechamento que existe na base e
+-- "CIENCIA, COM RENUNCIA AO PRAZO" -- 8 de ~11.000 intimacoes; a nona diz "Juntada de certidao
+-- - encerrado prazo". NENHUMA diz "peticao protocolada". Ou seja: o tribunal fecha o expediente
+-- na ciencia/renuncia ou na certidao do cartorio, NAO no instante do protocolo. Foi por isso
+-- que os 4 prazos que a Luana protocolou seguiam "Prazo aberto" no teor fresco.
+--
+-- CONCLUSAO 4: cada DESTINATARIO tem a sua intimacao do mesmo ato. No processo
+-- 5031202-56.2026.8.24.0000 (print do eProc que ela mandou): evento 84, destinataria Cibele
+-- Becker -> Status FECHADO (105 - CIENCIA, COM RENUNCIA AO PRAZO); evento 83, mesmo ato, outro
+-- advogado -> Status ABERTO. Por isso o prazo aparece aberto no eProc mesmo resolvido do nosso
+-- lado. E tambem por isso "aberto no tribunal" nao e o mesmo que "aberto para nos".
+--
+-- Correcao de leitura minha: o numero entre parenteses ("105 - CIENCIA...") NAO e codigo de
+-- motivo, e o ID DO EVENTO -- varia (143, 89, 105, 138, 65, 98). O motivo e o texto depois do
+-- traco, e existem so dois na base inteira.
+--
+-- OUTRO SINAL TESTADO E DESCARTADO: `movimentacoes` esta PARADA em 15/08/2026 -- zero
+-- movimentacao nos ultimos 7 dias, 81 nos ultimos 30, de 44.544 no total. Nenhum dos 4
+-- processos protocolados tem movimentacao depois da intimacao. A sincronia do DataJud nao esta
+-- rodando; enquanto nao rodar, "apareceu movimentacao de peticao" nao serve de sinal.
+
+-- ---------------------------------------------------------------------------
+-- 10. O DESENHO QUE FICOU, E O DEFEITO QUE EU INTRODUZI CONSERTANDO
+-- ---------------------------------------------------------------------------
+-- `prazos-fechar` passou a responder em TRES grupos, cada um dizendo so o que se sabe:
+--   FATAIS_SEM_CUMPRIR        tribunal DECLAROU aberto, e ja venceu ou vence hoje   -> 3
+--   SEM_RESPOSTA_DO_TRIBUNAL  tribunal nao falou deste (com o tribunal de cada um)  -> 6
+--   FORA_DA_ROTINA            a rotina nem consegue olhar                           -> 3
+-- A SOMA TEM DE FECHAR com o total de prazos abertos do dia (12 em 10/09). Isso e o teste de
+-- que ninguem sumiu: 3 + 6 + 3 = 12.
+--
+-- E foi exatamente esse teste que pegou um defeito MEU. Na primeira versao o filtro do
+-- FORA_DA_ROTINA era
+--     .filter((z) => !z.legalmail_id || !z.processos)
+-- com um `select` que nem trazia `lm_idprocessos`. A soma dava 11, nao 12. O que faltava era o
+-- prazo 5574 (DANIEL GONCALVES COSTA, TJSC, vencendo naquele dia): o processo 6698 existe e o
+-- prazo tem intimacao, mas o processo esta sem `lm_idprocessos`. A consulta principal usa
+-- `processos!inner` e o descarta; o filtro de resgate tambem. Ele sumia dos TRES grupos --
+-- exatamente a omissao silenciosa que o grupo existia para impedir. Corrigido com
+--     .filter((z) => !z.legalmail_id || !z.processos || !z.processos.lm_idprocessos)
+-- e o `motivo` passou a distinguir os tres casos.
+--
+-- REGRA QUE FICA: relatorio de cobertura tem de FECHAR A SOMA com o universo. Contar so os
+-- grupos "interessantes" esconde justamente o item que ninguem esta olhando.
+
+-- ---------------------------------------------------------------------------
+-- 11. O "cumprido" FALSO -- migration prazo_nao_fecha_por_data (10/09/2026)
+-- ---------------------------------------------------------------------------
+-- `lm_upsert_prazo_por_texto` fazia `cumpr := (dfinal < current_date)` e gravava
+-- `cumprido = cumpr`. Prazo VENCIDO virava CUMPRIDO, sem ninguem ter protocolado nada.
+-- Dos 571 prazos fechados: 554 assim, sem prova; 6 com "Prazo fechado" no texto; 1 com
+-- `cumprido_por` estampado; 10 outros.
+-- Agora data vencida produz `status='excedido'` com `cumprido=false`. `cumprido=true` tem UMA
+-- origem: prova (Legal Mail declarando, notices-to-comply declarando, ou clique humano), e toda
+-- escrita estampa `cumprido_em`/`cumprido_por`.
+-- Os 554 antigos NAO foram tocados -- decisao dela: "so daqui pra frente". O passado fica
+-- impreciso e nao ha como reconstruir; so o tribunal saberia.
