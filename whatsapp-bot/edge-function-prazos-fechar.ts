@@ -56,6 +56,8 @@ Deno.serve(async (req) => {
   if (url.searchParams.get("k") !== K) return json({ erro: "nao autorizado" }, 401);
   if (!API) return json({ erro: "sem LEGALMAIL_API_KEY" }, 500);
   const commit = url.searchParams.get("commit") !== "0";
+  const gabarito = (url.searchParams.get("gabarito") || "").split(",")
+    .map((x) => parseInt(x.trim(), 10)).filter(Number.isFinite);
   const t0 = Date.now();
   const hoje = hojeBR();
 
@@ -67,8 +69,21 @@ Deno.serve(async (req) => {
       saldo = typeof jb?.saldo_disponivel === "number" ? jb.saldo_disponivel : null;
     } catch { /* informativo */ }
 
-    const prazos = await sb(`prazos?cumprido=eq.false&legalmail_id=not.is.null&select=id,data,status,legalmail_id,processos!inner(id,numero,lm_idprocessos)&processos.lm_idprocessos=not.is.null&limit=3000`);
+    const SEL = "id,data,status,cumprido,legalmail_id,processos!inner(id,numero,lm_idprocessos)";
+    const prazos = await sb(`prazos?cumprido=eq.false&legalmail_id=not.is.null&select=${SEL}&processos.lm_idprocessos=not.is.null&limit=3000`);
     const lista: any[] = Array.isArray(prazos) ? prazos : [];
+
+    // MODO GABARITO (`?gabarito=5441,5688,...`): inclui na varredura prazos que JÁ ESTÃO
+    // fechados, que a consulta acima exclui por `cumprido=eq.false`. Serve para provar, com
+    // caso de resposta conhecida, o que significa um prazo NÃO APARECER na lista do tribunal.
+    // Ele nunca fecha nada: `gab` entra em `soLeitura` e é pulado na hora de gravar.
+    const soLeitura = new Set<number>();
+    if (gabarito.length) {
+      const g = await sb(`prazos?id=in.(${gabarito.join(",")})&select=${SEL}&processos.lm_idprocessos=not.is.null`);
+      for (const z of (Array.isArray(g) ? g : [])) {
+        if (!lista.some((x) => x.id === z.id)) { lista.push(z); soLeitura.add(z.id); }
+      }
+    }
 
     const porProc = new Map<string, any[]>();
     for (const z of lista) {
@@ -105,9 +120,11 @@ Deno.serve(async (req) => {
       const abre = new Set<string>((Array.isArray(j?.intimacoes_prazo_aberto)  ? j.intimacoes_prazo_aberto  : []).map((x: any) => String(x?.idintimacoes)));
       for (const z of doProc) {
         const k = String(z.legalmail_id);
-        const item = { prazo: z.id, data: z.data, processo: z.processos?.numero, legalmail_id: z.legalmail_id };
-        if (fech.has(k)) aFechar.push(item);
-        else if (abre.has(k)) seguem.push(item);
+        const balde = fech.has(k) ? "fechado" : (abre.has(k) ? "aberto" : "nao_listado");
+        const item = { prazo: z.id, data: z.data, processo: z.processos?.numero, legalmail_id: z.legalmail_id,
+                       ja_fechado_no_sistema: z.cumprido === true, gabarito: soLeitura.has(z.id), balde };
+        if (balde === "fechado") aFechar.push(item);
+        else if (balde === "aberto") seguem.push(item);
         else naoListados.push(item);
       }
     }
@@ -117,8 +134,10 @@ Deno.serve(async (req) => {
     // Fechar o que o tribunal diz fechado é seguro mesmo em rodada incompleta: é informação
     // positiva e verificada. O que NÃO se pode em rodada incompleta é afirmar pendência.
     let fechados = 0;
-    if (commit && aFechar.length) {
-      const ids = aFechar.map((x) => x.prazo);
+    // O gabarito é só leitura: entrou na varredura para revelar o balde, não para ser fechado.
+    const paraFechar = aFechar.filter((x) => !x.gabarito);
+    if (commit && paraFechar.length) {
+      const ids = paraFechar.map((x) => x.prazo);
       const r = await sb(`prazos?id=in.(${ids.join(",")})&cumprido=eq.false`, {
         method: "PATCH", headers: { Prefer: "return=representation" },
         body: JSON.stringify({ cumprido: true, status: "cumprido",
@@ -144,6 +163,22 @@ Deno.serve(async (req) => {
       a_fechar_detectados: aFechar.length,
       fechou: aFechar.slice(0, 40),
     };
+
+    // Relatório do gabarito: a prova de o que significa "não aparecer na lista do tribunal".
+    // Fechado com prova => esperado "nao_listado". Aberto de verdade => esperado "aberto".
+    if (gabarito.length) {
+      const todos = aFechar.concat(seguem, naoListados).filter((x) => x.gabarito);
+      const naoAchados = gabarito.filter((id) => !todos.some((x) => x.prazo === id));
+      resumo.GABARITO = todos.map((x) => ({
+        prazo: x.prazo, data: x.data, balde: x.balde,
+        estado_no_sistema: x.ja_fechado_no_sistema ? "FECHADO com prova" : "aberto",
+        esperado: x.ja_fechado_no_sistema ? "nao_listado" : "aberto",
+        bate: x.balde === (x.ja_fechado_no_sistema ? "nao_listado" : "aberto"),
+      }));
+      resumo.GABARITO_ACERTOS = (resumo.GABARITO as any[]).filter((x) => x.bate).length
+        + "/" + (resumo.GABARITO as any[]).length;
+      if (naoAchados.length) resumo.GABARITO_SEM_PROCESSO_NO_LEGALMAIL = naoAchados;
+    }
 
     if (completo) {
       resumo.seguem_abertos = seguem.length;

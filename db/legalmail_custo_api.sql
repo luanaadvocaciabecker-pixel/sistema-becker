@@ -227,3 +227,64 @@
 -- A janela de 3 dias que ficou no cron em 09/09 deixava 88% dos prazos sem chance de fechar.
 -- `data_captura_inicio` filtra pela data de CAPTURA, que nunca muda -- entao janela estreita
 -- nao e otimizacao, e cegueira permanente para intimacao antiga.
+
+-- ---------------------------------------------------------------------------
+-- 9. O TESTE DO GABARITO -- o que significa um prazo nao aparecer na lista
+-- Rodado em 10/09/2026, `?commit=0&gabarito=...`, custo R$ 0,00, nada gravado.
+-- ---------------------------------------------------------------------------
+-- Regra que a Luana deu: "nao aparece prazo em aberto no tribunal, sinal que fechamos".
+-- Testada com 7 prazos de resposta conhecida (fechados COM prova: o teor do Legal Mail diz
+-- "Prazo fechado"). Rodada completa: 94 processos, 94 HTTP 200, 0 erro.
+--
+--   prazo   vence        tribunal respondeu   esperado
+--   5425    2026-07-29   FECHADO              nao_listado   <- nao bateu
+--   5429    2026-07-29   FECHADO              nao_listado   <- nao bateu
+--   5435    2026-08-07   FECHADO              nao_listado   <- nao bateu
+--   5440    2026-07-21   nao_listado          nao_listado   ok
+--   5441    2026-07-21   nao_listado          nao_listado   ok
+--   5474    2026-08-24   nao_listado          nao_listado   ok
+--   5688    2026-09-24   nao_listado          nao_listado   ok
+--
+-- ACHADO 1 -- `intimacoes_prazo_fechado` FUNCIONA. Minha expectativa estava errada, nao o
+-- endpoint: 3 dos 7 vieram declarados FECHADO. O motivo de `a_fechar_detectados: 0` em todas
+-- as rodadas anteriores e banal -- a consulta busca `cumprido=eq.false`, e os prazos abertos
+-- estao genuinamente abertos. Nunca houve nada fechado para o endpoint achar.
+--
+-- ACHADO 2 -- "nao listado" NAO significa fechado. Dos 9 prazos que vencem hoje, 6 vieram
+-- "nao listado", e 5 deles sao do TRT:
+--   TJSC  5572, 5575, 5638  -> "aberto" (o tribunal confirma pendente)
+--   TJSC  5639              -> "nao listado"  (e o duplicado da AGRO LAVOURA, mesmo processo
+--                                              do 5638, que veio "aberto")
+--   TRT   5714,5730,5736,5763,5773 -> "nao listado"
+-- O eProc do TJSC nao conhece processo trabalhista. Ali "nao listado" quer dizer FORA DO
+-- ESCOPO, nao "fechamos". Aplicar a regra da ausencia fecharia os 5 prazos do TRT de hoje
+-- INDEVIDAMENTE. Por isso a regra, como estava enunciada, nao pode ser automatizada.
+--
+-- CONSEQUENCIA DE DESENHO: confiar no FECHADO declarado (funciona, e a rotina ja le) e
+-- CLASSIFICAR a ausencia -- "fora do alcance" quando o processo nao e coberto pelo endpoint --
+-- em vez de tratar ausencia como pendencia (o que faz hoje) ou como fechamento.
+
+-- ---------------------------------------------------------------------------
+-- 10. QUANDO o tribunal fecha o expediente -- nao e no protocolo
+-- ---------------------------------------------------------------------------
+-- Prazo 5688, CNJ 5031202-56.2026.8.24.0000, o unico fechado por rotina com prova. O teor:
+--   "Status:FECHADO (105 - CIENCIA, COM RENUNCIA AO PRAZO)"
+-- O numero entre parenteses e o ID DO EVENTO, nao codigo de motivo -- eu li errado primeiro.
+-- Motivos existentes em TODA a base (9 intimacoes de ~11.000):
+--   CIENCIA, COM RENUNCIA AO PRAZO ......... 8
+--   Juntada de certidao - encerrado prazo ... 1
+-- NENHUM diz "peticao protocolada".
+--
+-- O print do eProc que a Luana mandou fecha o raciocinio: o MESMO ato gera uma intimacao POR
+-- DESTINATARIO. Evento 84 -> Cibele Becker Friedrichsen -> Status FECHADO (renuncia).
+-- Evento 83 -> mesmo ato, outro advogado (rafael.azanha) -> Status ABERTO. A nossa fechou, a
+-- dele nao, e o prazo segue visivel no eProc.
+--
+-- CONCLUSAO para a pergunta dela ("vai conseguir identificar quando nos peticionamos?"):
+-- o sistema detecta o fechamento QUANDO O TRIBUNAL FECHA O EXPEDIENTE -- na ciencia/renuncia
+-- ou na certidao do cartorio -- e NAO no instante do protocolo. Foi por isso que os 4 prazos
+-- de 09/09 que ela protocolou continuavam com teor "Prazo aberto" na repuxada de hoje.
+--
+-- Terceiro sinal testado e descartado: `movimentacoes` esta CONGELADA em 15/08/2026 (0 linhas
+-- nos ultimos 7 dias, 81 nos ultimos 30, de 44.544). Nenhum dos 4 processos tem movimentacao
+-- depois da intimacao. A sincronia do DataJud nao esta rodando -- problema separado, anotado.
