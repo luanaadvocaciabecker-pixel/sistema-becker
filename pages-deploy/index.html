@@ -3669,9 +3669,50 @@ let _cliSearchSeq=0;
 function clienteSearchHtml(selectedId,nomeInicial){
   const dl='cli-dl-'+(_cliSearchSeq++);
   const nome=nomeInicial||(clientesCache.find(c=>c.id==selectedId)||{}).nome||'';
-  return`<input type="text" list="${dl}" value="${escHtml(nome)}" placeholder="Digite para buscar o cliente..." autocomplete="off" oninput="_cliSearchPick(this)" data-clihidden="${dl}-id">
+  return`<input type="text" list="${dl}" id="${dl}-inp" value="${escHtml(nome)}" placeholder="Digite para buscar o cliente..." autocomplete="off" oninput="_cliSearchPick(this)" data-clihidden="${dl}-id">
     <datalist id="${dl}">${clientesCache.map(c=>`<option value="${escHtml(c.nome)}">`).join('')}</datalist>
-    <input type="hidden" name="cliente_id" id="${dl}-id" value="${selectedId||''}">`;
+    <input type="hidden" name="cliente_id" id="${dl}-id" value="${selectedId||''}">
+    <div style="margin-top:5px">
+      <a href="#" onclick="_cliNovoToggle('${dl}');return false" style="font-size:12px;color:var(--azul3,#60a5fa);text-decoration:none">+ Cadastrar cliente novo</a>
+      <div id="${dl}-novo" style="display:none;margin-top:8px;padding:10px;border:1px solid var(--cinza3);border-radius:8px;background:var(--cinza1)">
+        <div style="font-size:11px;color:#64748b;margin-bottom:6px">Cadastro rápido — dá pra completar o resto depois na ficha do cliente</div>
+        <input id="${dl}-n-nome" placeholder="Nome completo *" style="width:100%;padding:7px;margin-bottom:6px;border-radius:6px;border:1px solid var(--cinza3);background:var(--card);color:var(--texto)">
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <input id="${dl}-n-cpf" placeholder="CPF/CNPJ" style="flex:1;padding:7px;border-radius:6px;border:1px solid var(--cinza3);background:var(--card);color:var(--texto)">
+          <input id="${dl}-n-tel" placeholder="Telefone/WhatsApp" style="flex:1;padding:7px;border-radius:6px;border:1px solid var(--cinza3);background:var(--card);color:var(--texto)">
+        </div>
+        <button type="button" class="btn btn-sm btn-primary" onclick="_cliNovoSalvar('${dl}')">Cadastrar e usar</button>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="_cliNovoToggle('${dl}')">Cancelar</button>
+      </div>
+    </div>`;
+}
+function _cliNovoToggle(dl){
+  const box=document.getElementById(dl+'-novo');if(!box)return;
+  const abrindo=box.style.display==='none';
+  box.style.display=abrindo?'block':'none';
+  if(abrindo){
+    const inp=document.getElementById(dl+'-inp'),nomeField=document.getElementById(dl+'-n-nome');
+    const nomeAtual=(inp&&inp.value||'').trim();
+    if(nomeField&&!nomeField.value)nomeField.value=nomeAtual;
+  }
+}
+async function _cliNovoSalvar(dl){
+  const nome=(document.getElementById(dl+'-n-nome').value||'').trim();
+  if(!nome){toast('Informe o nome do cliente.','erro');return;}
+  const cpf=(document.getElementById(dl+'-n-cpf').value||'').trim();
+  const tel=(document.getElementById(dl+'-n-tel').value||'').trim();
+  const reg={nome,status:'Ativo'};
+  if(cpf)reg.cpf_cnpj=cpf;
+  if(tel){reg.telefone=tel;reg.whatsapp=tel;}
+  const{data,error}=await supa.from('clientes').insert([reg]).select().single();
+  if(error){toast('Erro ao cadastrar: '+error.message,'erro');return;}
+  clientesCache.push({id:data.id,nome:data.nome});
+  const inp=document.getElementById(dl+'-inp'),hidden=document.getElementById(dl+'-id'),dlist=document.getElementById(dl),box=document.getElementById(dl+'-novo');
+  if(inp)inp.value=data.nome;
+  if(hidden)hidden.value=data.id;
+  if(dlist)dlist.insertAdjacentHTML('beforeend',`<option value="${escHtml(data.nome)}">`);
+  if(box)box.style.display='none';
+  toast('✅ Cliente cadastrado e vinculado.','ok');
 }
 function _cliSearchPick(inp){
   const hidden=document.getElementById(inp.dataset.clihidden);if(!hidden)return;
