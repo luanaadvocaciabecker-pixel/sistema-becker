@@ -1761,6 +1761,23 @@ async function chamarFuncao(nome,corpo){
   }catch(e){return {erro:String(e)};}
 }
 let usuarioAtual=null,modalAcao=null,clientesCache=[];
+// O Supabase (PostgREST) tem um teto de 1000 linhas por resposta que vale mesmo
+// pedindo .limit(5000) no código — por isso a busca de cliente nos formulários (Novo
+// Processo, Extrajudicial, Honorário...) nunca achava ninguém depois de "M" (1000ª
+// linha em ordem alfabética, de 1515 clientes). Busca em páginas de 1000 até acabar.
+async function carregarTodosClientes(){
+  if(clientesCache.length)return clientesCache;
+  let pagina=0,todos=[];
+  while(true){
+    const{data,error}=await supa.from('clientes').select('id,nome').order('nome').range(pagina*1000,pagina*1000+999);
+    if(error||!data)break;
+    todos=todos.concat(data);
+    if(data.length<1000)break;
+    pagina++;
+  }
+  clientesCache=todos;
+  return clientesCache;
+}
 let processosFiltro={busca:'',situacao:'',cliente:'',resp:'',meus:false,off:0};
 // Paginação dos clientes. A lista mostrava "50 de 1515" e PARAVA ALI: `buscarClientes` usava
 // `.limit(50)` sem offset e o rodapé era só texto, sem botão. Os outros 1.465 clientes só eram
@@ -3166,7 +3183,7 @@ function formCliente(d={}){return`<form id="form-cliente">
 // ---- JUDICIAIS ----
 async function pJudiciais(){
   const c=document.getElementById('conteudo');
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
+  await carregarTodosClientes();
   c.innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div class="toolbar">
@@ -3268,7 +3285,7 @@ async function novoProcesso(){
   // menu abre esse modal via setTimeout logo após navegar pra tela — se o carregamento
   // da lista de clientes ainda não tiver terminado nesse momento, o campo de busca
   // abria vazio (corrida de tempo, achado com o "+ Novo Extrajudicial").
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
+  await carregarTodosClientes();
   abrirModal('Novo Processo',formProcesso({}),async()=>{
     const d=coletarForm('form-processo');
     if(!d.numero){toast('Número CNJ é obrigatório.','erro');return false;}
@@ -3284,7 +3301,7 @@ async function novoProcesso(){
 }
 async function editarProcesso(id){
   const{data}=await supa.from('processos').select('*').eq('id',id).single();if(!data)return;
-  if(!clientesCache.length){const{data:cl}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=cl||[];}
+  await carregarTodosClientes();
   abrirModal('Editar Processo',formProcesso(data),async()=>{
     const d=coletarForm('form-processo');
     const{error}=await supa.from('processos').update(d).eq('id',id);
@@ -4284,7 +4301,7 @@ let admFiltro={busca:'',situacao:'',area:''};
 async function pAdministrativos(pagina){
   const extra = pagina === 'extrajudiciais';
   const c=document.getElementById('conteudo');
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
+  await carregarTodosClientes();
   c.innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div class="toolbar">
@@ -4423,7 +4440,7 @@ async function novoProcessoAdm(orgaoPadrao){
   // logo após navegar pra tela de Extrajudiciais — se o carregamento da lista de
   // clientes daquela tela ainda não tiver terminado, o campo de busca abria vazio.
   // Carregando aqui também, o modal nunca mais depende dessa corrida de tempo.
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
+  await carregarTodosClientes();
   const titulo = orgaoPadrao==='EXTRAJUDICIAL' ? 'Novo Caso Extrajudicial' : 'Novo Processo Administrativo';
   abrirModal(titulo,formProcessoAdm(orgaoPadrao?{orgao:orgaoPadrao}:{}),async()=>{
     const d=coletarForm('form-processo-adm');
@@ -4439,7 +4456,7 @@ async function novoProcessoAdm(orgaoPadrao){
 }
 async function editarProcessoAdm(id){
   const{data}=await supa.from('processos_adm').select('*').eq('id',id).single();if(!data)return;
-  if(!clientesCache.length){const{data:cl}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=cl||[];}
+  await carregarTodosClientes();
   abrirModal('Editar Processo Administrativo',formProcessoAdm(data),async()=>{
     const d=coletarForm('form-processo-adm');
     if(!d.data_protocolo)delete d.data_protocolo;
@@ -4456,7 +4473,7 @@ async function excluirProcessoAdm(id,num){
 async function converterParaJudicial(admId){
   const{data:adm}=await supa.from('processos_adm').select('*,clientes(nome)').eq('id',admId).single();
   if(!adm)return;
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
+  await carregarTodosClientes();
   const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   const advsOpts=(sel)=>`<option value="">Selecione...</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
   const formHtml=`<form id="form-converter">
@@ -5309,14 +5326,20 @@ async function pPublicacoes(){
   carregarPublicacoes();
 }
 async function carregarPublicacoes(){
-  const{data:all}=await supa.from('publicacoes').select('id,lida,processo_id').limit(5000);
-  const naoLidas=(all||[]).filter(p=>!p.lida).length;
-  const semVinc=(all||[]).filter(p=>!p.processo_id).length;
+  // Contagem via {count:'exact',head:true} (conta no servidor, sem trazer linha
+  // nenhuma) em vez de baixar tudo e contar no navegador — além de mais rápido,
+  // não esbarra no teto de 1000 linhas por resposta do Supabase (já são 11 mil+
+  // publicações; um .select() com .limit() maior que 1000 nunca contava direito).
+  const[{count:naoLidas},{count:semVinc},{count:total}]=await Promise.all([
+    supa.from('publicacoes').select('id',{count:'exact',head:true}).eq('lida',false),
+    supa.from('publicacoes').select('id',{count:'exact',head:true}).is('processo_id',null),
+    supa.from('publicacoes').select('id',{count:'exact',head:true})
+  ]);
   const st=document.getElementById('pub-stats');
   if(st)st.innerHTML=[
-    ['Não lidas',naoLidas,'#f87171'],
-    ['Sem processo',semVinc,'#fbbf24'],
-    ['Total',(all||[]).length,'#60a5fa']
+    ['Não lidas',naoLidas||0,'#f87171'],
+    ['Sem processo',semVinc||0,'#fbbf24'],
+    ['Total',total||0,'#60a5fa']
   ].map(([l,n,cor])=>`<div class="stat-card"><div class="stat-val" style="color:${cor}">${n}</div><div class="stat-label">${l}</div></div>`).join('');
   let q=supa.from('publicacoes').select('*,processos(numero,clientes(nome))').order('data_disponibilizacao',{ascending:false}).limit(300);
   if(pubFiltro==='naolidas')q=q.eq('lida',false);
@@ -5411,7 +5434,7 @@ async function carregarHon(status=''){
 }
 const filtrarHon=v=>carregarHon(v);
 async function novoHon(){
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
+  await carregarTodosClientes();
   abrirModal('Novo Honorário',`<form id="form-hon">
     <div class="form-field"><label>Cliente *</label>${clienteSearchHtml()}</div>
     <div class="form-field"><label>Descrição</label><input name="descricao"></div>
@@ -5505,7 +5528,7 @@ async function carregarDocs(busca=''){
   </tr>`).join('');
 }
 async function novoDoc(){
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
+  await carregarTodosClientes();
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
   abrirModal('Vincular Documento',`<form id="form-doc">
     <div class="form-field"><label>Nome do Documento *</label><input name="nome"></div>
@@ -7492,7 +7515,7 @@ async function carregarAlvaras(filtro){
   }).join('');
 }
 async function novoAlvara(){
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
+  await carregarTodosClientes();
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
   abrirModal('Novo Alvará',`<form id="form-alvara">
     <div class="form-row">
@@ -7534,7 +7557,7 @@ async function avancarAlvara(id,proxEtapa){
 async function editarAlvara(id){
   const{data:a}=await supa.from('alvaras').select('*').eq('id',id).single();
   if(!a){toast('Não encontrado.','erro');return;}
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
+  await carregarTodosClientes();
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
   abrirModal('Editar Alvará',`<form id="form-alvara">
     <div class="form-row">
