@@ -1,32 +1,43 @@
-// Edge Function `prazos-fechar` — verifica no tribunal quais prazos já foram fechados e fecha.
-// Cópia versionada; o deploy é feito no Supabase.
+// Edge Function `prazos-fechar` — o fecho do dia: o que o tribunal confirma aberto, o que ele
+// nao respondeu, e o que a rotina nem consegue olhar. Copia versionada; deploy no Supabase.
 //
-// Roda 1x por dia, às 17:30 BRT (cron `prazos_fechar_1730`, 20:30 UTC), para responder a
-// pergunta da Luana: "os prazos de hoje foram fechados?".
+// Roda 1x por dia, as 17:30 BRT (cron `prazos_fechar_1730`, 20:30 UTC).
+// FONTE: GET /api/v1/pleading/notices-to-comply — GRATIS na tabela oficial de precos.
+// *** NAO ACRESCENTE CHAMADA PAGA AQUI. So toca notices-to-comply e balance. ***
 //
-// FONTE: GET /api/v1/pleading/notices-to-comply — **GRÁTIS** na tabela oficial de preços.
-// Devolve por processo `intimacoes_prazo_fechado` e `intimacoes_prazo_aberto`, e o
-// `idintimacoes` casa EXATAMENTE com prazos.legalmail_id (conferido 6 a 6 em 09/09/2026).
+// LIMITE DE TAXA — licao paga com bloqueio em 09/09/2026: 120 req/min em janela deslizante, e
+// 3 respostas 429 em 10 min caracterizam "polling" e bloqueiam o workspace inteiro. Eu rodei 87
+// chamadas tres vezes em cinco minutos e derrubei o acesso. Por isso PASSO de 700ms e ABORTO no
+// primeiro 429, respeitando Retry-After.
 //
-// POR QUE NÃO USA O /notices (pago): a doc do Legal Mail diz "consultar em laço sai caro — a
-// cada 5 minutos há nova cobrança". A rotina antiga fazia isso de hora em hora, sem janela,
-// ~67 páginas de R$ 0,05 = ~R$ 90/dia, e devolvia cumpridos:0 em 112 execuções. O zero também
-// está explicado na spec: `prazo_status=cumprido` = "vinculada a uma petição protocolada", e o
-// escritório protocola no eProc, não pelo Legal Mail. Ver db/legalmail_custo_api.sql.
+// ---------------------------------------------------------------------------
+// O QUE ESTA ROTINA AFIRMA, E O QUE SE RECUSA A AFIRMAR (testado em 10/09/2026)
+// ---------------------------------------------------------------------------
+// Gabarito de 7 prazos fechados COM prova (`?gabarito=`, custo R$ 0,00):
+//   * `intimacoes_prazo_fechado` FUNCIONA — 3 dos 7 vieram declarados FECHADO. O
+//     `a_fechar_detectados: 0` das rodadas anteriores tinha causa banal: a consulta busca
+//     prazos abertos, e os abertos estavam genuinamente abertos.
+//   * AUSENCIA NAO E FECHAMENTO. Dos 9 prazos do dia, 6 nao foram mencionados e 5 sao do TRT,
+//     que o eProc do TJSC nao conhece. Fechar por ausencia fecharia esses cinco indevidamente.
+//   * E ausencia tambem nao e pendencia: a versao anterior somava os nao-mencionados em
+//     "ainda aberto" e reportava como atraso coisa que ninguem sabia se estava aberta.
 //
-// *** NÃO ACRESCENTE CHAMADA PAGA AQUI. Só toca notices-to-comply e balance, os dois "Grátis". ***
+// Por isso a resposta vem em TRES grupos, e cada um diz so o que se sabe:
+//   FATAIS_SEM_CUMPRIR        o tribunal DECLAROU aberto, e ja venceu ou vence hoje
+//   SEM_RESPOSTA_DO_TRIBUNAL  o tribunal nao falou deste (com o tribunal de cada um)
+//   FORA_DA_ROTINA            a rotina nem consegue olhar (ver o comentario do `fdr`)
+// Conferido em 10/09: 3 + 6 + 3 = 12, que e o total de prazos abertos do dia. A soma fechar
+// e o teste de que ninguem sumiu em silencio.
 //
-// LIMITE DE TAXA — lição paga com bloqueio em 09/09/2026:
-//   a spec diz 120 req/min em janela deslizante de 60s, e **3 respostas 429 em 10 minutos
-//   caracterizam "prática de polling"**, disparando timeout progressivo no workspace inteiro.
-//   Eu rodei 87 chamadas três vezes em cinco minutos e derrubei o acesso: a terceira volta deu
-//   0 de 87. Por isso: PASSO de 700ms entre chamadas (~85/min), e ao primeiro 429 a rotina
-//   ABORTA respeitando Retry-After — insistir é o que gera as 3 violações e o bloqueio.
+// QUANDO o tribunal fecha: na ciencia/renuncia ou na certidao do cartorio, NAO no instante do
+// protocolo. O unico motivo de fechamento que aparece na base e "CIENCIA, COM RENUNCIA AO
+// PRAZO" (8 de ~11.000 intimacoes); nenhum diz "peticao protocolada". E cada destinatario tem a
+// sua intimacao: no processo 5031202-56 o evento 84 (Cibele) esta FECHADO e o 83 (outro
+// advogado, mesmo ato) esta ABERTO. Ver db/legalmail_custo_api.sql.
 //
-// *** E O MAIS IMPORTANTE: rodada INCOMPLETA não reporta número. ***
-//   Na rodada bloqueada a função disse "VENCENDO_HOJE_AINDA_ABERTOS: 0" estando cega. Dizer
-//   "nenhum prazo pendente" sem ter conseguido olhar manda a equipe para casa. Se um único
-//   processo falhar, `COMPLETO:false` e as contagens vêm null, com aviso.
+// *** E O MAIS IMPORTANTE: rodada INCOMPLETA nao reporta numero. ***
+//   Na rodada bloqueada a funcao disse "0 em aberto" estando cega. Dizer "nenhum prazo
+//   pendente" sem ter conseguido olhar manda a equipe para casa.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const SB   = Deno.env.get("SUPABASE_URL")!;
@@ -56,6 +67,8 @@ Deno.serve(async (req) => {
   if (url.searchParams.get("k") !== K) return json({ erro: "nao autorizado" }, 401);
   if (!API) return json({ erro: "sem LEGALMAIL_API_KEY" }, 500);
   const commit = url.searchParams.get("commit") !== "0";
+  const gabarito = (url.searchParams.get("gabarito") || "").split(",")
+    .map((x) => parseInt(x.trim(), 10)).filter(Number.isFinite);
   const t0 = Date.now();
   const hoje = hojeBR();
 
@@ -67,8 +80,39 @@ Deno.serve(async (req) => {
       saldo = typeof jb?.saldo_disponivel === "number" ? jb.saldo_disponivel : null;
     } catch { /* informativo */ }
 
-    const prazos = await sb(`prazos?cumprido=eq.false&legalmail_id=not.is.null&select=id,data,status,legalmail_id,processos!inner(id,numero,lm_idprocessos)&processos.lm_idprocessos=not.is.null&limit=3000`);
+    const SEL = "id,data,status,cumprido,legalmail_id,processos!inner(id,numero,tribunal,lm_idprocessos)";
+    const prazos = await sb(`prazos?cumprido=eq.false&legalmail_id=not.is.null&select=${SEL}&processos.lm_idprocessos=not.is.null&limit=3000`);
     const lista: any[] = Array.isArray(prazos) ? prazos : [];
+
+    // MODO GABARITO (`?gabarito=5441,5688,...`): inclui na varredura prazos que JÁ ESTÃO
+    // fechados, que a consulta acima exclui por `cumprido=eq.false`. Serve para provar, com
+    // caso de resposta conhecida, o que significa um prazo NÃO APARECER na lista do tribunal.
+    // Ele nunca fecha nada: `gab` entra em `soLeitura` e é pulado na hora de gravar.
+    const soLeitura = new Set<number>();
+    if (gabarito.length) {
+      const g = await sb(`prazos?id=in.(${gabarito.join(",")})&select=${SEL}&processos.lm_idprocessos=not.is.null`);
+      for (const z of (Array.isArray(g) ? g : [])) {
+        if (!lista.some((x) => x.id === z.id)) { lista.push(z); soLeitura.add(z.id); }
+      }
+    }
+
+    // Os que a rotina nao alcanca: sem `legalmail_id` OU processo sem `lm_idprocessos`.
+    // Consulta separada de proposito -- a principal usa `!inner`, que os elimina em silencio.
+    // O `lm_idprocessos` TEM de estar no select: sem ele o filtro abaixo nao ve o terceiro caso.
+    // Defeito meu, achado conferindo o resultado contra o banco em 10/09: o filtro era
+    // `!z.legalmail_id || !z.processos` e deixava passar o prazo 5574 (TJSC, vencendo hoje,
+    // processo 6698 cadastrado, com intimacao) porque o processo existe e o prazo tem
+    // legalmail_id -- falta so o vinculo no Legal Mail. Ele sumia dos TRES grupos, que e
+    // exatamente a omissao silenciosa que este grupo existe para impedir.
+    const fdr = await sb(`prazos?cumprido=eq.false&data=lte.${hoje}&select=id,data,legalmail_id,processos(numero,tribunal,lm_idprocessos,advogado_responsavel,clientes(nome))&limit=500`);
+    const foraDaRotina = (Array.isArray(fdr) ? fdr : [])
+      .filter((z: any) => !z.legalmail_id || !z.processos || !z.processos.lm_idprocessos)
+      .map((z: any) => ({ prazo: z.id, data: z.data, processo: z.processos?.numero || "(sem processo)",
+                          tribunal: z.processos?.tribunal || "?", cliente: z.processos?.clientes?.nome || "(sem cliente)",
+                          responsavel: z.processos?.advogado_responsavel || "(sem responsavel)",
+                          motivo: !z.processos ? "prazo sem processo vinculado"
+                                : !z.legalmail_id ? "prazo sem intimacao de origem"
+                                : "processo sem vinculo no Legal Mail (falta lm_idprocessos)" }));
 
     const porProc = new Map<string, any[]>();
     for (const z of lista) {
@@ -80,7 +124,7 @@ Deno.serve(async (req) => {
 
     let http_ok = 0, http_erro = 0, abortou_em: string | null = null, retry_after: number | null = null;
     const status_vistos: Record<string, number> = {};
-    const aFechar: any[] = [], seguem: any[] = [], naoListados: any[] = [];
+    const aFechar: any[] = [], seguem: any[] = [], semResposta: any[] = [];
     let primeiro = true;
 
     for (const [idp, doProc] of porProc) {
@@ -105,10 +149,21 @@ Deno.serve(async (req) => {
       const abre = new Set<string>((Array.isArray(j?.intimacoes_prazo_aberto)  ? j.intimacoes_prazo_aberto  : []).map((x: any) => String(x?.idintimacoes)));
       for (const z of doProc) {
         const k = String(z.legalmail_id);
-        const item = { prazo: z.id, data: z.data, processo: z.processos?.numero, legalmail_id: z.legalmail_id };
-        if (fech.has(k)) aFechar.push(item);
-        else if (abre.has(k)) seguem.push(item);
-        else naoListados.push(item);
+        // TRES baldes, e o terceiro NAO e "fechado" nem "pendente":
+        //   fechado -> o tribunal DECLAROU fechado. Prova. Pode fechar no sistema.
+        //   aberto  -> o tribunal DECLAROU aberto. Pendencia confirmada.
+        //   sem_resposta -> o tribunal nao falou deste. NAO da para concluir nada.
+        // Testado em 10/09: dos 9 prazos que vencem hoje, 6 caem em sem_resposta e 5 sao do
+        // TRT, que o eProc do TJSC nao conhece. Tratar ausencia como fechamento fecharia esses
+        // cinco indevidamente. E tratar como pendencia (o que a versao anterior fazia, somando
+        // `naoListados` em `aindaAberto`) enche a lista de coisa que ninguem sabe se esta aberta.
+        const balde = fech.has(k) ? "fechado" : (abre.has(k) ? "aberto" : "sem_resposta");
+        const item = { prazo: z.id, data: z.data, processo: z.processos?.numero,
+                       tribunal: z.processos?.tribunal || "?", legalmail_id: z.legalmail_id,
+                       ja_fechado_no_sistema: z.cumprido === true, gabarito: soLeitura.has(z.id), balde };
+        if (balde === "fechado") aFechar.push(item);
+        else if (balde === "aberto") seguem.push(item);
+        else semResposta.push(item);
       }
     }
 
@@ -117,8 +172,10 @@ Deno.serve(async (req) => {
     // Fechar o que o tribunal diz fechado é seguro mesmo em rodada incompleta: é informação
     // positiva e verificada. O que NÃO se pode em rodada incompleta é afirmar pendência.
     let fechados = 0;
-    if (commit && aFechar.length) {
-      const ids = aFechar.map((x) => x.prazo);
+    // O gabarito é só leitura: entrou na varredura para revelar o balde, não para ser fechado.
+    const paraFechar = aFechar.filter((x) => !x.gabarito);
+    if (commit && paraFechar.length) {
+      const ids = paraFechar.map((x) => x.prazo);
       const r = await sb(`prazos?id=in.(${ids.join(",")})&cumprido=eq.false`, {
         method: "PATCH", headers: { Prefer: "return=representation" },
         body: JSON.stringify({ cumprido: true, status: "cumprido",
@@ -127,9 +184,14 @@ Deno.serve(async (req) => {
       fechados = Array.isArray(r) ? r.length : 0;
     }
 
-    const aindaAberto = seguem.concat(naoListados);
-    const vencendoHoje = aindaAberto.filter((x) => String(x.data) === hoje);
-    const vencidos     = aindaAberto.filter((x) => String(x.data) < hoje);
+    // O FECHO DO DIA. Pedido dela: "olhamos hoje se foi todos e nao perdeu nenhum prazo... quero
+    // isso sem precisar abrir os tribunais". Entao o recorte e o DIA, e cada grupo diz o que se
+    // SABE, sem misturar confirmado com desconhecido.
+    const doDia = (arr: any[]) => arr.filter((x) => !x.gabarito && String(x.data) <= hoje);
+    const abertosConfirmados = doDia(seguem);
+    const desconhecidos      = doDia(semResposta);
+    const porTribunal: Record<string, number> = {};
+    for (const x of desconhecidos) porTribunal[x.tribunal] = (porTribunal[x.tribunal] || 0) + 1;
 
     const resumo: Record<string, unknown> = {
       rodou_em: new Date().toISOString(), hoje,
@@ -142,20 +204,48 @@ Deno.serve(async (req) => {
       prazos_vistos: lista.length,
       fechados_agora: fechados,
       a_fechar_detectados: aFechar.length,
-      fechou: aFechar.slice(0, 40),
+      fechou: aFechar.filter((x) => !x.gabarito).slice(0, 40),
     };
+
+    // Relatório do gabarito: a prova de o que significa "não aparecer na lista do tribunal".
+    // Fechado com prova => esperado "nao_listado". Aberto de verdade => esperado "aberto".
+    if (gabarito.length) {
+      const todos = aFechar.concat(seguem, semResposta).filter((x) => x.gabarito);
+      const naoAchados = gabarito.filter((id) => !todos.some((x) => x.prazo === id));
+      resumo.GABARITO = todos.map((x) => ({
+        prazo: x.prazo, data: x.data, balde: x.balde,
+        estado_no_sistema: x.ja_fechado_no_sistema ? "FECHADO com prova" : "aberto",
+        esperado: x.ja_fechado_no_sistema ? "nao_listado" : "aberto",
+        bate: x.balde === (x.ja_fechado_no_sistema ? "nao_listado" : "aberto"),
+      }));
+      resumo.GABARITO_ACERTOS = (resumo.GABARITO as any[]).filter((x) => x.bate).length
+        + "/" + (resumo.GABARITO as any[]).length;
+      if (naoAchados.length) resumo.GABARITO_SEM_PROCESSO_NO_LEGALMAIL = naoAchados;
+    }
 
     if (completo) {
       resumo.seguem_abertos = seguem.length;
-      resumo.nao_listados = naoListados.length;
-      resumo.VENCENDO_HOJE_AINDA_ABERTOS = vencendoHoje.length;
-      resumo.VENCIDOS_AINDA_ABERTOS = vencidos.length;
-      resumo.vencendo_hoje = vencendoHoje.slice(0, 40);
-      resumo.vencidos = vencidos.slice(0, 40);
+      resumo.sem_resposta_total = semResposta.length;
+      // 1) o que o tribunal CONFIRMA que segue aberto e ja venceu ou vence hoje. E o numero
+      //    que responde "ficou algum fatal sem cumprir?".
+      resumo.FATAIS_SEM_CUMPRIR = abertosConfirmados.length;
+      resumo.fatais_sem_cumprir = abertosConfirmados.slice(0, 40);
+      // 2) o que o tribunal NAO respondeu. Nao e pendencia nem fechamento: e "so o tribunal
+      //    sabe". Vem com o tribunal de cada um, porque a maioria e TRT, que este endpoint
+      //    nao cobre -- e sem isso a lista parece atraso quando nao e.
+      resumo.SEM_RESPOSTA_DO_TRIBUNAL = desconhecidos.length;
+      resumo.sem_resposta_por_tribunal = porTribunal;
+      resumo.sem_resposta = desconhecidos.slice(0, 40);
+      // 3) o que a rotina NEM CONSEGUE OLHAR: prazo sem `legalmail_id` ou processo sem
+      //    `lm_idprocessos`. A consulta principal os exclui, e por isso eles desapareciam do
+      //    relatorio -- o pior tipo de omissao, porque parece que nao existem. Medido em
+      //    10/09: 3 dos 12 prazos do dia. Para esses o tribunal tem de ser aberto a mao.
+      resumo.FORA_DA_ROTINA = foraDaRotina.length;
+      resumo.fora_da_rotina = foraDaRotina.slice(0, 40);
     } else {
       // rodada cega: NÃO inventa número de pendência
-      resumo.VENCENDO_HOJE_AINDA_ABERTOS = null;
-      resumo.VENCIDOS_AINDA_ABERTOS = null;
+      resumo.FATAIS_SEM_CUMPRIR = null;
+      resumo.SEM_RESPOSTA_DO_TRIBUNAL = null;
       resumo.aviso = `RODADA INCOMPLETA (${http_ok}/${porProc.size} processos consultados). `
         + `Nao e possivel afirmar quantos prazos seguem abertos. `
         + (abortou_em ? `Abortada por HTTP 429 (limite de taxa)${retry_after ? `, Retry-After ${retry_after}s` : ""}. ` : "")
@@ -170,9 +260,9 @@ Deno.serve(async (req) => {
           processos_consultados: porProc.size, http_ok, http_erro,
           prazos_vistos: lista.length, fechados,
           seguem_abertos: completo ? seguem.length : null,
-          nao_listados: completo ? naoListados.length : null,
-          vencendo_hoje_abertos: completo ? vencendoHoje.length : null,
-          vencidos_abertos: completo ? vencidos.length : null,
+          nao_listados: completo ? semResposta.length : null,
+          vencendo_hoje_abertos: completo ? abertosConfirmados.length : null,
+          vencidos_abertos: completo ? desconhecidos.length : null,
           saldo_api: saldo, detalhe: resumo,
           erro: completo ? null : String(resumo.aviso),
         }]),
