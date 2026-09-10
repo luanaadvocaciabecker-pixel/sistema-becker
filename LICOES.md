@@ -9,6 +9,48 @@ Quem for mexer em rotina automática ou em qualquer chamada de API paga: leia as
 
 ---
 
+## 10/09/2026 — desliguei o gasto e desliguei, sem ver, a entrada de prazo de 5 tribunais
+
+**O que aconteceu.** Para estancar os R$ 461 acima, desliguei os dois crons do Legal Mail em
+09/09 às 18:20. No dia seguinte a Luana perguntou *"os prazos de hoje e de amanhã de todos os
+tribunais já estão no sistema?"* e a medição mostrou que **nenhum prazo novo de tribunal
+não-trabalhista havia nascido desde o desligamento**: entraram 60 publicações no dia, 0 com
+"Data final", e os 3 prazos criados eram todos do caminho calculado do TRT.
+
+**Custo.** 18 prazos (vencimentos de 16/09 a 01/10, incluindo sentenças) ficaram fora do sistema
+por ~16 horas. Não perdeu prazo porque nenhum era de hoje ou amanhã — **foi sorte, não desenho.**
+
+**Causa.** Só existem dois caminhos que criam prazo, e eu conhecia os dois sem ter cruzado o
+escopo deles:
+
+| caminho | exige | cobre |
+|---|---|---|
+| `lm_upsert_prazo_por_texto` | texto com "Data final" | qualquer tribunal |
+| `trt_gera_prazos` | `tribunal ~ '^(TRT|TST)'` | só trabalhista |
+
+E o dado que fecha a conta: em 01/08–10/09, a "Intimação por sistema" do eProc (a única que traz
+"Data final") aparece **757 vezes, e 0 delas pelo DJEN**. O DJEN do CNJ não traz "Data final" em
+nenhuma das 1.199 linhas. Ou seja: o `notices` pago era o **único** alimentador de TJSC (490
+processos ativos!), TJSP, TJPR, TRF-4 e STJ, e eu tratei ele como "a rotina que só gastava".
+
+**REGRAS:**
+15. **Antes de desligar rotina, listar o que mais ela sustenta.** A pergunta não é "quanto isso
+   gasta?", é "**o que para de funcionar se isso parar?**". Desligar é mudança de
+   comportamento, não pausa neutra.
+16. **Rotina desligada por custo tem de virar item com prazo, não estado permanente.** Ficou
+   ~16 h desligada sem substituto porque não havia nada obrigando a voltar.
+17. **Resposta de rotina de custo precisa dizer o preço da própria rodada.** O
+   `legalmail-reconcile` agora devolve `paginas_cobradas` e `custo_estimado_brl` — o gasto fica
+   no log de `net._http_response`, sem depender de alguém abrir o painel do fornecedor.
+18. **Janela é o padrão, acervo inteiro é exceção explícita.** Inverti o padrão da função: sem
+   parâmetro ela filtra por captura; puxar tudo exige `?tudo=1`, e há teto de páginas por rodada
+   (R$ 1,50) para que laço com defeito não vire fatura.
+
+Detalhe: `whatsapp-bot/edge-function-legalmail-reconcile.ts` (cabeçalho) e
+`db/legalmail_custo_api.sql`
+
+---
+
 ## 09/09/2026 — R$ 461 em 5 dias relendo o que já estava no banco
 
 **O que aconteceu.** O cron `legalmail-reconcile-horario` puxava o acervo inteiro de intimações
@@ -28,9 +70,23 @@ já estava gravado.
 > *"Serve como alternativa ao webhook (...): uma rotina **diária** consegue puxar tudo o que foi
 > capturado no dia filtrando por `data_captura_inicio`."*
 
-O parâmetro de janela **já existia no nosso código** e não estava sendo usado. E o cron **não
-estava versionado em lugar nenhum do repositório** — foi criado direto no banco, sem commit,
-sem arquivo, sem revisão.
+**Correção de 10/09 a esta lição:** eu escrevi acima que *"o parâmetro de janela já existia e não
+estava sendo usado"*. Fui ler o código e **estava sendo usado** — só não no lugar que gastava. A
+lista de coleta era:
+```ts
+const plano = [
+  ["pendente", null, MAX_PAGES_PENDENTE],   // <- null CRAVADO, ignora a janela
+  ["cumprido", since, MAX_PAGES_FECHADOS],
+  ["excedido", since, MAX_PAGES_FECHADOS],
+];
+```
+O cron chamava `?janela=1&dias=3` e a janela valia para cumprido/excedido; o `pendente` — que é
+justamente o volumoso e o único que cria prazo — vinha inteiro. Diagnóstico vago ("não usava a
+janela") quase virou conserto no lugar errado: **o defeito estava numa palavra, `null`, na linha
+de um dos três status.**
+
+E o cron **não estava versionado em lugar nenhum do repositório** — foi criado direto no banco,
+sem commit, sem arquivo, sem revisão.
 
 **REGRAS:**
 1. **Cron que chama API paga tem de estar versionado no repositório, com o preço por chamada
