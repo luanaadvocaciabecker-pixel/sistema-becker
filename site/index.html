@@ -3263,7 +3263,12 @@ async function buscarProcessos(keepPage){
     <span style="margin:0 14px;font-weight:500">${ini}–${fim} de ${total} processos</span>
     <button class="btn btn-secondary btn-sm" ${fim>=total?'disabled':''} onclick="pagProc(1)">Próxima →</button>`;
 }
-function novoProcesso(){
+async function novoProcesso(){
+  // Carrega aqui também (não só na tela de Processos): o atalho "+ Novo Processo" do
+  // menu abre esse modal via setTimeout logo após navegar pra tela — se o carregamento
+  // da lista de clientes ainda não tiver terminado nesse momento, o campo de busca
+  // abria vazio (corrida de tempo, achado com o "+ Novo Extrajudicial").
+  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
   abrirModal('Novo Processo',formProcesso({}),async()=>{
     const d=coletarForm('form-processo');
     if(!d.numero){toast('Número CNJ é obrigatório.','erro');return false;}
@@ -3279,6 +3284,7 @@ function novoProcesso(){
 }
 async function editarProcesso(id){
   const{data}=await supa.from('processos').select('*').eq('id',id).single();if(!data)return;
+  if(!clientesCache.length){const{data:cl}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=cl||[];}
   abrirModal('Editar Processo',formProcesso(data),async()=>{
     const d=coletarForm('form-processo');
     const{error}=await supa.from('processos').update(d).eq('id',id);
@@ -4412,7 +4418,12 @@ function formProcessoAdm(d={}){
   <div class="form-field"><label>Observações</label><textarea name="observacoes">${d.observacoes||''}</textarea></div>
 </form>`;
 }
-function novoProcessoAdm(orgaoPadrao){
+async function novoProcessoAdm(orgaoPadrao){
+  // Idem: o atalho "+ Novo Extrajudicial" do menu abre este modal via setTimeout(250)
+  // logo após navegar pra tela de Extrajudiciais — se o carregamento da lista de
+  // clientes daquela tela ainda não tiver terminado, o campo de busca abria vazio.
+  // Carregando aqui também, o modal nunca mais depende dessa corrida de tempo.
+  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
   const titulo = orgaoPadrao==='EXTRAJUDICIAL' ? 'Novo Caso Extrajudicial' : 'Novo Processo Administrativo';
   abrirModal(titulo,formProcessoAdm(orgaoPadrao?{orgao:orgaoPadrao}:{}),async()=>{
     const d=coletarForm('form-processo-adm');
@@ -4428,6 +4439,7 @@ function novoProcessoAdm(orgaoPadrao){
 }
 async function editarProcessoAdm(id){
   const{data}=await supa.from('processos_adm').select('*').eq('id',id).single();if(!data)return;
+  if(!clientesCache.length){const{data:cl}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=cl||[];}
   abrirModal('Editar Processo Administrativo',formProcessoAdm(data),async()=>{
     const d=coletarForm('form-processo-adm');
     if(!d.data_protocolo)delete d.data_protocolo;
