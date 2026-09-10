@@ -372,3 +372,70 @@
 -- escrita estampa `cumprido_em`/`cumprido_por`.
 -- Os 554 antigos NAO foram tocados -- decisao dela: "so daqui pra frente". O passado fica
 -- impreciso e nao ha como reconstruir; so o tribunal saberia.
+
+-- ============================================================================
+-- 12) "Prazo fechado" do Legal Mail NÃO quer dizer "cumprimos" — 10/09/2026
+-- ============================================================================
+-- Origem: ela conferiu os tribunais um a um no fim do dia e não achou NENHUM prazo em aberto
+-- ("fechamos, cumprimos"), enquanto o fecho das 17:30 acusava 3 fatais sem cumprir. Fui apurar
+-- quem estava certo. Os dois estavam — e a culpa é da palavra.
+--
+-- O Legal Mail achata TRÊS estados do eProc em duas palavras. Medido nas 3.264 intimações que
+-- trazem o campo `Status:` no teor:
+--
+--   Status: do eProc                        Legal Mail diz    tem Data final?   n      %
+--   --------------------------------------  ----------------  ---------------  -----  -----
+--   AGUARD. ABERTURA                        "Prazo fechado"   não              1.896  58,1%
+--   ABERTO                                  "Prazo aberto"    sim              1.224  37,5%
+--   FECHADO (nn - CIÊNCIA, COM RENÚNCIA...) "Prazo fechado"   sim                  9   0,3%
+--   (formato antigo, sem campo Status)      —                 —                  135   4,1%
+--
+-- Recortando só os 1.970 "Prazo fechado":
+--   1.959 sem Status:FECHADO e sem Data final  -> "aguardando abertura", ou seja NÃO ABRIU
+--       9 com Status:FECHADO                   -> encerramento real
+--       2 com Data final, formato antigo       -> encerramento real
+--
+-- Exemplo do mesmo ato (processo 5007877-29, evento 46), duas fotografias em legalmail_id
+-- diferentes:
+--   4530345  "Prazo fechado"  Status:AGUARD. ABERTURA  (sem data inicial/final)
+--   4595035  "Prazo aberto"   Status:ABERTO            Data inicial 27/08  Data final 10/09
+-- Não são destinatários diferentes: é a MESMA intimação da Cibele, capturada antes e depois de
+-- o prazo abrir. Quem lê "fechado" na primeira conclui que foi cumprido; o prazo nem começou.
+--
+-- ----------------------------------------------------------------------------
+-- O QUE ISSO SIGNIFICA PARA O FECHO DO DIA (e é a parte que muda a promessa)
+-- ----------------------------------------------------------------------------
+-- O eProc só marca FECHADO em CIÊNCIA COM RENÚNCIA AO PRAZO ou em certidão do cartório:
+-- 9 vezes em 3.264 (0,3%). PROTOCOLAR PETIÇÃO NÃO FECHA O EXPEDIENTE.
+--
+-- Logo, o caminho grátis sabe dizer "o tribunal ainda mostra em aberto" e praticamente NUNCA
+-- vai conseguir dizer "foi cumprido". Os 3 prazos que a rotina acusou em 10/09 (5572 VINICIUS,
+-- 5575 THIAGO, 5638 AGRO LAVOURA — todos TJSC, todos Data final 10/09 23:59:59, todos
+-- Status:ABERTO) estavam cumpridos pelo escritório E abertos no eProc ao mesmo tempo. Reconsulta
+-- às 19:25 do mesmo dia: continuavam ABERTO. Não era atraso da rodada.
+--
+-- Por isso o grupo foi RENOMEADO de FATAIS_SEM_CUMPRIR para AINDA_ABERTO_NO_TRIBUNAL, com um
+-- campo `leia_se` na própria resposta. Era um rótulo que acusava a equipe de não ter feito o
+-- que ela tinha feito.
+--
+-- ----------------------------------------------------------------------------
+-- O QUE FOI CONSERTADO E O QUE NÃO HOUVE DE ESTRAGO
+-- ----------------------------------------------------------------------------
+-- `lm_reconcile` fechava prazo com a regra `pstatus ~ 'fechad|cumprid'`, que casa com os 1.959
+-- "aguardando abertura". Não houve estrago: intimação nesse estado não tem Data final, então
+-- `lm_upsert_prazo_por_texto` nunca criou prazo para ela, e havia 0 linhas para fechar (medido:
+-- 0 de 1.959 têm prazo no sistema). Foi SORTE, não desenho — bastava um prazo existente receber
+-- uma cópia nesse estado.
+-- Migration `lm_reconcile_fechado_de_verdade`: fechamento passa a exigir `Status:FECHADO` no
+-- teor, ou (formato antigo) "Prazo fechado" acompanhado de "Data final"; autoria estampada como
+-- `lm_reconcile/status-fechado`.
+-- Conferido: único prazo já fechado por essa via é o 5688, cujo teor traz
+-- `Status:FECHADO (105 - CIÊNCIA, COM RENÚNCIA AO PRAZO)` — fechamento legítimo.
+--
+-- ----------------------------------------------------------------------------
+-- O QUE AINDA NÃO RESOLVE (candidato, não promessa)
+-- ----------------------------------------------------------------------------
+-- Detectar o PROTOCOLO exige olhar as peças do processo, não o expediente. `lawsuit/case-files`
+-- é GRÁTIS na tabela de preços e devolve os documentos com data. Peça nossa com data posterior
+-- à intimação seria a evidência que falta. NÃO TESTADO ainda — a função lm-casefiles-probe
+-- existe e é o caminho para testar.

@@ -323,3 +323,53 @@ desse valor; seria carimbar uma coisa que vira outra.
 **REGRA:**
 27. **Não gravar em campo permanente um valor derivado de "a cópia canônica de agora".** Ou se
     grava a origem (o id da linha), ou se recalcula na leitura.
+
+---
+
+## 10/09/2026 — o rótulo acusou a equipe de não ter feito o que ela tinha feito
+
+Ela conferiu os tribunais um a um no fim do dia e não achou nenhum prazo em aberto — "fechamos,
+cumprimos". O fecho das 17:30 acusava **3 fatais sem cumprir**. Os dois estavam certos.
+
+O eProc **não fecha o expediente quando a petição é protocolada.** Ele fecha na *ciência com
+renúncia ao prazo* ou na certidão do cartório: **9 vezes em 3.264 intimações (0,3%)**. Os três
+acusados estavam `Status:ABERTO`, Data final hoje 23:59:59 — cumpridos pelo escritório e abertos
+no tribunal ao mesmo tempo. Reconsultei duas horas depois: continuavam abertos. Não era atraso.
+
+O defeito não estava na medição, estava na **palavra**: `FATAIS_SEM_CUMPRIR` afirma culpa a
+partir de um dado que só sabe dizer "o expediente segue aberto". Renomeado para
+`AINDA_ABERTO_NO_TRIBUNAL`, com um campo `leia_se` na própria resposta explicando o limite.
+
+**REGRA:**
+28. **O nome do campo é uma afirmação, e responde pelo que afirma.** Se o dado sabe dizer
+    "o tribunal não fechou", o campo não pode se chamar "sem cumprir". Rótulo que afirma mais
+    que a medição manda procurar problema onde o trabalho já foi feito — e queima a confiança
+    na lista inteira.
+
+---
+
+## 10/09/2026 — "Prazo fechado" queria dizer "ainda não abriu" em 99% dos casos
+
+Eu construí o fechamento automático em cima de `Status do prazo: Prazo fechado` do Legal Mail,
+tratando isso como prova de cumprimento. Medido nas 1.970 intimações que trazem essa frase:
+
+| | intimações | tem Data final |
+|---|---|---|
+| `Status:AGUARD. ABERTURA` — **não abriu** | **1.959** | 0 |
+| `Status:FECHADO (nn - CIÊNCIA, COM RENÚNCIA AO PRAZO)` | 9 | 9 |
+| formato antigo, sem campo `Status` | 2 | 2 |
+
+O Legal Mail achata três estados do eProc em duas palavras: "fechado" cobre tanto *encerrado*
+quanto *ainda não começou*. E a mesma intimação aparece nas duas formas, em `legalmail_id`
+diferentes, conforme é recapturada antes e depois de o prazo abrir.
+
+Não houve estrago — intimação em "aguardando abertura" não tem Data final, então nunca gerou
+prazo e não havia linha para fechar (0 de 1.959). **Foi sorte, não desenho.**
+
+**REGRA:**
+29. **Antes de tratar um valor de terceiro como prova, contar em quantos sentidos ele é usado
+    nos dados reais.** Um enum de duas palavras cobrindo três estados é o caso comum, não a
+    exceção — e o sentido que interessa costuma ser o raro (aqui, 0,3%).
+30. **"Não deu problema" não é o mesmo que "está certo".** A regra errada não fechou nada só
+    porque faltava Data final naquelas linhas; qualquer mudança de formato do fornecedor teria
+    transformado o acerto acidental em prazo perdido.

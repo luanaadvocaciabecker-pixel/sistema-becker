@@ -23,17 +23,30 @@
 //     "ainda aberto" e reportava como atraso coisa que ninguem sabia se estava aberta.
 //
 // Por isso a resposta vem em TRES grupos, e cada um diz so o que se sabe:
-//   FATAIS_SEM_CUMPRIR        o tribunal DECLAROU aberto, e ja venceu ou vence hoje
+//   AINDA_ABERTO_NO_TRIBUNAL  o tribunal DECLAROU aberto, e ja venceu ou vence hoje
 //   SEM_RESPOSTA_DO_TRIBUNAL  o tribunal nao falou deste (com o tribunal de cada um)
 //   FORA_DA_ROTINA            a rotina nem consegue olhar (ver o comentario do `fdr`)
 // Conferido em 10/09: 3 + 6 + 3 = 12, que e o total de prazos abertos do dia. A soma fechar
 // e o teste de que ninguem sumiu em silencio.
 //
-// QUANDO o tribunal fecha: na ciencia/renuncia ou na certidao do cartorio, NAO no instante do
-// protocolo. O unico motivo de fechamento que aparece na base e "CIENCIA, COM RENUNCIA AO
-// PRAZO" (8 de ~11.000 intimacoes); nenhum diz "peticao protocolada". E cada destinatario tem a
-// sua intimacao: no processo 5031202-56 o evento 84 (Cibele) esta FECHADO e o 83 (outro
-// advogado, mesmo ato) esta ABERTO. Ver db/legalmail_custo_api.sql.
+// *** "AINDA ABERTO" NAO E "SEM CUMPRIR". *** Este grupo se chamava FATAIS_SEM_CUMPRIR, e o
+// nome estava errado: em 10/09/2026 ele acusou de pendencia tres prazos que o escritorio TINHA
+// cumprido. O eProc nao fecha o expediente quando a peticao e protocolada -- ele fecha na
+// CIENCIA COM RENUNCIA AO PRAZO ou na certidao do cartorio. Medido nas 3.264 intimacoes que
+// trazem o campo `Status:` no teor:
+//   Status:AGUARD. ABERTURA .... 1.896 (58,1%)  ainda nao abriu
+//   Status:ABERTO .............. 1.224 (37,5%)  correndo
+//   Status:FECHADO .............     9 ( 0,3%)  encerrado de verdade
+// Ou seja: esta rotina sabe dizer que um expediente SEGUE ABERTO no tribunal, e praticamente
+// nunca vai conseguir dizer que foi cumprido -- protocolo nenhum aparece aqui. O grupo e uma
+// lista de CONFERIR, nao de culpados, e o texto tem de dizer isso; senao manda procurar
+// problema exatamente onde o trabalho ja foi feito.
+//
+// Cuidado que anda junto: o Legal Mail chama de "Prazo fechado" tanto o encerrado quanto o
+// "aguardando abertura" -- 1.959 de 1.970 sao o segundo caso, todos sem "Data final". Quem le
+// esse campo tem de exigir `Status:FECHADO` (migration lm_reconcile_fechado_de_verdade).
+// E cada destinatario tem a sua intimacao: no processo 5031202-56 o evento 84 (Cibele) esta
+// FECHADO e o 83 (outro advogado, mesmo ato) esta ABERTO. Ver db/legalmail_custo_api.sql.
 //
 // *** E O MAIS IMPORTANTE: rodada INCOMPLETA nao reporta numero. ***
 //   Na rodada bloqueada a funcao disse "0 em aberto" estando cega. Dizer "nenhum prazo
@@ -226,10 +239,14 @@ Deno.serve(async (req) => {
     if (completo) {
       resumo.seguem_abertos = seguem.length;
       resumo.sem_resposta_total = semResposta.length;
-      // 1) o que o tribunal CONFIRMA que segue aberto e ja venceu ou vence hoje. E o numero
-      //    que responde "ficou algum fatal sem cumprir?".
-      resumo.FATAIS_SEM_CUMPRIR = abertosConfirmados.length;
-      resumo.fatais_sem_cumprir = abertosConfirmados.slice(0, 40);
+      // 1) o que o tribunal CONFIRMA que segue aberto e ja venceu ou vence hoje. Responde "o
+      //    tribunal ainda mostra alguma coisa em aberto hoje?" -- e NAO "quem deixou de
+      //    cumprir": protocolar nao fecha o expediente (ver o cabecalho).
+      resumo.AINDA_ABERTO_NO_TRIBUNAL = abertosConfirmados.length;
+      resumo.ainda_aberto_no_tribunal = abertosConfirmados.slice(0, 40);
+      resumo.leia_se = "AINDA_ABERTO_NO_TRIBUNAL = o eProc nao fechou o expediente. Pode ja "
+        + "ter sido protocolado: o eProc so fecha na ciencia com renuncia ou na certidao do "
+        + "cartorio (9 de 3.264 intimacoes). E lista de CONFERIR, nao de prazo perdido.";
       // 2) o que o tribunal NAO respondeu. Nao e pendencia nem fechamento: e "so o tribunal
       //    sabe". Vem com o tribunal de cada um, porque a maioria e TRT, que este endpoint
       //    nao cobre -- e sem isso a lista parece atraso quando nao e.
@@ -244,7 +261,7 @@ Deno.serve(async (req) => {
       resumo.fora_da_rotina = foraDaRotina.slice(0, 40);
     } else {
       // rodada cega: NÃO inventa número de pendência
-      resumo.FATAIS_SEM_CUMPRIR = null;
+      resumo.AINDA_ABERTO_NO_TRIBUNAL = null;
       resumo.SEM_RESPOSTA_DO_TRIBUNAL = null;
       resumo.aviso = `RODADA INCOMPLETA (${http_ok}/${porProc.size} processos consultados). `
         + `Nao e possivel afirmar quantos prazos seguem abertos. `
