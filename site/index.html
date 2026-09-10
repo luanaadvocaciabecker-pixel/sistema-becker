@@ -3850,7 +3850,9 @@ function editarLinkNN(id){
 // `_nnResp` = filtro por responsável. As 80 linhas de `novos_negocios` estão com responsavel
 // VAZIO: o campo existe desde sempre e nunca foi preenchido, e a lista também não o mostrava,
 // então não havia como notar. Decisão dela em 10/09: mostrar e deixar filtrar, sem obrigar.
-let _nnCache=[], _nnFiltro='todos', _nnBusca='', _nnResp='';
+let _nnCache=[], _nnFiltro='todos', _nnBusca='', _nnResp='', _nnMes='';
+const _nnMesLabel=iso=>{const d=new Date(iso);return d.toLocaleDateString('pt-BR',{month:'long',year:'numeric',timeZone:'UTC'});};
+const _nnMesChave=iso=>iso?iso.slice(0,7):''; // 'YYYY-MM', ordena certinho sem parsear de novo
 function _nnEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function _nnStatus(neg){
   const itens=neg.nn_itens||[];
@@ -3901,6 +3903,11 @@ function renderNovosNegocios(){
           ${respNomes().map(r=>`<option ${_nnResp===r?'selected':''}>${escHtml(r)}</option>`).join('')}
           <option value="__SEM__" ${_nnResp==='__SEM__'?'selected':''}>⚠️ Sem responsável</option>
         </select>
+        <select class="filtro" onchange="_nnMes=this.value;renderNovosNegociosLista()" style="padding:7px 10px">
+          <option value="">Todos os meses</option>
+          ${(()=>{const chaves=[...new Set(_nnCache.map(n=>_nnMesChave(n.created_at)).filter(Boolean))].sort();
+            return chaves.map(k=>`<option value="${k}" ${_nnMes===k?'selected':''}>${_nnMesLabel(k+'-15')}</option>`).join('');})()}
+        </select>
         <button class="btn btn-primary btn-sm" onclick="novoNegocio()">+ Novo</button>
       </div>
     </div>
@@ -3917,8 +3924,11 @@ function renderNovosNegociosLista(){
   else if(_nnFiltro==='sempasta')lista=lista.filter(x=>x.s.cls==='vermelho');
   if(_nnResp==='__SEM__')lista=lista.filter(x=>!(x.n.responsavel||'').trim());
   else if(_nnResp)lista=lista.filter(x=>(x.n.responsavel||'').trim()===_nnResp);
+  if(_nnMes)lista=lista.filter(x=>_nnMesChave(x.n.created_at)===_nnMes);
   const q=_nnBusca.trim().toLowerCase();
   if(q)lista=lista.filter(x=>(x.n.cliente_nome||'').toLowerCase().includes(q)||(x.n.acao||'').toLowerCase().includes(q)||(x.n.responsavel||'').toLowerCase().includes(q));
+  // classifica por data de entrada (a mais antiga primeiro — é quem está esperando há mais tempo)
+  lista.sort((a,b)=>(a.n.created_at||'').localeCompare(b.n.created_at||''));
   if(!lista.length){el.innerHTML='<div class="empty-state" style="padding:30px;text-align:center;color:#64748b"><div style="font-size:34px">📭</div><p>Nenhum novo negócio neste filtro.</p></div>';return;}
   el.innerHTML=lista.map(({n,s})=>`
     <div onclick="abrirNovoNegocio(${n.id})" style="display:flex;align-items:center;gap:12px;padding:12px 10px;border-bottom:1px solid var(--border);cursor:pointer" onmouseover="this.style.background='rgba(0,0,0,.035)'" onmouseout="this.style.background='none'">
@@ -3932,6 +3942,7 @@ function renderNovosNegociosLista(){
       </div>
       ${!((n.whatsapp||n.clientes?.telefone||n.clientes?.whatsapp||'').trim())?`<span class="tag" style="background:rgba(220,38,38,.12);color:#b91c1c;font-size:11px;flex-shrink:0" title="Sem número de contato — clique para preencher">📱 sem WhatsApp</span>`:''}
       ${n.status==='repassado'?`<span class="tag" style="background:rgba(37,99,235,.12);color:#1d4ed8;font-size:11px;flex-shrink:0" title="Repassado para ${_nnEsc(n.responsavel||'')}">📨 ${_nnEsc(n.responsavel||'repassado')}</span>`:''}
+      ${n.created_at?`<span class="tag" style="background:rgba(100,116,139,.1);color:#64748b;font-size:11px;flex-shrink:0" title="Data de entrada">📅 ${new Date(n.created_at).toLocaleDateString('pt-BR',{timeZone:'UTC'})}</span>`:''}
       <span class="tag" style="background:rgba(148,163,184,.12);color:#334155;font-size:11px;flex-shrink:0">${NN_LABEL[n.categoria]||n.categoria}</span>
       <span style="font-size:12px;font-weight:700;color:${s.cor};min-width:96px;text-align:right;flex-shrink:0">${s.emoji} ${s.rotulo}</span>
     </div>`).join('');
