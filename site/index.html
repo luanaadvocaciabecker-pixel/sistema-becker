@@ -3728,10 +3728,22 @@ function _cliSearchInput(dl){
   // salvar um cliente_id de um nome que não é mais o que está escrito no campo)
   const atual=clientesCache.find(c=>c.id==hidden.value);
   if(!atual||atual.nome.toLowerCase()!==q)hidden.value='';
-  if(q.length<2){res.style.display='none';res.innerHTML='';return;}
-  const achados=clientesCache.filter(c=>c.nome.toLowerCase().includes(q)).slice(0,20);
+  if(q.length<1){res.style.display='none';res.innerHTML='';return;}
+  // prioriza nome que começa com o texto, depois qualquer palavra do nome que começa
+  // (acha pelo sobrenome), só por último substring no meio — assim uma letra só (ex.
+  // "z") não fica enterrada atrás de nomes que só têm a letra no meio.
+  const rank=nome=>{
+    const n=nome.toLowerCase();
+    if(n.startsWith(q))return 0;
+    if(n.split(/\s+/).some(p=>p.startsWith(q)))return 1;
+    if(n.includes(q))return 2;
+    return 9;
+  };
+  const todos=clientesCache.map(c=>({c,r:rank(c.nome)})).filter(x=>x.r<9).sort((a,b)=>a.r-b.r||a.c.nome.localeCompare(b.c.nome));
+  const achados=todos.slice(0,20);
   res.innerHTML=achados.length
-    ? achados.map(c=>`<div onmousedown="_cliSearchEscolher('${dl}',${c.id})" style="padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseover="this.style.background='rgba(0,0,0,.04)'" onmouseout="this.style.background='none'">${escHtml(c.nome)}</div>`).join('')
+    ? achados.map(({c})=>`<div onmousedown="_cliSearchEscolher('${dl}',${c.id})" style="padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseover="this.style.background='rgba(0,0,0,.04)'" onmouseout="this.style.background='none'">${escHtml(c.nome)}</div>`).join('')
+      +(todos.length>20?`<div style="padding:6px 10px;font-size:11px;color:#64748b">Mais ${todos.length-20} resultado(s) — digite mais letras pra refinar.</div>`:'')
     : `<div style="padding:8px 10px;font-size:12px;color:#64748b">Nenhum cliente encontrado com "${escHtml(inp.value)}".</div>`;
   res.style.display='block';
 }
