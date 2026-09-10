@@ -1762,8 +1762,12 @@ async function chamarFuncao(nome,corpo){
 }
 let usuarioAtual=null,modalAcao=null,clientesCache=[];
 let processosFiltro={busca:'',situacao:'',cliente:'',resp:'',meus:false,off:0};
+// Paginação dos clientes. A lista mostrava "50 de 1515" e PARAVA ALI: `buscarClientes` usava
+// `.limit(50)` sem offset e o rodapé era só texto, sem botão. Os outros 1.465 clientes só eram
+// alcançáveis pela busca. Mesmo desenho da `pagProc`, que já funcionava nos processos.
+function pagCli(dir){const total=window._clCount||0;let off=(clientesFiltro.off||0)+dir*50;if(off<0)off=0;if(off>=total)return;clientesFiltro.off=off;buscarClientes(true);window.scrollTo({top:0,behavior:'smooth'});}
 function pagProc(dir){const total=window._prCount||0;let off=(processosFiltro.off||0)+dir*50;if(off<0)off=0;if(off>=total)return;processosFiltro.off=off;buscarProcessos(true);window.scrollTo({top:0,behavior:'smooth'});}
-let clientesFiltro={busca:'',resp:'',status:''};
+let clientesFiltro={busca:'',resp:'',status:'',off:0};
 // WhatsApp/telefone clicável: monta link wa.me a partir de um número livre.
 function soDigitos(s){return String(s==null?'':s).replace(/\D/g,'');}
 function waLink(num){let d=soDigitos(num);if(!d)return '';if(d.length<=11)d='55'+d;return 'https://wa.me/'+d;}
@@ -2643,7 +2647,7 @@ function renderPrazoTag(dataStr){
 // ---- CLIENTES ----
 async function pClientes(){
   const c=document.getElementById('conteudo');
-  clientesFiltro={busca:'',resp:'',status:''};
+  clientesFiltro={busca:'',resp:'',status:'',off:0};
   c.innerHTML=`
   <div class="toolbar">
     <div class="search-box"><input type="text" placeholder="Buscar nome, CPF, e-mail..." oninput="clientesFiltro.busca=this.value;buscarClientes()"></div>
@@ -2662,13 +2666,15 @@ async function pClientes(){
   <div id="cl-pag" style="text-align:center;padding:8px;color:#94a3b8;font-size:12px"></div>`;
   buscarClientes();
 }
-async function buscarClientes(){
+async function buscarClientes(keepPage){
+  if(!keepPage)clientesFiltro.off=0;   // mexer no filtro volta para a primeira página
+  const _off=clientesFiltro.off||0;
   let q=supa.from('clientes').select('*',{count:'exact'}).order('nome');
   const _cond=await _condicoesBusca(clientesFiltro.busca,{comCliente:false});
   if(_cond)q=q.or(_cond);
   if(clientesFiltro.resp)q=q.ilike('responsavel',`%${clientesFiltro.resp}%`);
   if(clientesFiltro.status)q=q.eq('status',clientesFiltro.status);
-  const{data,count,error}=await q.limit(50);
+  const{data,count,error}=await q.range(_off,_off+49);
   const tb=document.getElementById('cl-tbody');if(!tb)return;
   if(error||!data?.length){tb.innerHTML=`<tr><td colspan="7" style="text-align:center;padding:40px;color:#94a3b8">${error?'Erro ao carregar.':'Nenhum cliente encontrado.'}</td></tr>`;document.getElementById('cl-pag').textContent='';return;}
   tb.innerHTML=data.map(cl=>`<tr>
@@ -2682,7 +2688,12 @@ async function buscarClientes(){
       <button class="btn-icon" title="Editar" onclick="editarCliente('${cl.id}')">✏️</button>
       <button class="btn-icon" title="Excluir" onclick="excluirCliente('${cl.id}','${escHtml(cl.nome)}')">🗑️</button>
     </td></tr>`).join('');
-  document.getElementById('cl-pag').textContent=`${data.length} de ${count||0} clientes`;
+  const _total=count||0; window._clCount=_total;
+  const _ini=_total?_off+1:0, _fim=_off+data.length;
+  document.getElementById('cl-pag').innerHTML=`
+    <button class="btn btn-secondary btn-sm" ${_off<=0?'disabled':''} onclick="pagCli(-1)">← Anterior</button>
+    <span style="margin:0 14px;font-weight:500">${_ini}–${_fim} de ${_total} clientes</span>
+    <button class="btn btn-secondary btn-sm" ${_fim>=_total?'disabled':''} onclick="pagCli(1)">Próxima →</button>`;
 }
 function novoCliente(){dadosTemp={};abrirModal('Novo Cliente',formCliente({}),async()=>{
   const d=coletarForm('form-cliente');if(!d.nome){toast('Informe o nome.','erro');return false;}
@@ -2694,13 +2705,13 @@ async function editarCliente(id){
   abrirModal('Editar Cliente',formCliente(data),async()=>{
     const d=coletarForm('form-cliente');if(!d.nome){toast('Informe o nome.','erro');return false;}
     const{error}=await supa.from('clientes').update(d).eq('id',id);
-    if(error){toast('Erro: '+error.message,'erro');return false;}toast('Atualizado!','ok');buscarClientes();
+    if(error){toast('Erro: '+error.message,'erro');return false;}toast('Atualizado!','ok');buscarClientes(true);
   });
 }
 async function excluirCliente(id,nome){
   abrirModal('Excluir Cliente',`<p>Excluir <strong>${nome}</strong>?<br><small style="color:#dc2626">Esta ação não pode ser desfeita.</small></p>`,
     async()=>{const{error}=await supa.from('clientes').delete().eq('id',id);
-    if(error){toast('Erro.','erro');return false;}toast('Removido.','ok');buscarClientes();},'Excluir',true);
+    if(error){toast('Erro.','erro');return false;}toast('Removido.','ok');buscarClientes(true);},'Excluir',true);
 }
 function toggleMeusProc(){
   processosFiltro.meus=!processosFiltro.meus;
@@ -4132,7 +4143,7 @@ function novoNegocio(){
 function pProcessos(){pJudiciais();}
 
 // ---- ADMINISTRATIVOS ----
-let admFiltro={busca:'',situacao:''};
+let admFiltro={busca:'',situacao:'',area:''};
 // Serve as páginas 'administrativos' e 'extrajudiciais': é a MESMA tabela (processos_adm), e
 // extrajudicial é um valor de `orgao`, não um módulo separado. Só o rótulo do botão muda.
 async function pAdministrativos(pagina){
@@ -4147,11 +4158,15 @@ async function pAdministrativos(pagina){
       <option value="">Todas as situações</option>
       ${Object.keys(ADM_SITUACOES).map(o=>`<option>${o}</option>`).join('')}
     </select>
+    <select class="filtro" onchange="admFiltro.area=this.value;buscarAdministrativos()">
+      <option value="">Todas as etiquetas</option>
+      ${Object.keys(ADM_AREAS).map(o=>`<option>${o}</option>`).join('')}
+    </select>
     <button class="btn btn-primary" onclick="novoProcessoAdm(${extra?"'EXTRAJUDICIAL'":'null'})">+ ${extra?'Novo Extrajudicial':'Novo Administrativo'}</button>
   </div>
   <div class="card"><div class="table-wrap"><table>
-    <thead><tr><th>Nº Protocolo</th><th>Órgão</th><th>Cliente</th><th>Assunto</th><th>Responsável</th><th>Situação</th><th></th></tr></thead>
-    <tbody id="adm-tbody"><tr><td colspan="7" style="text-align:center;padding:40px;color:#94a3b8">Carregando...</td></tr></tbody>
+    <thead><tr><th>Nº Protocolo</th><th>Órgão</th><th>Cliente</th><th>Assunto</th><th>Responsável</th><th>Etiqueta</th><th>Situação</th><th></th></tr></thead>
+    <tbody id="adm-tbody"><tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">Carregando...</td></tr></tbody>
   </table></div></div>
   <div id="adm-pag" style="text-align:center;padding:8px;color:#94a3b8;font-size:12px"></div>`;
   buscarAdministrativos();
@@ -4176,17 +4191,41 @@ const ADM_SITUACOES={
   'Exigência':'#C2410C',
   'Recurso administrativo':'#6D28D9',
   'Deferido':'#15803D',
-  'Indeferido':'#B91C1C'
+  'Indeferido':'#B91C1C',
+  'Concluído':'#334155'      // pedido dela em 10/09; cinza-ardósia = encerrado, sem juízo de mérito
 };
+// ETIQUETAS DE ÁREA do extrajudicial/administrativo. Pedido dela em 10/09/2026.
+// Mesma disciplina das situações: fonte única, e a coluna `processos_adm.area` (migration
+// `adm_area_etiqueta`) é texto livre SEM CHECK, para etiqueta nova não exigir migration.
+// A grafia acompanha `processos.area`, que já usa "Previdenciário" e "Família" assim — o
+// vocabulário é o mesmo entre judicial e extrajudicial de propósito.
+// Cores: as mesmas famílias do tema claro, e o contraste das seis foi medido com o alpha 14
+// (pior caso 4,52:1, todas passam WCAG AA).
+const ADM_AREAS={
+  'Previdenciário':'#1D4ED8',
+  'Família':'#6D28D9',
+  'Sucessões':'#B45309',
+  'Administrativo':'#15803D',
+  'Trânsito':'#C2410C',
+  'Negociação':'#0F766E'
+};
+// Etiqueta colorida, usada pela situação e pela área. Estava repetida inline na tabela.
+function _etiquetaAdm(valor,mapa){
+  const c=mapa[valor]||'#64748B';
+  if(!valor)return '<span style="color:#94A3B8">—</span>';
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;`
+       + `font-weight:600;background:${c}14;color:${c};border:1px solid ${c}3d">${escHtml(valor)}</span>`;
+}
 async function buscarAdministrativos(){
   let q=supa.from('processos_adm').select('*,clientes(nome)',{count:'exact'}).order('created_at',{ascending:false});
   const _cond=await _condicoesBusca(admFiltro.busca);
   if(_cond)q=q.or(_cond);
   if(admFiltro.situacao)q=q.eq('situacao',admFiltro.situacao);
+  if(admFiltro.area)q=q.eq('area',admFiltro.area);
   const{data,count,error}=await q.limit(50);
   const tb=document.getElementById('adm-tbody');if(!tb)return;
   if(error||!data?.length){
-    tb.innerHTML=`<tr><td colspan="7" style="text-align:center;padding:40px;color:#94a3b8">${error?'Erro: '+error.message:'Nenhum processo administrativo cadastrado.'}</td></tr>`;
+    tb.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">${error?'Erro: '+error.message:'Nenhum processo administrativo cadastrado.'}</td></tr>`;
     if(document.getElementById('adm-pag'))document.getElementById('adm-pag').textContent='';return;
   }
   const corStatus=ADM_SITUACOES;
@@ -4196,7 +4235,8 @@ async function buscarAdministrativos(){
     <td>${p.clientes?.nome||'—'}</td>
     <td>${truncar(p.assunto||'—',40)}</td>
     <td style="font-size:12px">${p.responsavel||'—'}</td>
-    <td><span style="display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;background:${corStatus[p.situacao]||'#94a3b8'}14;color:${corStatus[p.situacao]||'#94a3b8'};border:1px solid ${corStatus[p.situacao]||'#94a3b8'}3d">${p.situacao||'—'}</span></td>
+    <td>${_etiquetaAdm(p.area,ADM_AREAS)}</td>
+    <td>${_etiquetaAdm(p.situacao,ADM_SITUACOES)}</td>
     <td style="white-space:nowrap">
       ${p.situacao==='Indeferido'&&!p.convertido_para_judicial?`<button class="btn-icon" title="Converter para Judicial" onclick="converterParaJudicial('${p.id}')">⚖️</button>`:''}
       <button class="btn-icon" title="Editar" onclick="editarProcessoAdm('${p.id}')">✏️</button>
@@ -4236,6 +4276,10 @@ function formProcessoAdm(d={}){
     <div class="form-field"><label>Situação</label>
       <select name="situacao">${Object.keys(ADM_SITUACOES).map(o=>`<option ${(d.situacao||'Em análise')===o?'selected':''}>${o}</option>`).join('')}</select>
     </div>
+  </div>
+  <div class="form-field"><label>Etiqueta <span style="color:#64748B;font-weight:400">(opcional)</span></label>
+    <input name="area" list="areas-adm" value="${escHtml(d.area||'')}" placeholder="Escolha da lista ou digite" autocomplete="off">
+    <datalist id="areas-adm">${Object.keys(ADM_AREAS).map(o=>`<option value="${escHtml(o)}">`).join('')}</datalist>
   </div>
   <div class="form-field"><label>Observações</label><textarea name="observacoes">${d.observacoes||''}</textarea></div>
 </form>`;
