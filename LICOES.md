@@ -9,6 +9,55 @@ Quem for mexer em rotina automática ou em qualquer chamada de API paga: leia as
 
 ---
 
+## 10/09/2026 — tema claro colado por cima do escuro, e a busca que prometia o que não fazia
+
+**O que aconteceu.** Ela mandou print da busca do topo: *"não tá dando para ver as escritas e na
+parte de processo quando eu procuro pelo nome da pessoa não aparece"*. Dois defeitos sem relação
+entre si, no mesmo lugar da tela.
+
+**Custo.** Nenhum em dinheiro, e é o pior tipo de defeito: **ela não confia mais na busca**. Quem
+digita um nome, não acha, e conclui que o processo não está cadastrado — quando está.
+
+**Causa 1 — cascata.** O sistema nasceu escuro e o tema claro entrou **por sobreposição**, com
+`body{...}` redefinindo as variáveis mais adiante no arquivo. Quem tinha fundo escuro cravado em
+hex precisou de uma linha de correção. Ela existe, e **três lugares ficaram fora da lista**: o
+campo do topo escurecia **ao receber foco** (ela não via o que digitava), o painel de resultados
+ficava a ~1,1:1 de contraste, e a lista de opção de **todo** `select` do sistema abria escura com
+texto escuro. Existia até um neutralizador de estilo escuro — mas **escopado em `#conteudo`**, e
+a barra do topo fica fora dele.
+
+**Causa 2 — a busca.** Quatro defeitos somados, todos medidos antes de mexer:
+
+| | digitado | achava | devia achar |
+|---|---|---|---|
+| não filtrava pelo cliente, apesar do campo dizer "Buscar número, **cliente**, assunto" | `miraci` | 0 | 2 |
+| acento: `ilike` é literal | `sebastiao` (clientes) | 0 | 3 |
+| vírgula é separador no `or=(...)` do PostgREST e corrompia a consulta | `OLIVEIRA, FLAVIO` | erro silencioso | — |
+| frase exata não casa nome fora de ordem | `SILVA JOSE` (clientes) | 0 | 6 |
+
+**REGRAS:**
+19. **Placeholder é promessa: o que o campo diz que busca, tem de buscar.** "Buscar número,
+    cliente, assunto" com o cliente de fora é a tela mentindo para quem usa. Ao mexer num
+    filtro, ler o texto do campo e conferir item por item.
+20. **Tema por sobreposição precisa de lista fechada, não de memória.** A correção do tema claro
+    é uma lista de seletores escrita à mão — o que não entrar nela fica quebrado e ninguém vê.
+    Ao acrescentar componente com fundo em hex, entrar na lista no mesmo commit. E cuidado com
+    neutralizador escopado (`#conteudo`): topo e rodapé ficam fora.
+21. **`:hover`/`:focus` também são estado visual.** Os três lugares quebrados incluíam um
+    `:focus` — a tela parecia certa parada e quebrava ao ser usada. Conferir o estado ativo.
+22. **Termo digitado nunca vai cru para dentro de `or=(...)`.** Vírgula e parêntese são sintaxe
+    ali. Normalizar num lugar só (`_termoBusca()`), usado por todas as buscas.
+23. **Busca de nome próprio é "todas as palavras, em qualquer ordem".** Frase exata deu 0 em
+    todos os casos de duas palavras que eu testei. Ninguém digita o nome na ordem do cadastro.
+24. **Verdade repetida em três lugares divergiu em três lugares.** O mapa de quem-é-quem existia
+    no JS *e* em duas tabelas escritas à mão na tela; a Alana aparecia num e-mail que não existe
+    e a Samaira não existia em lugar nenhum. Agora as tabelas são renderizadas do mapa. Fonte
+    única, ou não é fonte.
+
+Detalhe: `db/busca_sem_acento.sql`
+
+---
+
 ## 10/09/2026 — desliguei o gasto e desliguei, sem ver, a entrada de prazo de 5 tribunais
 
 **O que aconteceu.** Para estancar os R$ 461 acima, desliguei os dois crons do Legal Mail em

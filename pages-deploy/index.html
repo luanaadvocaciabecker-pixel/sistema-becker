@@ -652,9 +652,24 @@ body{
 .notif-dot{
   border-color:#FFFFFF;
 }
-.notif-panel,.modal,.modal-body,.modal-header,.modal-footer,.toast-msg{
+.notif-panel,.modal,.modal-body,.modal-header,.modal-footer,.toast-msg,
+#busca-global-resultado{
   background:#FFFFFF;
   border-color:#E3E8EF;
+  color:#172033;
+}
+/* Estes três ficaram de fora quando o tema claro entrou por cima do escuro, e o resultado era
+   texto quase preto sobre fundo quase preto (~1,1:1). O neutralizador de estilo escuro que já
+   existe é escopado em `#conteudo`, e a barra do topo fica fora dele — foi por isso que passou.
+   1) o campo de busca do topo escurecia AO RECEBER FOCO: ela não via o que digitava;
+   2) o painel de resultados (acima, junto dos modais);
+   3) a lista de opção de TODO select do sistema. */
+.topbar-search input:focus{
+  background:#FFFFFF;
+  color:#050D1E;
+}
+select.filtro option,.form-field select option,#busca-global-resultado option{
+  background:#FFFFFF;
   color:#172033;
 }
 .notif-item{
@@ -1853,14 +1868,55 @@ function chavePerfilUsuario(){
   const email=(usuarioAtual?.email||'usuario').toLowerCase();
   return 'becker_perfil_'+email;
 }
+// FONTE ÚNICA de quem é quem. Confirmado pela Luana em 10/09/2026 contra a lista real de
+// Authentication > Users do Supabase. Antes disso a verdade estava em TRÊS lugares (este mapa
+// e duas tabelas escritas à mão na tela), e os três divergiam: a Alana aparecia como
+// `alana@advocaciabecker.com`, que não existe, e a Samaira não existia em lugar nenhum.
+// Se entrar ou sair alguém, mexa SÓ aqui — as tabelas da tela são renderizadas deste objeto.
+//
+// ATENÇÃO ao domínio: a conta da Alana é `@beckeradvogados.com`, não `@advocaciabecker.com`.
+// `funcao` é o que aparece no perfil; `nome` tem de ser IDÊNTICO ao valor gravado em
+// `processos.advogado_responsavel` (conferido: Samaira Leite da Silva 181, Luana Fernandes 170,
+// Maria Helena 161, Alana Pais Lemos 142, Cibele Becker 1), senão o filtro "Meus processos"
+// não acha nada.
 const USUARIOS_BECKER={
-  'juridico1@advocaciabecker.com':{nome:'Luana Fernandes',funcao:'Advogada'},
-  'juridico2@advocaciabecker.com':{nome:'Maria Helena',funcao:'Advogada'},
-  'juridico5@advocaciabecker.com':{nome:'Ana Beatriz Muller',funcao:'Estagiária'},
-  'cibele@advocaciabecker.com':{nome:'Cibele Becker',funcao:'Sócia'},
-  'alana@advocaciabecker.com':{nome:'Alana Pais Lemos',funcao:'Advogada'},
-  'atendimento@advocaciabecker.com':{nome:'Secretaria',funcao:'Atendimento'}
+  'juridico1@advocaciabecker.com':{nome:'Luana Fernandes',      funcao:'Advogada',  admin:true},
+  'juridico2@advocaciabecker.com':{nome:'Maria Helena',         funcao:'Advogada'},
+  'juridico3@beckeradvogados.com':{nome:'Alana Pais Lemos',     funcao:'Advogada'},
+  'juridico4@advocaciabecker.com':{nome:'Samaira Leite da Silva',funcao:'Advogada'},
+  'juridico5@advocaciabecker.com':{nome:'Ana Beatriz Muller',   funcao:'Estagiária'},
+  'cibele@advocaciabecker.com':   {nome:'Cibele Becker',        funcao:'Sócia'},
+  // Apelidos: não são contas da lista do Supabase, ficam só para não perder o perfil de quem
+  // entrar por um endereço antigo. Não aparecem na tabela de usuários.
+  'alana@advocaciabecker.com':      {nome:'Alana Pais Lemos',funcao:'Advogada',   apelido:true},
+  'atendimento@advocaciabecker.com':{nome:'Secretaria',      funcao:'Atendimento',apelido:true}
 };
+// Renderiza as linhas da tabela de usuários a partir do USUARIOS_BECKER. Existia à mão em dois
+// lugares e os dois estavam desatualizados; agora quem edita o mapa acerta as duas telas.
+function linhasUsuariosBecker(){
+  return Object.entries(USUARIOS_BECKER)
+    .filter(([,u])=>!u.apelido)
+    .map(([email,u])=>{
+      const papel=u.admin?`${u.funcao} · Admin`:u.funcao;
+      const cls=u.admin?'ativo':(u.funcao==='Atendimento'?'aguardando':'andamento');
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:12px;font-size:13px">${email}</td>
+        <td style="padding:12px;font-size:13px;font-weight:600">${escHtml(u.nome)}</td>
+        <td style="padding:12px"><span class="tag ${cls}">${escHtml(papel)}</span></td>
+        <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
+      </tr>`;
+    }).join('');
+}
+function linhasUsuariosCurtas(){
+  return Object.entries(USUARIOS_BECKER)
+    .filter(([,u])=>!u.apelido)
+    .map(([email,u])=>{
+      const papel=u.admin?'Admin':u.funcao;
+      const cls=u.admin?'ativo':(u.funcao==='Atendimento'?'aguardando':'andamento');
+      return `<tr><td style="padding:8px;font-size:13px">${email}</td>
+        <td style="padding:8px"><span class="tag ${cls}">${escHtml(papel)}</span></td></tr>`;
+    }).join('');
+}
 function perfilPadraoUsuario(){
   const email=(usuarioAtual?.email||'').toLowerCase().trim();
   if(USUARIOS_BECKER[email]) return{...USUARIOS_BECKER[email],foto:''};
@@ -2606,7 +2662,8 @@ async function pClientes(){
 }
 async function buscarClientes(){
   let q=supa.from('clientes').select('*',{count:'exact'}).order('nome');
-  if(clientesFiltro.busca)q=q.or(`nome.ilike.%${clientesFiltro.busca}%,cpf_cnpj.ilike.%${clientesFiltro.busca}%,email.ilike.%${clientesFiltro.busca}%`);
+  const _cond=await _condicoesBusca(clientesFiltro.busca,{comCliente:false});
+  if(_cond)q=q.or(_cond);
   if(clientesFiltro.resp)q=q.ilike('responsavel',`%${clientesFiltro.resp}%`);
   if(clientesFiltro.status)q=q.eq('status',clientesFiltro.status);
   const{data,count,error}=await q.limit(50);
@@ -3132,7 +3189,10 @@ async function buscarProcessos(keepPage){
   if(!keepPage)processosFiltro.off=0;
   const _off=processosFiltro.off||0;
   let q=somenteProcessosPrincipais(supa.from('processos').select('*,clientes(nome)',{count:'exact'})).order('created_at',{ascending:false});
-  if(processosFiltro.busca)q=q.or(`numero.ilike.%${processosFiltro.busca}%,assunto.ilike.%${processosFiltro.busca}%,parte_contraria.ilike.%${processosFiltro.busca}%`);
+  // Antes filtrava só numero/assunto/parte_contraria — o campo prometia "cliente" e não
+  // olhava o cliente. Medido: "miraci" achava 0 de 2, "juarez" 0 de 2, "gabriel" 2 de 11.
+  const _cond=await _condicoesBusca(processosFiltro.busca);
+  if(_cond)q=q.or(_cond);
   if(processosFiltro.situacao)q=q.eq('situacao',processosFiltro.situacao);
   if(processosFiltro.resp==='__SEM__')q=q.or('advogado_responsavel.is.null,advogado_responsavel.eq.');
   else if(processosFiltro.resp)q=q.ilike('advogado_responsavel','%'+processosFiltro.resp+'%');
@@ -4096,7 +4156,8 @@ async function pAdministrativos(pagina){
 }
 async function buscarAdministrativos(){
   let q=supa.from('processos_adm').select('*,clientes(nome)',{count:'exact'}).order('created_at',{ascending:false});
-  if(admFiltro.busca)q=q.or(`numero_protocolo.ilike.%${admFiltro.busca}%,orgao.ilike.%${admFiltro.busca}%,assunto.ilike.%${admFiltro.busca}%`);
+  const _cond=await _condicoesBusca(admFiltro.busca);
+  if(_cond)q=q.or(_cond);
   if(admFiltro.situacao)q=q.eq('situacao',admFiltro.situacao);
   const{data,count,error}=await q.limit(50);
   const tb=document.getElementById('adm-tbody');if(!tb)return;
@@ -5409,9 +5470,7 @@ function pConfig(){
     <table style="max-width:500px;width:100%;border-collapse:collapse">
       <thead><tr><th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid var(--texto)">E-mail</th><th style="padding:8px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid var(--texto)">Papel</th></tr></thead>
       <tbody>
-        <tr><td style="padding:8px;font-size:13px">juridico1@advocaciabecker.com</td><td style="padding:8px"><span class="tag ativo">Admin</span></td></tr>
-        <tr><td style="padding:8px;font-size:13px">cibele@advocaciabecker.com</td><td style="padding:8px"><span class="tag andamento">Advogada</span></td></tr>
-        <tr><td style="padding:8px;font-size:13px">atendimento@advocaciabecker.com</td><td style="padding:8px"><span class="tag aguardando">Secretaria</span></td></tr>
+        ${linhasUsuariosCurtas()}
       </tbody>
     </table>
     <p style="font-size:12px;color:#94a3b8;margin-top:10px">Para adicionar usuários: Supabase → Authentication → Users → Invite User</p>
@@ -5443,36 +5502,7 @@ function pUsuarios(){
           <th style="padding:10px 12px;font-size:11px;text-align:left;color:#64748b;border-bottom:1px solid rgba(255,255,255,0.07);text-transform:uppercase;letter-spacing:.05em">Status</th>
         </tr></thead>
         <tbody>
-          <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
-            <td style="padding:12px;font-size:13px">juridico1@advocaciabecker.com</td>
-            <td style="padding:12px;font-size:13px;font-weight:600">Luana Fernandes</td>
-            <td style="padding:12px"><span class="tag ativo">Advogada · Admin</span></td>
-            <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
-          </tr>
-          <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
-            <td style="padding:12px;font-size:13px">alana@advocaciabecker.com</td>
-            <td style="padding:12px;font-size:13px;font-weight:600">Alana Pais Lemos</td>
-            <td style="padding:12px"><span class="tag andamento">Advogada</span></td>
-            <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
-          </tr>
-          <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
-            <td style="padding:12px;font-size:13px">juridico2@advocaciabecker.com</td>
-            <td style="padding:12px;font-size:13px;font-weight:600">Maria Helena</td>
-            <td style="padding:12px"><span class="tag andamento">Advogada</span></td>
-            <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
-          </tr>
-          <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
-            <td style="padding:12px;font-size:13px">juridico5@advocaciabecker.com</td>
-            <td style="padding:12px;font-size:13px;font-weight:600">Ana Beatriz Muller</td>
-            <td style="padding:12px"><span class="tag andamento">Estagiária</span></td>
-            <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
-          </tr>
-          <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
-            <td style="padding:12px;font-size:13px">atendimento@advocaciabecker.com</td>
-            <td style="padding:12px;font-size:13px;font-weight:600">Secretaria</td>
-            <td style="padding:12px"><span class="tag aguardando">Secretária</span></td>
-            <td style="padding:12px"><span class="tag ativo">Ativo</span></td>
-          </tr>
+          ${linhasUsuariosBecker()}
         </tbody>
       </table>
       <div style="margin-top:20px;padding:14px;background:rgba(200,165,92,0.06);border:1px solid rgba(200,165,92,0.15);border-radius:8px;font-size:12px;color:#94a3b8;line-height:1.8">
@@ -5563,37 +5593,99 @@ function copiarDoStore(i){
 function fmtMoeda(v){return v!=null?'R$ '+parseFloat(v).toLocaleString('pt-BR',{minimumFractionDigits:2}):'R$ 0,00';}
 function debounce(fn,d){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),d);};}
 
+// ---- BUSCA: normalização do termo, usada pelas QUATRO buscas ----
+// Três defeitos somados faziam "digito o nome e não aparece" (medido em 10/09/2026):
+//   1) acento — `ilike` é literal, então "sebastiao" achava 0 de 3 SEBASTIÃO, "joao" 9 de 17
+//      e "jose" 31 de 42. Resolvido pela coluna gerada `busca` (migration `busca_sem_acento`),
+//      que guarda o texto MAIÚSCULO e sem acento via `becker_sem_acento()`. Aqui aplicamos a
+//      MESMA regra ao que a pessoa digita — tela e banco não podem divergir.
+//   2) vírgula e parêntese — o termo ia cru dentro do `or=(...)` do PostgREST, onde a vírgula é
+//      SEPARADOR. Digitar "OLIVEIRA, FLAVIO" corrompia a consulta e a tela dizia "Nenhum
+//      processo", como se a busca não funcionasse. Aqui viram espaço.
+//   3) pontuação de CNJ/CPF — quem digita só os dígitos não achava nada. A coluna `busca`
+//      guarda também uma cópia só-dígitos, e devolvemos o termo nas duas formas.
+//   4) duas palavras fora de ordem — buscar a frase inteira ("OLIVEIRA FLAVIO") achava 0,
+//      porque o nome gravado é "FLAVIO RIBEIRO DE OLIVEIRA...". Medido nos clientes:
+//      frase exata dava 0 em TODOS os casos de duas palavras, e exigir todas as palavras
+//      (em qualquer ordem) dá 1 para "OLIVEIRA FLAVIO" e 6 para "SILVA JOSE". Termo de uma
+//      palavra não muda (27 = 27).
+function _termoBusca(v){
+  const t=(v||'').normalize('NFD').replace(/\p{Diacritic}/gu,'')
+                 .toUpperCase().replace(/[,()*%]/g,' ').replace(/\s+/g,' ').trim();
+  const d=t.replace(/\D/g,'');
+  return {
+    t,
+    d: d.length>=3 ? d : '',            // menos de 3 dígitos não vale procurar por número
+    palavras: t.split(' ').filter(w=>w.length>=2).slice(0,5)   // teto de 5 para não inflar a URL
+  };
+}
+// Monta as condições do `or` do PostgREST para um termo, incluindo os processos/administrativos
+// do cliente cujo NOME casa. O nome do cliente está em outra tabela, então não cabe em coluna
+// gerada: resolve-se em dois passos. `cliente_id.in.(...)` dentro do `or` é sintaxe válida, e é
+// por isso que `count` e paginação continuam funcionando sem mudança.
+async function _condicoesBusca(v,{comCliente=true}={}){
+  const {t,d,palavras}=_termoBusca(v);
+  if(!t)return null;
+  // Todas as palavras, em qualquer ordem: `and(...)` aninhado dentro do `or(...)` é sintaxe do
+  // PostgREST. Com uma palavra só, não embrulha — fica a condição simples.
+  const alvo=palavras.length?palavras:[t];
+  const texto=alvo.length>1
+    ? `and(${alvo.map(w=>`busca.ilike.%${w}%`).join(',')})`
+    : `busca.ilike.%${alvo[0]}%`;
+  const cond=[texto];
+  if(d)cond.push(`busca.ilike.%${d}%`);
+  if(comCliente){
+    // ilike encadeado é AND no PostgREST — mesma regra de "todas as palavras".
+    let cq=supa.from('clientes').select('id');
+    for(const w of alvo)cq=cq.ilike('busca',`%${w}%`);
+    const {data}=await cq.limit(300);
+    const ids=(data||[]).map(c=>c.id).filter(Number.isFinite);
+    // A guarda existe para não mandar lista vazia à toa. (Conferido em 10/09/2026 contra a
+    // API: `in.()` vazio NÃO é erro de sintaxe, ao contrário do que eu tinha escrito aqui —
+    // ele analisa e só não casa nada. O grupo `and(...)` aninhado no `or(...)` também foi
+    // conferido: malformado devolve 400/PGRST100, e o nosso devolve 401, ou seja, passou
+    // pela análise.)
+    if(ids.length)cond.push(`cliente_id.in.(${ids.join(',')})`);
+  }
+  return cond.join(',');
+}
+
 // ---- BUSCA GLOBAL ----
 const buscaGlobalDebounced=debounce(async(q)=>{
   const el=document.getElementById('busca-global-resultado');
   if(!el)return;
   if(!q||q.length<2){el.style.display='none';return;}
   el.style.display='block';
-  el.innerHTML='<div style="padding:12px 14px;color:#52525B;font-size:12px">Buscando...</div>';
+  el.innerHTML='<div style="padding:12px 14px;color:#64748B;font-size:12px">Buscando...</div>';
+  // Mesma normalização das buscas das abas (sem acento, sem vírgula solta, com só-dígitos),
+  // e o processo agora também é achado pelo NOME DO CLIENTE.
+  const condCli=await _condicoesBusca(q,{comCliente:false});
+  const condPrc=await _condicoesBusca(q);
+  if(!condCli&&!condPrc){el.style.display='none';return;}
   const[cls,prcs]=await Promise.all([
-    supa.from('clientes').select('id,nome,cpf_cnpj,telefone').or(`nome.ilike.%${q}%,cpf_cnpj.ilike.%${q}%,email.ilike.%${q}%,telefone.ilike.%${q}%`).limit(5),
-    somenteProcessosPrincipais(supa.from('processos').select('id,numero,assunto,clientes(nome)')).or(`numero.ilike.%${q}%,assunto.ilike.%${q}%,parte_contraria.ilike.%${q}%`).limit(5)
+    supa.from('clientes').select('id,nome,cpf_cnpj,telefone').or(condCli).limit(5),
+    somenteProcessosPrincipais(supa.from('processos').select('id,numero,assunto,clientes(nome)')).or(condPrc).limit(5)
   ]);
   const clientes=cls.data||[];
   const processos=prcs.data||[];
   if(!clientes.length&&!processos.length){
-    el.innerHTML='<div style="padding:12px 14px;color:#52525B;font-size:12px">Nenhum resultado encontrado.</div>';return;
+    el.innerHTML='<div style="padding:12px 14px;color:#64748B;font-size:12px">Nenhum resultado encontrado.</div>';return;
   }
   let html2='';
   if(clientes.length){
-    html2+=`<div style="padding:6px 14px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#52525B">Clientes</div>`;
+    html2+=`<div style="padding:6px 14px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748B">Clientes</div>`;
     html2+=clientes.map(cl=>`<div onclick="fecharBuscaGlobal();abrirCliente(${cl.id})" style="padding:9px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,0.04)">
       <span style="font-size:16px">👥</span>
       <div><div style="font-size:13px;font-weight:500;color:var(--texto)">${cl.nome}</div>
-      <div style="font-size:11px;color:#52525B">${cl.cpf_cnpj||cl.telefone||''}</div></div>
+      <div style="font-size:11px;color:#64748B">${cl.cpf_cnpj||cl.telefone||''}</div></div>
     </div>`).join('');
   }
   if(processos.length){
-    html2+=`<div style="padding:6px 14px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#52525B;margin-top:4px">Processos</div>`;
-    html2+=processos.map(p=>`<div onclick="fecharBuscaGlobal();ir('processos')" style="padding:9px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,0.04)">
+    html2+=`<div style="padding:6px 14px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748B;margin-top:4px">Processos</div>`;
+    html2+=processos.map(p=>`<div onclick="fecharBuscaGlobal();abrirProcesso('${p.id}')" style="padding:9px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,0.04)">
       <span style="font-size:16px">⚖️</span>
       <div><div style="font-size:12px;font-weight:500;font-family:monospace;color:var(--azul3)">${p.numero||'Sem nº'}</div>
-      <div style="font-size:11px;color:#52525B">${truncar(p.assunto||'',50)} · ${p.clientes?.nome||''}</div></div>
+      <div style="font-size:11px;color:#64748B">${truncar(p.assunto||'',50)} · ${p.clientes?.nome||''}</div></div>
     </div>`).join('');
   }
   el.innerHTML=html2;
