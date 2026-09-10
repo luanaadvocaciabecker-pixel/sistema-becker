@@ -3663,15 +3663,22 @@ function tagSituacaoProcesso(s){
   if(r==='Arquivado')return'arquivado';
   return'andamento';
 }
-// Busca de cliente por nome (datalist) em vez de <select> com 1500+ opções — mais
-// rápido de achar e a lista não corre risco de aparecer cortada por algum .limit().
+// Busca de cliente por nome — caixa de resultados própria (não usa <datalist> nativo:
+// com 1500+ clientes, o navegador não filtra/rola bem uma lista sem digitar nada, e
+// parecia "cortado" no meio do alfabeto). Filtra em memória (clientesCache já tem
+// todos) a cada tecla, mostra até 20 resultados, sem round-trip ao Supabase.
 let _cliSearchSeq=0;
 function clienteSearchHtml(selectedId,nomeInicial){
   const dl='cli-dl-'+(_cliSearchSeq++);
   const nome=nomeInicial||(clientesCache.find(c=>c.id==selectedId)||{}).nome||'';
-  return`<input type="text" list="${dl}" id="${dl}-inp" value="${escHtml(nome)}" placeholder="Digite para buscar o cliente..." autocomplete="off" oninput="_cliSearchPick(this)" data-clihidden="${dl}-id">
-    <datalist id="${dl}">${clientesCache.map(c=>`<option value="${escHtml(c.nome)}">`).join('')}</datalist>
+  return`<div style="position:relative">
+    <input type="text" id="${dl}-inp" value="${escHtml(nome)}" placeholder="Digite para buscar o cliente..." autocomplete="off"
+      oninput="_cliSearchInput('${dl}')" onfocus="_cliSearchInput('${dl}')"
+      onblur="setTimeout(()=>{const r=document.getElementById('${dl}-res');if(r)r.style.display='none'},150)"
+      data-clihidden="${dl}-id" style="width:100%">
+    <div id="${dl}-res" style="display:none;position:absolute;z-index:50;left:0;right:0;top:100%;background:var(--card);border:1px solid var(--cinza3);border-radius:8px;margin-top:2px;max-height:220px;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>
     <input type="hidden" name="cliente_id" id="${dl}-id" value="${selectedId||''}">
+  </div>
     <div style="margin-top:5px">
       <a href="#" onclick="_cliNovoToggle('${dl}');return false" style="font-size:12px;color:var(--azul3,#60a5fa);text-decoration:none">+ Cadastrar cliente novo</a>
       <div id="${dl}-novo" style="display:none;margin-top:8px;padding:10px;border:1px solid var(--cinza3);border-radius:8px;background:var(--cinza1)">
@@ -3707,17 +3714,33 @@ async function _cliNovoSalvar(dl){
   const{data,error}=await supa.from('clientes').insert([reg]).select().single();
   if(error){toast('Erro ao cadastrar: '+error.message,'erro');return;}
   clientesCache.push({id:data.id,nome:data.nome});
-  const inp=document.getElementById(dl+'-inp'),hidden=document.getElementById(dl+'-id'),dlist=document.getElementById(dl),box=document.getElementById(dl+'-novo');
+  const inp=document.getElementById(dl+'-inp'),hidden=document.getElementById(dl+'-id'),box=document.getElementById(dl+'-novo');
   if(inp)inp.value=data.nome;
   if(hidden)hidden.value=data.id;
-  if(dlist)dlist.insertAdjacentHTML('beforeend',`<option value="${escHtml(data.nome)}">`);
   if(box)box.style.display='none';
   toast('✅ Cliente cadastrado e vinculado.','ok');
 }
-function _cliSearchPick(inp){
-  const hidden=document.getElementById(inp.dataset.clihidden);if(!hidden)return;
-  const match=clientesCache.find(c=>c.nome===inp.value);
-  hidden.value=match?match.id:'';
+function _cliSearchInput(dl){
+  const inp=document.getElementById(dl+'-inp'),res=document.getElementById(dl+'-res'),hidden=document.getElementById(dl+'-id');
+  if(!inp||!res||!hidden)return;
+  const q=inp.value.trim().toLowerCase();
+  // se o texto não bate mais com o cliente já vinculado, desfaz o vínculo (evita
+  // salvar um cliente_id de um nome que não é mais o que está escrito no campo)
+  const atual=clientesCache.find(c=>c.id==hidden.value);
+  if(!atual||atual.nome.toLowerCase()!==q)hidden.value='';
+  if(q.length<2){res.style.display='none';res.innerHTML='';return;}
+  const achados=clientesCache.filter(c=>c.nome.toLowerCase().includes(q)).slice(0,20);
+  res.innerHTML=achados.length
+    ? achados.map(c=>`<div onmousedown="_cliSearchEscolher('${dl}',${c.id})" style="padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseover="this.style.background='rgba(0,0,0,.04)'" onmouseout="this.style.background='none'">${escHtml(c.nome)}</div>`).join('')
+    : `<div style="padding:8px 10px;font-size:12px;color:#64748b">Nenhum cliente encontrado com "${escHtml(inp.value)}".</div>`;
+  res.style.display='block';
+}
+function _cliSearchEscolher(dl,id){
+  const c=clientesCache.find(x=>x.id==id);if(!c)return;
+  const inp=document.getElementById(dl+'-inp'),hidden=document.getElementById(dl+'-id'),res=document.getElementById(dl+'-res');
+  if(inp)inp.value=c.nome;
+  if(hidden)hidden.value=c.id;
+  if(res){res.style.display='none';res.innerHTML='';}
 }
 function formProcesso(d={}){
   const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
