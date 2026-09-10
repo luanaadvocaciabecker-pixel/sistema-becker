@@ -152,3 +152,87 @@
 --
 -- AGENDADO em cron.job (nada disso rodava antes — ver db/djen_supabase_pgcron.sql):
 --   trt_prazos_diario  '20 10 * * *'  select trt_gera_prazos(current_date-15, current_date, true)
+
+-- ============================================================================
+-- 10/09/2026 — AVISO DE DISTRIBUIÇÃO NÃO É PRAZO (migration trt_ignora_distribuicao)
+-- ============================================================================
+-- Origem: pergunta dela — "verificar também tudo o TST que estão vindo também certinho".
+-- A coleta do TST estava certa. O defeito estava no que esta função faz com ela.
+--
+-- O ATO, na íntegra (263 caracteres, é tudo o que existe):
+--   "Processo 0000007-12.2025.5.12.0016 distribuído para 3ª Turma - Gabinete da Ministra
+--    Margareth Rodrigues Costa na data 05/09/2026. Para maiores informações, clique no
+--    link a seguir: https://pje.tst.jus.br/..."
+-- Não manda fazer nada. Não abre prazo. Mas a regra desta função é "todo ato sem Data final
+-- vira prazo de 5 dias úteis", e a lista de exceções só tinha pauta e ata de sessão.
+--
+-- MEDIDO em 10/09/2026, no universo trabalhista inteiro (1.195 atos em publicacoes_atos):
+--   atos que são puro aviso de distribuição ......... 174   (130 TRT + 44 TST)
+--   deles, que já haviam virado prazo ................ 14   (6 ainda em aberto)
+--   maior texto entre os 174 ......................... 304 caracteres
+--   dos 174, quantos contêm QUALQUER palavra de ordem   0   (nem "prazo", nem "intime",
+--                                                           nem verbo imperativo)
+--
+-- A REGRA (ancorada no início do texto, de propósito):
+--   texto ~* '^\s*Processo\s+[0-9.\-]+\s+distribu(i|í)do para'
+--   AND length(becker_html_texto(texto)) < 600
+-- Só casa quando o ato INTEIRO é a linha de distribuição. A guarda de tamanho hoje não tira
+-- nada (o maior tem 304); existe para o dia em que o tribunal juntar uma ordem depois da
+-- distribuição — nesse dia o ato VOLTA a gerar prazo, em vez de sumir calado.
+--
+-- POR QUE NÃO FILTRAR POR `tipo`: dos 49 avisos de distribuição do TST, só 3 chegam como
+-- 'Lista de distribuição'; os outros 46 chegam como 'DJEN/PJe', igual a um despacho.
+-- `tipo` é o rótulo da FONTE de coleta, não do ato — o mesmo achado de db/publicacoes_atos.sql.
+--
+-- CONFERÊNCIA (dry-run 2025-07-01 → 2026-09-10):
+--   TST ....... 61 candidatos ANTES  →  20 DEPOIS   (61 − 41; os outros 3 dos 44 já tinham prazo)
+--   avisos de distribuição que sobraram no dry-run: 0
+--   os 6 prazos falsos em aberto (5713, 5723, 5754, 5760, 5762, 5779) foram para
+--     status='descartado', cumprido=true, cumprido_por='descartado/aviso-de-distribuicao'
+--   auditoria "cumprido and cumprido_por is null": 570 antes, 570 depois (não cresceu)
+--   estimados: 36 → 30 · encerrados: 43 → 43 (intocados)
+--
+-- ----------------------------------------------------------------------------
+-- ACHADO LATERAL — o MESMO ato chega rotulado com DOIS tribunais diferentes
+-- ----------------------------------------------------------------------------
+-- O prazo 5713 tinha descrição "RENATO PEREZ FERNANDES · TRT-12", mas o ato é do TST.
+-- Não é bug da descrição: as 4 cópias cruas do ato (publicacoes) são
+--   id 303057  tribunal 'TRT-12'  tipo 'Publicação'                        354 car.
+--   id 377759  tribunal 'TST'     tipo 'Lista de distribuição'             383 car.
+--   id 432002  tribunal 'TST'     tipo 'DJEN/PJe'                          383 car.
+--   id 432026  tribunal 'TST'     tipo 'Diário de Justiça Eletrônico Nac.' 383 car.
+-- A view publicacoes_atos escolhe a cópia de texto mais longo → hoje devolve 'TST'. Quando o
+-- prazo nasceu, a cópia do TST ainda não tinha chegado, e a canônica era a 'TRT-12'.
+-- MEDIDO: 60 de 1.231 grupos (cnj, data) trabalhistas têm cópias com família de tribunal
+-- divergente (TRT × TST).
+-- CONSEQUÊNCIA: o tribunal gravado na descrição do prazo é o rótulo da cópia canônica NO
+-- MOMENTO DA CRIAÇÃO, e ele muda depois. Não dá para carimbar "· ato do TST" na descrição a
+-- partir desse valor — seria carimbar uma coisa que vira outra. Fica registrado; conserto de
+-- verdade é normalizar `tribunal`, que continua na fila.
+--
+-- ----------------------------------------------------------------------------
+-- CORREÇÃO DE UMA AFIRMAÇÃO MINHA
+-- ----------------------------------------------------------------------------
+-- Eu disse "o TST nunca gerou prazo nenhum". Estava errado: eu cruzei prazo × publicação pelo
+-- `legalmail_id`, que é NULO no caminho calculado (só o caminho do Legal Mail o preenche).
+-- A chave certa é `prazos.ato_chave` = cnj|data|ato_id. Cruzando certo: 3 dos 65 atos de TST
+-- geraram prazo — justamente os 3 falsos de 08/09.
+--
+-- ----------------------------------------------------------------------------
+-- O QUE FICA SEM AÇÃO (registrado de propósito)
+-- ----------------------------------------------------------------------------
+-- Classificação dos 65 atos de TST por natureza:
+--   aviso de distribuição (não tem prazo) ... 49 atos · 17 com processo · 14/07/25–08/09/26
+--   TEM ordem/prazo ......................... 11 atos ·  3 com processo · 09/07/25–25/03/26
+--   pauta/ata de sessão ......................  1 ato
+--   outro ....................................  4 atos
+-- Os 11 com ordem são TODOS anteriores a 25/03/2026 (mais de 5 meses). NÃO backfillar: criar
+-- prazo hoje para ato de março produziria 11 pendências vencidas e falsas — exatamente o
+-- defeito que esta migration conserta.
+--
+-- 125 das 188 linhas de TST não têm processo vinculado. Prazo desses nasce como
+-- "(processo a vincular)": sem cliente e sem responsável, só aparece na fila de conferência.
+--
+-- Volume do TST: 2 a 6 atos/mês, com pico de 25 em junho/2026. JULHO/2026 TEVE ZERO, com a
+-- coleta geral do mês normal (525 atos, 110 do TRT). Cabe no ruído de um fluxo de 2–6/mês,
+-- mas NÃO é prova de que a coleta não falhou naquele mês. Incerteza, não conclusão.

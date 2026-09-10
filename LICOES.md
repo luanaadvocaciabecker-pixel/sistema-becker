@@ -254,3 +254,72 @@ processo do TRT e generalizado; nos processos do eProc ele responde 200 com dado
 **REGRA:**
 14. **Afirmação em documentação tem de vir com a medição e a data.** "Funciona" sem número é
     palpite. E resultado de um caso não vira regra geral.
+
+---
+
+## 10/09/2026 — "todo ato vira prazo" precisa de lista de exceções, e ela cresce
+
+`trt_gera_prazos` transforma todo ato trabalhista sem "Data final" em prazo estimado de 5 dias
+úteis. A lista de exceções tinha dois itens (pauta de julgamento, ata de sessão). Faltava um
+terceiro, e ele é o mais comum de todos.
+
+**Aviso de distribuição** — *"Processo 0000007-12.2025.5.12.0016 distribuído para 3ª Turma -
+Gabinete da Ministra Margareth Rodrigues Costa na data 05/09/2026. Para maiores informações,
+clique no link…"* — é o ato inteiro. Não manda fazer nada. Medido: **174 dos 1.195 atos
+trabalhistas** são isso (130 TRT + 44 TST), o maior tem **304 caracteres**, e **nenhum dos 174**
+contém qualquer palavra de ordem — nem "prazo", nem "intime", nem verbo imperativo. Já haviam
+virado **14 prazos falsos**, 6 ainda em aberto, na fila "A conferir".
+
+Prazo falso na fila é a doença dos 554 `cumprido` falsos ao contrário: lá prazo real sumia com
+cara de feito, aqui prazo inexistente ocupa a fila. Nos dois casos a fila deixa de merecer
+confiança — e fila em que não se confia deixa de ser lida.
+
+**`tipo` não serve de discriminador.** Dos 49 avisos de distribuição do TST, só 3 chegam como
+`'Lista de distribuição'`; os outros 46 chegam como `'DJEN/PJe'`, igual a um despacho. `tipo` é
+o rótulo da FONTE de coleta, nunca do ato — o mesmo achado que já valia para a dedup.
+
+**A exclusão é ancorada e com teto de tamanho**, para poder errar para o lado seguro: só casa
+quando o ato COMEÇA com a linha de distribuição E tem menos de 600 caracteres. Se um dia o
+tribunal juntar uma ordem depois da distribuição, o ato volta a gerar prazo em vez de sumir
+calado.
+
+**REGRA:**
+25. **Regra do tipo "todo X vira Y" só se sustenta com lista de exceções mantida.** Cada molde
+    novo de aviso sem ordem tem de entrar nela, ou a fila enche de item falso. E toda exceção
+    nasce com contra-guarda (aqui, o teto de tamanho) para não virar omissão silenciosa.
+
+---
+
+## 10/09/2026 — cruzar prazo com publicação: a chave depende do CAMINHO que criou o prazo
+
+Eu afirmei "o TST nunca gerou prazo nenhum". Estava errado. Cruzei por `prazos.legalmail_id`,
+que é **nulo** no caminho calculado — só o caminho do Legal Mail o preenche. A chave do caminho
+calculado é `prazos.ato_chave` (`cnj|data|ato_id`). Cruzando certo, o TST gerou 3.
+
+| caminho | quem cria | chave para cruzar |
+|---|---|---|
+| Legal Mail (exige "Data final") | `lm_upsert_prazo_por_texto` | `legalmail_id` |
+| DJEN calculado (TRT/TST) | `trt_gera_prazos` | `ato_chave` |
+
+**REGRA:**
+26. **Antes de concluir "não existe nenhum", conferir que a chave do JOIN existe naquele
+    caminho.** Zero por chave errada é indistinguível de zero de verdade — e soa igual de
+    convincente.
+
+---
+
+## 10/09/2026 — o mesmo ato chega com DOIS tribunais diferentes
+
+O prazo 5713 dizia "· TRT-12" e o ato é do TST. As 4 cópias cruas do mesmo ato vêm rotuladas
+`TRT-12` (1) e `TST` (3). A view `publicacoes_atos` escolhe a cópia de texto mais longo, então
+hoje devolve TST — mas quando o prazo nasceu, a cópia do TST ainda não tinha chegado e a
+canônica era a do TRT-12. Medido: **60 de 1.231** grupos (cnj, data) trabalhistas têm cópias com
+família de tribunal divergente.
+
+Consequência prática: **o tribunal gravado na descrição de um prazo é o rótulo da cópia canônica
+no momento da criação, e ele muda depois.** Eu ia carimbar "· ato do TST" na descrição a partir
+desse valor; seria carimbar uma coisa que vira outra.
+
+**REGRA:**
+27. **Não gravar em campo permanente um valor derivado de "a cópia canônica de agora".** Ou se
+    grava a origem (o id da linha), ou se recalcula na leitura.

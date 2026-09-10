@@ -5254,7 +5254,14 @@ async function novoPrazo(){
   });
 }
 async function cumprir(id){
-  await supa.from('prazos').update({cumprido:true}).eq('id',id);
+  // Estampa a autoria. `cumprido=true` sem `cumprido_por` foi o que deixou 554 prazos
+  // "cumpridos" sem prova nenhuma: a auditoria é
+  // `select count(*) from prazos where cumprido and cumprido_por is null`, e ela só continua
+  // significando alguma coisa se TODA escrita nova assinar quem fechou.
+  await supa.from('prazos').update({
+    cumprido:true, cumprido_em:new Date().toISOString(),
+    cumprido_por:(usuarioAtual?.email||'tela')
+  }).eq('id',id);
   toast('Prazo cumprido!','ok');carregarPrazos();
 }
 // Desfaz o "Cumprir". Existe porque o clique é de um toque só e já houve prazo de
@@ -5303,7 +5310,12 @@ async function confirmarPrazoOk(id){
 // bloqueando a recriação.
 async function descartarPrazo(id){
   if(!confirm('Marcar como "não era prazo nosso"?\n\nEle sai da fila e da lista de prazos em aberto. A publicação de origem continua guardada.'))return;
-  const{error}=await supa.from('prazos').update({status:'descartado',cumprido:true}).eq('id',id);
+  // `cumprido=true` é o que tira da lista (a tela inteira trata "em aberto" como
+  // cumprido=false); a autoria diz que saiu por descarte, não por cumprimento.
+  const{error}=await supa.from('prazos').update({
+    status:'descartado', cumprido:true, cumprido_em:new Date().toISOString(),
+    cumprido_por:'descartado/'+(usuarioAtual?.email||'tela')
+  }).eq('id',id);
   if(error){toast('Erro: '+error.message,'erro');return;}
   toast('Descartado — não era prazo nosso.','ok');carregarPrazos();
 }
