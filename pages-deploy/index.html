@@ -4143,7 +4143,7 @@ async function pAdministrativos(pagina){
     <div class="search-box"><input type="text" placeholder="Buscar protocolo, órgão, assunto, cliente..." oninput="admFiltro.busca=this.value;buscarAdministrativos()"></div>
     <select class="filtro" onchange="admFiltro.situacao=this.value;buscarAdministrativos()">
       <option value="">Todas as situações</option>
-      <option>Em análise</option><option>Exigência</option><option>Recurso administrativo</option><option>Deferido</option><option>Indeferido</option>
+      ${Object.keys(ADM_SITUACOES).map(o=>`<option>${o}</option>`).join('')}
     </select>
     <button class="btn btn-primary" onclick="novoProcessoAdm(${extra?"'EXTRAJUDICIAL'":'null'})">+ ${extra?'Novo Extrajudicial':'Novo Administrativo'}</button>
   </div>
@@ -4154,6 +4154,28 @@ async function pAdministrativos(pagina){
   <div id="adm-pag" style="text-align:center;padding:8px;color:#94a3b8;font-size:12px"></div>`;
   buscarAdministrativos();
 }
+// Situações do administrativo/extrajudicial: FONTE ÚNICA (nome -> cor da etiqueta).
+// Estava escrita à mão em três lugares — o filtro, o mapa de cor e o formulário — e bastava
+// esquecer um para a etiqueta sair sem cor ou a opção não existir no cadastro.
+// "Em andamento" foi pedida pela Luana em 10/09/2026. Conferido que `processos_adm` não tem
+// CHECK em `situacao` (então a opção nova salva) e que as 31 linhas existentes estão todas em
+// "Em análise" (então nada fica órfão).
+// As cores são as MESMAS que o tema claro já define para as etiquetas `.tag` (linhas ~836-860):
+// aguardando #B45309, andamento #1D4ED8, ativo #15803D, inativo #B91C1C, suspenso #6D28D9. As
+// antigas vinham do tema escuro (#fbbf24, #4ade80, #f87171...) e ficavam lavadas no branco —
+// "Em análise" em âmbar claro dá ~1,8:1. Não é invenção de paleta: é usar a que já existe.
+// O fundo da etiqueta é a própria cor com alpha `14` (7,8%) e a borda `3d`. Medido: com o `22`
+// (13,3%) que estava antes, três das seis reprovavam em WCAG AA (4,18 / 4,28 / 4,19); com `14`
+// a pior fica em 4,52:1. Mexer no alpha conserta as seis de uma vez, sem desalinhar a cor do
+// texto das etiquetas `.tag` do resto do sistema.
+const ADM_SITUACOES={
+  'Em análise':'#B45309',
+  'Em andamento':'#1D4ED8',
+  'Exigência':'#C2410C',
+  'Recurso administrativo':'#6D28D9',
+  'Deferido':'#15803D',
+  'Indeferido':'#B91C1C'
+};
 async function buscarAdministrativos(){
   let q=supa.from('processos_adm').select('*,clientes(nome)',{count:'exact'}).order('created_at',{ascending:false});
   const _cond=await _condicoesBusca(admFiltro.busca);
@@ -4165,17 +4187,14 @@ async function buscarAdministrativos(){
     tb.innerHTML=`<tr><td colspan="7" style="text-align:center;padding:40px;color:#94a3b8">${error?'Erro: '+error.message:'Nenhum processo administrativo cadastrado.'}</td></tr>`;
     if(document.getElementById('adm-pag'))document.getElementById('adm-pag').textContent='';return;
   }
-  const corStatus={
-    'Em análise':'#fbbf24','Exigência':'#f97316','Recurso administrativo':'#a78bfa',
-    'Deferido':'#4ade80','Indeferido':'#f87171'
-  };
+  const corStatus=ADM_SITUACOES;
   tb.innerHTML=data.map(p=>`<tr>
     <td style="font-family:monospace;font-size:12px;color:var(--blue,#3d8ef0)">${p.numero_protocolo||'—'}</td>
     <td><strong>${p.orgao||'—'}</strong></td>
     <td>${p.clientes?.nome||'—'}</td>
     <td>${truncar(p.assunto||'—',40)}</td>
     <td style="font-size:12px">${p.responsavel||'—'}</td>
-    <td><span style="display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;background:${corStatus[p.situacao]||'#94a3b8'}22;color:${corStatus[p.situacao]||'#94a3b8'};border:1px solid ${corStatus[p.situacao]||'#94a3b8'}44">${p.situacao||'—'}</span></td>
+    <td><span style="display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;background:${corStatus[p.situacao]||'#94a3b8'}14;color:${corStatus[p.situacao]||'#94a3b8'};border:1px solid ${corStatus[p.situacao]||'#94a3b8'}3d">${p.situacao||'—'}</span></td>
     <td style="white-space:nowrap">
       ${p.situacao==='Indeferido'&&!p.convertido_para_judicial?`<button class="btn-icon" title="Converter para Judicial" onclick="converterParaJudicial('${p.id}')">⚖️</button>`:''}
       <button class="btn-icon" title="Editar" onclick="editarProcessoAdm('${p.id}')">✏️</button>
@@ -4213,7 +4232,7 @@ function formProcessoAdm(d={}){
   <div class="form-row">
     <div class="form-field"><label>Responsável *</label><select name="responsavel">${advsOpts(d.responsavel)}</select></div>
     <div class="form-field"><label>Situação</label>
-      <select name="situacao">${['Em análise','Exigência','Recurso administrativo','Deferido','Indeferido'].map(o=>`<option ${(d.situacao||'Em análise')===o?'selected':''}>${o}</option>`).join('')}</select>
+      <select name="situacao">${Object.keys(ADM_SITUACOES).map(o=>`<option ${(d.situacao||'Em análise')===o?'selected':''}>${o}</option>`).join('')}</select>
     </div>
   </div>
   <div class="form-field"><label>Observações</label><textarea name="observacoes">${d.observacoes||''}</textarea></div>
