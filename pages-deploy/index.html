@@ -3166,7 +3166,7 @@ function formCliente(d={}){return`<form id="form-cliente">
 // ---- JUDICIAIS ----
 async function pJudiciais(){
   const c=document.getElementById('conteudo');
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(500);clientesCache=data||[];}
+  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
   c.innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div class="toolbar">
@@ -4188,7 +4188,7 @@ let admFiltro={busca:'',situacao:'',area:''};
 async function pAdministrativos(pagina){
   const extra = pagina === 'extrajudiciais';
   const c=document.getElementById('conteudo');
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(500);clientesCache=data||[];}
+  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
   c.innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0" onmouseover="this.style.color='#F1F5F9'" onmouseout="this.style.color='#94a3b8'">← Voltar</button>
   <div class="toolbar">
@@ -4355,7 +4355,7 @@ async function excluirProcessoAdm(id,num){
 async function converterParaJudicial(admId){
   const{data:adm}=await supa.from('processos_adm').select('*,clientes(nome)').eq('id',admId).single();
   if(!adm)return;
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(500);clientesCache=data||[];}
+  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
   const advs=respNomes();   // era esta lista à mão, sem a Ana; ver respNomes()
   const advsOpts=(sel)=>`<option value="">Selecione...</option>`+advs.map(o=>`<option ${sel===o?'selected':''}>${o}</option>`).join('');
   const formHtml=`<form id="form-converter">
@@ -5310,7 +5310,7 @@ async function carregarHon(status=''){
 }
 const filtrarHon=v=>carregarHon(v);
 async function novoHon(){
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(500);clientesCache=data||[];}
+  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
   abrirModal('Novo Honorário',`<form id="form-hon">
     <div class="form-field"><label>Cliente *</label>
       <select name="cliente_id"><option value="">Selecione...</option>${clientesCache.map(cl=>`<option value="${cl.id}">${cl.nome}</option>`).join('')}</select>
@@ -5406,7 +5406,7 @@ async function carregarDocs(busca=''){
   </tr>`).join('');
 }
 async function novoDoc(){
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(500);clientesCache=data||[];}
+  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
   abrirModal('Vincular Documento',`<form id="form-doc">
     <div class="form-field"><label>Nome do Documento *</label><input name="nome"></div>
@@ -7395,7 +7395,7 @@ async function carregarAlvaras(filtro){
   }).join('');
 }
 async function novoAlvara(){
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(500);clientesCache=data||[];}
+  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
   abrirModal('Novo Alvará',`<form id="form-alvara">
     <div class="form-row">
@@ -7439,7 +7439,7 @@ async function avancarAlvara(id,proxEtapa){
 async function editarAlvara(id){
   const{data:a}=await supa.from('alvaras').select('*').eq('id',id).single();
   if(!a){toast('Não encontrado.','erro');return;}
-  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(500);clientesCache=data||[];}
+  if(!clientesCache.length){const{data}=await supa.from('clientes').select('id,nome').order('nome').limit(5000);clientesCache=data||[];}
   const{data:procs}=await somenteProcessosPrincipais(supa.from('processos').select('id,numero')).order('numero').limit(200);
   abrirModal('Editar Alvará',`<form id="form-alvara">
     <div class="form-row">
