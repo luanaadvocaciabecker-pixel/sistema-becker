@@ -1886,10 +1886,12 @@ const USUARIOS_BECKER={
   'juridico4@advocaciabecker.com':{nome:'Samaira Leite da Silva',funcao:'Advogada'},
   'juridico5@advocaciabecker.com':{nome:'Ana Beatriz Muller',   funcao:'Estagiária'},
   'cibele@advocaciabecker.com':   {nome:'Cibele Becker',        funcao:'Sócia'},
-  // Apelidos: não são contas da lista do Supabase, ficam só para não perder o perfil de quem
-  // entrar por um endereço antigo. Não aparecem na tabela de usuários.
-  'alana@advocaciabecker.com':      {nome:'Alana Pais Lemos',funcao:'Advogada',   apelido:true},
-  'atendimento@advocaciabecker.com':{nome:'Secretaria',      funcao:'Atendimento',apelido:true}
+  // Apelido: não é conta da lista do Supabase, fica só para não perder o perfil se a Alana
+  // entrar pelo endereço antigo. Não aparece na tabela de usuários.
+  // `atendimento@advocaciabecker.com` foi REMOVIDO em 10/09/2026 — a Luana confirmou que a conta
+  // não existe. Se a secretária precisar de acesso um dia, o caminho é criar o usuário em
+  // Authentication > Users do Supabase e acrescentar a linha aqui, com funcao:'Atendimento'.
+  'alana@advocaciabecker.com':{nome:'Alana Pais Lemos',funcao:'Advogada',apelido:true}
 };
 // Renderiza as linhas da tabela de usuários a partir do USUARIOS_BECKER. Existia à mão em dois
 // lugares e os dois estavam desatualizados; agora quem edita o mapa acerta as duas telas.
