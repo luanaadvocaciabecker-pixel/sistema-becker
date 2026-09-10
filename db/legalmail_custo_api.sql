@@ -187,3 +187,43 @@
 -- de 10/09 ou 11/09 já tinham prazo — 19 de 19, 0 sem prazo (TJSC 7, TJSP 10, TRF-4 2). E o
 -- dry-run `trt_gera_prazos('2026-08-25','2026-09-10',false)` voltou vazio. Ou seja: o que já
 -- havia chegado estava completo; o problema era só a entrada NOVA.
+
+-- ---------------------------------------------------------------------------
+-- 8. O LEGAL MAIL NAO AVISA QUANDO O ESCRITORIO PETICIONA -- medido em 10/09/2026
+-- ---------------------------------------------------------------------------
+-- Pergunta dela: "agora vai conseguir identificar quando nos peticionamos e fechou o prazo?"
+-- Resposta medida: NAO, nao de forma confiavel.
+--
+-- Gabarito 1 -- os 4 prazos de 09/09 que ela AFIRMA ter cumprido (5569, 5571, 5665, 5679):
+--   repuxados hoje com janela de 30 dias (1.131 intimacoes, 23 paginas, R$ 1,15), e o teor
+--   fresco do Legal Mail continua dizendo "Status do prazo: Prazo aberto" nos QUATRO.
+-- Gabarito 2 -- os 43 prazos que o escritorio encerrou em bloco a mao:
+--   as intimacoes deles NAO TRAZEM o campo "Status do prazo" nenhum. 43 de 43.
+-- Contraexemplo -- prazo 5688: texto "Prazo fechado", Data final 24/09 (futura), fechado em
+--   09/09 18:58 por lm_reconcile. Existe, mas e 1 caso, nao regra.
+--
+-- E o "fechamento automatico" que parecia funcionar e OUTRA COISA. Em
+-- public.lm_upsert_prazo_por_texto:
+--     cumpr := (dfinal < current_date);
+--     ... status = case when cumpr then 'cumprido' else 'pendente' end, cumprido = cumpr
+-- Marca "cumprido" SO PORQUE A DATA PASSOU. Classificacao dos 571 prazos fechados:
+--   554  fechados so por data, sem prova nenhuma
+--     6  texto do Legal Mail diz "Prazo fechado" (prova)
+--     1  rotina estampou cumprido_por (prova)
+--    10  outros
+-- Isso e o oposto de controle de prazo: prazo PERDIDO sai da lista de pendencias com cara de
+-- feito, e o sistema nao distingue cumprido de perdido.
+--
+-- Decisao dela: os 554 antigos FICAM como estao; conserto so daqui para frente.
+--
+-- O `pleading/notices-to-comply` (gratis) tambem nao resolveu: 95 processos, 132 prazos, todos
+-- HTTP 200, rodada completa, e `a_fechar_detectados: 0`. Nunca um prazo em
+-- `intimacoes_prazo_fechado`. Sobraram 38 "nao listados", e a hipotese a testar e que
+-- ausencia da lista = fechado -- ainda NAO confirmada.
+--
+-- Cobertura da janela do /notices, medida nos 128 prazos abertos com intimacao (o mais antigo
+-- tem 24 dias, mediana 13):
+--   dias=3 -> 16 de 128 (12%)   dias=7 -> 31   dias=15 -> 76   dias=30 -> 128
+-- A janela de 3 dias que ficou no cron em 09/09 deixava 88% dos prazos sem chance de fechar.
+-- `data_captura_inicio` filtra pela data de CAPTURA, que nunca muda -- entao janela estreita
+-- nao e otimizacao, e cegueira permanente para intimacao antiga.
