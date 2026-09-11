@@ -275,3 +275,33 @@
 -- Não dá para adivinhar sem o teor do ato — não inventar regra em cima de 1-2 amostras (regra 14
 -- do LICOES.md: afirmação em documentação exige medição e data, e aqui a amostra é pequena
 -- demais para virar regra).
+
+-- ============================================================================
+-- 11/09/2026 — TST: mais evidência de 15 dias úteis, mas NÃO subo o N (motivo: direção do erro)
+-- ============================================================================
+-- Ela mandou mais um PDF "Meus Expedientes", desta vez do TST (3ª/5ª/6ª Turmas). 3 linhas:
+--   RRAg 0010055-09.2023.5.15.0051 (5ª Turma): ciência 04/09 -> prazo final 28/09 = 15 dias úteis
+--   AIRR 0000824-45.2022.5.12.0028 (3ª Turma): ciência 25/08 -> prazo final 16/09 = 15 dias úteis
+--   AIRR 0010691-47.2023.5.15.0027 (6ª Turma): ciência 18/08 -> prazo final 16/09 = 20 dias úteis (fora do padrão)
+--
+-- 2 de 3 batem em exatos 15 dias úteis — reforça os 2 outliers já vistos no gabarito de ontem
+-- (CumPrSe 0010138-11 e ATOrd 0001933-49, ambos TRT 1º grau), agora com 4 casos no total.
+--
+-- MESMO ASSIM, NÃO estendo a régua para N=15 em nada agora. O motivo é a DIREÇÃO do erro, não a
+-- falta de evidência:
+--   - `N = least(n_base, n_dirigido)` sempre pega o MENOR. Se o n_base for 15 e o prazo real de
+--     um caso específico for 8 (RRAg/AIRR também aparecem na classificação "Recurso|Agravo" que
+--     hoje já vira N=8), o prazo calculado ficaria D14/D15 — DEPOIS do vencimento real. É
+--     exatamente o erro perigoso: o time confiaria numa data que já passou.
+--   - N=8 (o que já está em produção) é MENOR que 15. Se a régua certa para TST for realmente
+--     15, o sistema antecipa a data — erra para o lado seguro, o mesmo raciocínio de sempre.
+--   - Confundir dois fenômenos diferentes: os 2 outliers de TRT 1º grau (CumPrSe/ATOrd) e os 2
+--     casos novos de TST (RRAg/AIRR) batem no MESMO número por coincidência, não necessariamente
+--     pela MESMA regra jurídica — um pode ser impugnação ao cumprimento de sentença (CPC art.
+--     525, 15 dias úteis, aplicado subsidiariamente) e o outro uma regra própria do TST. Sem o
+--     teor do ato, tratar os 4 como uma coisa só seria inventar regra maior que a evidência.
+--
+-- Fica REGISTRADO para o dia em que alguém tiver o teor desses atos (RRAg/AIRR do TST
+-- especificamente) e puder confirmar se 15 dias úteis é mesmo a régua do TST em recurso de
+-- revista — aí sim vale considerar `tribunal ~* '^TST'` como um terceiro caso na função, com o
+-- cuidado de nunca deixar o N subir sem prova poder empurrar prazo pra depois do real.
