@@ -236,3 +236,42 @@
 -- Volume do TST: 2 a 6 atos/mês, com pico de 25 em junho/2026. JULHO/2026 TEVE ZERO, com a
 -- coleta geral do mês normal (525 atos, 110 do TRT). Cabe no ruído de um fluxo de 2–6/mês,
 -- mas NÃO é prova de que a coleta não falhou naquele mês. Incerteza, não conclusão.
+
+-- ============================================================================
+-- 11/09/2026 — RECURSO TRABALHISTA (2º grau) É 8 DIAS ÚTEIS, NÃO 5 (migration trt_recurso_8_dias)
+-- ============================================================================
+-- Origem: ela mandou 4 PDFs "Meus Expedientes" reais do PJe (TRT-12 e TRT-15, 1º e 2º grau) e
+-- pediu para conferir os prazos e ver como calcular. Extraí as 18 linhas (Data de Ciência ->
+-- Prazo Final) e contei dias úteis, excluindo sáb/dom e o feriado de 07/09 (Independência).
+--
+-- RESULTADO, 11/09/2026:
+--   Ação Trabalhista (ATOrd/ATSum) e Cumprimento de Sentença, 1º grau ... 5 dias úteis, 7 de 7
+--   Recurso Ordinário / RORSum, 2º grau ...................................... 8 dias úteis, 5 de 5
+--   resto (9, 10, 15, 16 dias) ........................ 6 casos, SEM explicação sem o teor do ato
+--
+-- 8 dias úteis é o prazo recursal correto na Justiça do Trabalho (CLT) — diferente dos 15 dias
+-- úteis do CPC cível, que é o que a função implicitamente assumia ao usar N=5 sempre (o 5 vinha
+-- do gabarito de 1º grau, nunca tinha sido testado contra recurso de 2º grau).
+--
+-- A CLASSE JÁ ESTAVA NO BANCO, só não estava sendo lida: `publicacoes_atos.classe` (medido em
+-- 11/09: 448 de 1.204 atos trabalhistas preenchidos, 37% de cobertura; 48 desses já classificam
+-- como recurso). Valores reais vistos: "Recurso Ordinário Trabalhista", "Recurso Ordinário -
+-- Rito Sumaríssimo", "Agravo de Petição", "Agravo de Instrumento em Recurso de Revista",
+-- "Recurso de Revista", "Recurso de Revista com Agravo".
+--
+-- A CORREÇÃO: `n_base := case when a.classe ~* 'Recurso|Agravo' then 8 else 5 end`, e o `N`
+-- final continua sendo `least(n_base, n_dirigido)` — o texto dirigido, quando existe, continua
+-- podendo encurtar, nunca alongar (mesma regra de sempre: erra para o lado seguro).
+--
+-- SEM `classe` (63% dos casos hoje), continua caindo em 5 — MESMO comportamento de antes desta
+-- migration, mesmo lado seguro. Ninguém regride.
+--
+-- CONFERIDO após aplicar: dry-run 2025-07-01 a 2026-09-11 dá 31 atos com classe de recurso,
+-- todos com N=8; os outros 880 continuam em N<=5. Nenhum prazo já gravado (`fonte=
+-- 'DJEN/calculado'`) foi tocado — a função só afeta atos futuros, sem `on conflict` disparando
+-- update em linha existente.
+--
+-- OS 4 CASOS FORA DO PADRÃO (9, 10, 15, 16 dias úteis no gabarito de 18) FICAM SEM CORREÇÃO.
+-- Não dá para adivinhar sem o teor do ato — não inventar regra em cima de 1-2 amostras (regra 14
+-- do LICOES.md: afirmação em documentação exige medição e data, e aqui a amostra é pequena
+-- demais para virar regra).

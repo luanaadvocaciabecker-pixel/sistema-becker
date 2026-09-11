@@ -373,3 +373,22 @@ prazo e não havia linha para fechar (0 de 1.959). **Foi sorte, não desenho.**
 30. **"Não deu problema" não é o mesmo que "está certo".** A regra errada não fechou nada só
     porque faltava Data final naquelas linhas; qualquer mudança de formato do fornecedor teria
     transformado o acerto acidental em prazo perdido.
+
+---
+
+## 11/09/2026 — regra de dias trabalhista não é uma, são pelo menos duas (1º e 2º grau)
+
+Ela mandou 4 PDFs reais do "Meus Expedientes" do PJe (TRT-12 e TRT-15) pedindo para conferir os
+prazos. Contei dias úteis entre Data de Ciência e Prazo Final nas 18 linhas: **7 de 7 casos de
+1º grau bateram em exatos 5 dias úteis; 5 de 5 recursos de 2º grau bateram em exatos 8.** O
+`N=5` fixo da função já estava certo para 1º grau (é o mesmo gabarito que validou o TJSC), mas
+nunca tinha sido testado contra recurso — e 8 dias é o prazo recursal correto na Justiça do
+Trabalho (CLT), não 15 (CPC) nem 5.
+
+A classe do processo (`"Recurso Ordinário Trabalhista"`, `"Agravo..."`) já estava coletada em
+`publicacoes_atos.classe` — só não estava sendo lida pela função que calcula o prazo.
+
+**REGRA:**
+31. **Um `N` fixo para "todo ato do tribunal X" quase sempre esconde uma segunda categoria.**
+    Antes de confiar num gabarito pequeno (aqui, 6 casos de TJSC), testar contra uma classe de
+    ato diferente (aqui, recurso de 2º grau) antes de assumir que a régua serve para tudo.
