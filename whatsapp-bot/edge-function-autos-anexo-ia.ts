@@ -106,6 +106,58 @@ function blocoPolo(cliente: string | null, polo: string | null, papeis: string |
   ].join(" ");
 }
 
+// Converte 'YYYY-MM-DD' (formato do banco) para 'DD/MM/AAAA'. MESMO BLOCO do autos-ia, de propósito.
+function dataBR(d: string | null | undefined): string | null {
+  if (!d) return null;
+  const [a, m, dd] = String(d).split("-");
+  return dd && m && a ? `${dd}/${m}/${a}` : null;
+}
+
+// Os PRAZOS deste processo que o sistema JÁ TEM — vêm do tribunal (Legal Mail) ou do cálculo do
+// DJEN, não da leitura do PDF inteiro. MESMO BLOCO do autos-ia, de propósito.
+async function blocoPrazos(processoId: number): Promise<string> {
+  try {
+    const r = await sb(`prazos?processo_id=eq.${processoId}&select=data,cumprido,descricao&order=data.desc&limit=8`);
+    const lst: any[] = Array.isArray(r) ? r : [];
+    if (!lst.length) return "PRAZOS JÁ CADASTRADOS NO SISTEMA: nenhum para este processo.";
+    const linhas = lst.map((p) => `- ${dataBR(p.data)} · ${p.cumprido ? "cumprido" : "EM ABERTO"} · ${p.descricao || ""}`).join("\n");
+    return [
+      "PRAZOS JÁ CADASTRADOS NO SISTEMA (datas conferidas com o tribunal — prefira estes valores a qualquer cálculo seu sobre o texto):",
+      linhas,
+      "Se o texto dos autos sugerir prazo ou data diferente do que está aqui, diga isso em pontos_atencao — não escolha um valor em silêncio.",
+    ].join("\n");
+  } catch {
+    return "PRAZOS JÁ CADASTRADOS NO SISTEMA: não foi possível consultar agora.";
+  }
+}
+
+// Corrige data_final/prazo_dias com o prazo que o sistema JÁ TEM. MESMO BLOCO do autos-ia, de
+// propósito — achado em 10/09/2026 (ver o comentário lá): 2 de 7 resumos gravados saíram com
+// data_final:null para processo que já tinha prazo aberto com data OFICIAL do tribunal no banco.
+// NUNCA inventa prazo: só age quando existe um prazo aberto de verdade no sistema.
+async function corrigeComPrazoDoSistema(obj: any, processoId: number): Promise<any> {
+  if (!obj) return obj;
+  try {
+    const r = await sb(`prazos?processo_id=eq.${processoId}&cumprido=eq.false&select=data,descricao&order=data.asc&limit=1`);
+    const p = Array.isArray(r) && r[0] ? r[0] : null;
+    if (!p) return obj; // sem prazo aberto no sistema: mantém o que a IA leu
+    const dataSistema = dataBR(p.data);
+    const diasMatch = String(p.descricao || "").match(/\((\d+)\s*dias?\)/) || String(p.descricao || "").match(/\+(\d+)\s*dias\s*úteis/);
+    const diasSistema = diasMatch ? parseInt(diasMatch[1], 10) : null;
+    const dataIA = obj.data_final && obj.data_final !== "null" ? obj.data_final : null;
+    const divergiu = dataIA && dataIA !== dataSistema;
+    obj.data_final = dataSistema;
+    if (diasSistema != null) obj.prazo_dias = diasSistema;
+    if (divergiu) {
+      obj.pontos_atencao = Array.isArray(obj.pontos_atencao) ? obj.pontos_atencao : [];
+      obj.pontos_atencao.unshift(
+        `⚠️ A leitura do PDF sugeriu data final ${dataIA}, mas o sistema tem ${dataSistema} confirmado com o tribunal (prazo já cadastrado) — usando o do sistema. Confira.`
+      );
+    }
+    return obj;
+  } catch { return obj; } // consulta falhou: nunca quebra o fluxo por causa da correção
+}
+
 // Mesmo prompt do autos-ia, de propósito: o resumo tem de sair igual, venha do download pago ou
 // da íntegra anexada. Se um dia mudar lá, mudar aqui também.
 const PROMPT = [
@@ -125,10 +177,10 @@ const PROMPT = [
   '"estrategia":"1-3 frases de recomendação estratégica (teses, recursos cabíveis, próximo passo sugerido) — só se houver base nos autos"',
   '}',
   "'custas' = precisa recolher custas/preparo/porte/GRU/taxa. 'documentos' = precisa juntar/apresentar documento/procuração/comprovante. 'geral' = qualquer outra.",
-  "REGRAS: não invente fatos, números de processo, valores, datas ou jurisprudência. Se algo não estiver nos autos, omita o item (não preencha com suposição). Se o ato não fixa prazo para o escritório, use prazo_dias e data_final null. Português claro, sem juridiquês desnecessário. Cada lista com no máximo 6 itens.",
+  "REGRAS: não invente fatos, números de processo, valores, datas ou jurisprudência. Se algo não estiver nos autos, omita o item (não preencha com suposição). Se o ato não fixa prazo para o escritório, use prazo_dias e data_final null. Se houver um bloco 'PRAZOS JÁ CADASTRADOS NO SISTEMA', ele é mais confiável que sua leitura do texto — use os valores dele. Português claro, sem juridiquês desnecessário. Cada lista com no máximo 6 itens.",
 ].join(" ");
 
-async function lerComIA(pdfUrl: string, polo: string): Promise<{ ok: boolean, mb: number, obj: any, err?: string }> {
+async function lerComIA(pdfUrl: string, polo: string, processoId: number): Promise<{ ok: boolean, mb: number, obj: any, err?: string }> {
   const pr = await fetch(pdfUrl);
   if (!pr.ok) return { ok: false, mb: 0, obj: null, err: `pdf http ${pr.status}` };
   const buf = new Uint8Array(await pr.arrayBuffer());
@@ -138,7 +190,7 @@ async function lerComIA(pdfUrl: string, polo: string): Promise<{ ok: boolean, mb
   const g = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GMODEL}:generateContent?key=${encodeURIComponent(GKEY)}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ fileData: { fileUri: uri, mimeType: "application/pdf" } }, { text: `${polo}\n\n${PROMPT}` }] }],
+      contents: [{ role: "user", parts: [{ fileData: { fileUri: uri, mimeType: "application/pdf" } }, { text: `${polo}\n\n${await blocoPrazos(processoId)}\n\n${PROMPT}` }] }],
       generationConfig: { temperature: 0, maxOutputTokens: 3200, responseMimeType: "application/json" },
     }),
   });
@@ -148,6 +200,7 @@ async function lerComIA(pdfUrl: string, polo: string): Promise<{ ok: boolean, mb
   const a = txt.indexOf("{"), b = txt.lastIndexOf("}");
   if (a >= 0 && b > a) txt = txt.slice(a, b + 1);
   let obj: any = null; try { obj = JSON.parse(txt); } catch { /* deixa null */ }
+  if (obj) obj = await corrigeComPrazoDoSistema(obj, processoId);
   return { ok: !!obj, mb, obj, err: obj ? undefined : "json invalido" };
 }
 
@@ -193,7 +246,7 @@ Deno.serve(async (req) => {
     const pr0 = Array.isArray(prs) ? prs[0] : null;
     const polo = blocoPolo(pr0?.clientes?.nome || null, pr0?.polo_cliente || null, pr0?.polo_papeis || null);
 
-    const ia = await lerComIA(assinada, polo);
+    const ia = await lerComIA(assinada, polo, processoId);
     if (!ia.ok) return json({ erro: ia.err || "falha da IA", mb: ia.mb }, 502);
 
     // Grava com fonte='anexo' e SEM tocar em n_autos/job_id/pdf_path, que pertencem ao caminho
