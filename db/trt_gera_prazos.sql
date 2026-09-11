@@ -305,3 +305,43 @@
 -- especificamente) e puder confirmar se 15 dias úteis é mesmo a régua do TST em recurso de
 -- revista — aí sim vale considerar `tribunal ~* '^TST'` como um terceiro caso na função, com o
 -- cuidado de nunca deixar o N subir sem prova poder empurrar prazo pra depois do real.
+
+-- =====================================================================================
+-- 11/09/2026 — os prazos dos PDFs "Meus Expedientes" saem da fila "a conferir"
+-- =====================================================================================
+-- Ela pediu: os prazos que ela mesma mandou (PDFs do próprio tribunal, "Meus Expedientes")
+-- não precisam mais ficar como ESTIMADO/"a conferir" — o Prazo Final já é o dado oficial do
+-- tribunal, não uma estimativa nossa. Cruzados os 27 pares (processo, Data de Ciência, Prazo
+-- Final) dos 6 PDFs contra `prazos` (cumprido=false, status='estimado'):
+--
+--   12 prazos abertos casaram com processo cadastrado:
+--     8 já tinham a data calculada IGUAL ao Prazo Final do tribunal — só confirmados
+--       (ids 5714, 5726, 5736, 5797, 5740, 5770, 5773, 5774): status='confirmado'.
+--     4 tinham a data calculada DIFERENTE do Prazo Final real — corrigidos para o valor do
+--       tribunal e confirmados (nunca "confirma" um valor que já se sabe errado):
+--         5733 (0001024-22.2025.5.12.0004): 11/09 → 16/09
+--         5802 (0001806-14.2026.5.12.0030): 18/09 → 23/09
+--         5775 (0010055-09.2023.5.15.0051, TST RRAg): 14/09 → 28/09 — mais uma evidência de
+--           que o TST usa régua diferente do TRT (ver seção "TST" acima); aqui não é palpite,
+--           é o Prazo Final oficial do próprio tribunal.
+--         5800 (0011066-58.2022.5.15.0132, RORSum 2º grau): 17/09 → 22/09 — prazo calculado
+--           ANTES da correção N=8 (migration trt_recurso_8_dias) entrar no ar; confirma que a
+--           correção estava certa, mas o registro antigo só é corrigido agora, com prova.
+--
+-- ACHADO LATERAL — dois prazos fechados "em bloco sem conferência" (ver seção acima) estavam
+-- com data calculada errada, e um deles vence HOJE (11/09/2026). NÃO foram alterados por esta
+-- rodada — avisados diretamente para ela decidir/confirmar manualmente, porque envolve saber
+-- se a peça já foi protocolada, não só corrigir uma data:
+--   prazo 5732 (processo 6298, 0000998-80.2025.5.12.0050): calculado 04/09, real 11/09 (HOJE).
+--   prazo 5729 (processo 6085, 0000824-45.2022.5.12.0028, TST AIRR): calculado 01/09, real 16/09.
+--
+-- ACHADO LATERAL 2 — processos dos PDFs sem NENHUM prazo no sistema (nem estimado, nem
+-- encerrado): não é isto que ela pediu para resolver agora, mas fica registrado porque tem
+-- prazo real batendo:
+--   processo 6233 (0001899-87.2024.5.12.0016, ROT 2º grau): ciência 14/09, final 24/09.
+--   processo 6741 (0001742-10.2026.5.12.0028): ciência 14/09, final 21/09.
+--   processo 6720 (0001794-06.2026.5.12.0028): ciência ~20/08, final 14/09 (em 3 dias).
+-- E 6 números de processo dos PDFs nem estão cadastrados no sistema (checar se são clientes
+-- novos ou erro de transcrição do número): 0001732-38.2026.5.12.0004, 0001513-25.2026.5.12.0004,
+-- 0010138-11.2026.5.15.0151, 0010691-47.2023.5.15.0027, 0011196-71.2026.5.15.0079,
+-- 0011220-44.2025.5.15.0044.
