@@ -345,3 +345,38 @@
 -- novos ou erro de transcrição do número): 0001732-38.2026.5.12.0004, 0001513-25.2026.5.12.0004,
 -- 0010138-11.2026.5.15.0151, 0010691-47.2023.5.15.0027, 0011196-71.2026.5.15.0079,
 -- 0011220-44.2025.5.15.0044.
+
+-- =====================================================================================
+-- 11/09/2026 — "Recurso de Revista" (TST) passa a usar 15 dias úteis, não 8 — migration
+-- trt_recurso_revista_15_dias
+-- =====================================================================================
+-- Ela pediu para usar os PDFs que mandou para refinar o parâmetro de cálculo e parar de
+-- errar. Ao cruzar os 27 pares (processo/ciência/Prazo Final) dos PDFs contra os prazos
+-- abertos (ver seção "os prazos... saem da fila 'a conferir'" acima), sobrou um padrão
+-- claro nos casos de TST que a correção de 8 dias (recurso trabalhista) ainda calculava
+-- errado:
+--
+--   classe "Recurso de Revista com Agravo" (RRAg) — 1 caso — 15 dias úteis exatos
+--   classe "Agravo de Instrumento em Recurso de Revista" (AIRR) — 1 caso — 15 exatos
+--   classe "Agravo de Instrumento em Recurso de Revista" (AIRR, outro processo) — 20 dias
+--     úteis (outlier, mais alto que 15 — não contradiz o piso de 15, só não o explica)
+--
+-- Nenhum caso de "Recurso de Revista" (em qualquer variação) bateu em 8 dias ou menos.
+-- `processos.tribunal` NÃO serve para distinguir TST de TRT aqui — o campo carrega o
+-- tribunal de ORIGEM do processo (ex.: "TRT12"), não o órgão que praticou o ato (mesmo
+-- problema já documentado para o aviso de distribuição do TST). A classe do ATO em si já
+-- resolve: qualquer classe contendo "Recurso de Revista" — sozinho, com Agravo, ou como
+-- Agravo de Instrumento — é o recurso de competência do TST, com prazo diferente do
+-- Recurso Ordinário (TRT, 8 dias, CLT art. 895 expresso). A hipótese jurídica mais provável
+-- é a aplicação subsidiária do CPC (art. 1.003 §5º, 15 dias úteis) para o instrumento que a
+-- CLT não define em 8 dias — mas isso é hipótese, não prova; o que está provado é o número.
+--
+-- "Agravo" isolado (Agravo de Petição, agravo genérico sem "de Revista") CONTINUA em 8 —
+-- sem nenhuma evidência de que seja diferente, e 8 é o lado seguro quando não se sabe.
+--
+-- Medido (dry-run 2025-07-01 a 2026-09-11, antes/depois):
+--   17 atos têm classe com "Recurso de Revista" (13 AIRR + 3 RRAg + 1 "com Agravo");
+--   3 já tinham prazo gravado (não tocados); 14 ainda não — esses passam de N=8 para N=15.
+--   Todos os outros 894 candidatos do dry-run permanecem exatamente iguais (871 em N=5,
+--   18 em N=8 — os "Recurso Ordinário"/RORSum/Agravo de Petição continuam intocados).
+--   Nenhum prazo já gravado é alterado por esta migration — só atos futuros/não gravados.
