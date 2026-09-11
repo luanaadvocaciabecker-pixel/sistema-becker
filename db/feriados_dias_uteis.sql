@@ -15,12 +15,23 @@
 -- lm_add_business_days ficou intacta de propósito: outros caminhos dependem dela.
 
 -- CREATE TABLE public.feriados (
---   data date primary key,
+--   data date not null,
 --   nome text not null,
 --   abrangencia text not null default 'nacional'
---     check (abrangencia in ('nacional','trabalhista','estadual','municipal'))
+--     check (abrangencia in ('nacional','trabalhista','estadual','municipal',
+--                             'TRT9','TRT12','TRT15')),
+--   primary key (data, abrangencia)
 -- );
 -- RLS: policy `feriados_leitura`, select para authenticated.
+--
+-- 11/09/2026 — migration `feriados_por_tribunal`: PK trocada de `data` sozinha para
+-- `(data, abrangencia)`, e o check ganhou TRT9/TRT12/TRT15. Motivo: a tabela era "um feriado
+-- por dia no calendário inteiro" — não dava pra ter uma suspensão regional de um tribunal
+-- sem I ser a ÚNICA coisa daquele dia. Prova de que era preciso: 18/02/2026 (Quarta de Cinzas)
+-- é suspensão de expediente no TRT-9 E no TRT-15 ao mesmo tempo — duas linhas, mesma data,
+-- abrangências diferentes. `becker_dias_uteis()` já usava `exists(...)`, não join 1:1, então
+-- não precisou mudar por causa da PK — só a tabela. As 56 linhas antigas continuaram intactas
+-- (nunca havia duas linhas pra mesma data antes, então a chave só ficou mais permissiva).
 
 -- Semeado: feriados nacionais 2026 e 2027.
 --   2026 (Páscoa 05/04): 01/01, 16-17/02 Carnaval, 03/04 Sexta Santa, 21/04, 01/05,
@@ -42,3 +53,50 @@
 --   select * from feriados order by data;
 --
 -- MANUTENÇÃO: semear os feriados de 2028 antes de dez/2027, e a suspensão 20/12/2027-20/01/2028.
+
+-- =====================================================================================
+-- 11/09/2026 — calendário regional por tribunal (TRT9/TRT12/TRT15), migration
+-- feriados_regionais_trt + trt_gera_prazos_abrangencia_regional
+-- =====================================================================================
+-- Ela pediu para usar os PDFs oficiais que mandou para "ir tentando ver o parâmetro de cálculo
+-- de prazo para parar de errar". Mandou 3 calendários de tribunal (TRT-9/PR, TRT-12/SC,
+-- TRT-15/Campinas, todos 2026) e um artigo genérico sobre contagem de prazo trabalhista.
+--
+-- ACHADO: `becker_dias_uteis()` sempre usou só `nacional`+`trabalhista` — nenhuma suspensão
+-- REGIONAL de tribunal específico (Carnaval regimental, Semana Santa, vésperas de feriado,
+-- portarias de suspensão ad-hoc) nunca foi excluída, para nenhum TRT. Boa notícia: Carnaval,
+-- Corpus Christi e Sexta-feira Santa já estavam em `nacional` — não eram o gap. O gap real,
+-- medido contra os 3 calendários, ficou pequeno: ~9 a 12 datas por tribunal, sempre um dia
+-- normal de semana perto de um feriado já conhecido (véspera de Tiradentes, véspera de Corpus
+-- Christi, Quarta de Cinzas, Semana Santa completa, feriados transferidos por portaria, e
+-- 2 suspensões ad-hoc do TRT-9 — Copa do Mundo 29/06 e duas datas avulsas 28/08 e 01/09).
+--
+-- Só entraram datas Estaduais/Regimentais/"suspensão de expediente" — nunca Municipal (feriado
+-- de cidade) nem Órgão Julgador (vara específica): dependeriam de saber a comarca exata de cada
+-- processo, que não temos mapeada, e são o nível mais arriscado de inventar suspensão que não
+-- existe (a regra de ouro deste arquivo: feriado esquecido só antecipa, inofensivo; feriado
+-- inventado empurra prazo pra frente e PERDE prazo de verdade).
+--
+-- `trt_gera_prazos` passa a escolher a abrangência pelo `a.tribunal` do ATO (não do processo —
+-- mesmo cuidado já registrado para AIRR/TST, o ato pode tramitar em órgão diferente da origem
+-- do processo). Tribunal sem calendário próprio (TRT-2, TRT-24, TST, qualquer TJ): continua
+-- só nacional+trabalhista, nunca inventa suspensão sem fonte.
+--
+-- CONFERIDO — e é HONESTO dizer que o calendário novo NÃO explicou os outliers pendentes:
+-- testados os 5 casos ainda sem explicação (0001933-49, 0001794-06, 0000998-80 do TRT-12;
+-- 0010138-11, 0010691-47 do TRT-15) contra o calendário regional novo — nenhum deles atravessa
+-- uma das datas novas, então o cálculo não muda nem um dia para nenhum. O calendário era um gap
+-- real (e passa a valer para qualquer ato futuro cuja janela cruze uma dessas datas), mas não é
+-- a causa desses 5 casos específicos — eles continuam sem explicação, e não inventamos uma
+-- regra nova só para fechar a conta. Achado lateral curioso, registrado sem virar regra: dois
+-- desses outliers (0001933-49 e 0010138-11) bateram EXATO em 15 dias úteis, o mesmo número que
+-- já aparece nos casos de TST/impugnação — pode ser o mesmo fenômeno com classe mal capturada,
+-- pode ser coincidência; sem o teor do ato não dá para saber, então fica só anotado.
+--
+-- Dry-run 2025-07-01 a 2026-09-11 antes/depois da migration: mesma distribuição de N (865 em 5,
+-- 18 em 8, 13 em 15 — a pequena variação de total entre rodadas é do cron diário rodando no
+-- meio do dia, não desta migration). Nenhum prazo já gravado foi tocado.
+--
+-- MANUTENÇÃO: calendário 2026 só — o de 2027 de cada tribunal precisa ser buscado de novo
+-- quando publicado. Só 3 tribunais cobertos; os demais (`TRT-2`, `TRT-24` aparecem nos dados)
+-- ficam sem calendário próprio até ela mandar a fonte oficial.
