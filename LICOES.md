@@ -392,3 +392,16 @@ A classe do processo (`"Recurso Ordinário Trabalhista"`, `"Agravo..."`) já est
 31. **Um `N` fixo para "todo ato do tribunal X" quase sempre esconde uma segunda categoria.**
     Antes de confiar num gabarito pequeno (aqui, 6 casos de TJSC), testar contra uma classe de
     ato diferente (aqui, recurso de 2º grau) antes de assumir que a régua serve para tudo.
+
+---
+
+## 11/09/2026 — duplicado por CPF que o nome exato não achava
+
+Consertando os clientes "X" (nome colado com a parte contrária), 13 de 14 casos com duplicado
+limpo bateram por **nome exato**. Um (DEICY CONTESSOTTO DA SILVA URIAS) só apareceu cruzando
+por **CPF** — o registro "X" tinha o CPF colado no nome (`"...URIAS (044.966.439-28) X..."`) e
+o registro limpo não, então a comparação de string nunca ia bater.
+
+**REGRA:**
+32. **Achar duplicado de cliente exige cruzar por nome E por CPF/CNPJ, nunca só um dos dois.**
+    Documento sozinho já resolveu um caso que o nome, sozinho, não resolvia.

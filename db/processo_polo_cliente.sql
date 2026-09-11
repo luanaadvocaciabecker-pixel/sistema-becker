@@ -170,3 +170,63 @@
 -- * 334 processos ativos AINDA SEM POLO. Neles a tela mostra "não identificado — confira nos
 --   autos antes de peticionar" e o prompt proíbe a IA de afirmar o lado. É o comportamento
 --   correto, mas não é cobertura: só a intimação com "(PAPEL - NOME)" resolve.
+
+-- ============================================================================
+-- 11/09/2026 — 26 clientes com nome colado ("Fulano X Beltrano") — conserto parcial
+-- ============================================================================
+-- Origem: ela mandou print do processo 5038710-53.2026.8.24.0000 (IRIA RODRIGUES DE LIMA
+-- FREITAS) dizendo "olha que eu digo ele não tá identificando qual o nosso cliente".
+--
+-- APURADO: o algoritmo (becker_deriva_polo) estava certo; o CADASTRO estava quebrado. O cliente
+-- (id 1444) tinha as DUAS partes coladas no mesmo campo `nome`:
+--   "IRIA RODRIGUES DE LIMA FREITAS X BRADESCO ADMINISTRADORA DE CONSORCIOS"
+-- Residuo da importação da planilha "ATIVOS ATUAL 2026" (`Status: NAO_ENCONTRADO`). Com os dois
+-- nomes colados, `becker_deriva_polo` nunca casa contra o padrão (PAPEL - NOME) da intimação, e
+-- cai — corretamente — no "não identificado" em vez de chutar um lado.
+--
+-- MEDIDO: 82 clientes no formato "A X B" no total; 26 com processo vinculado, e os 26 tinham
+-- polo_cliente NULL — 100%. Não era o processo dela sozinho.
+--
+-- O CONSERTO, em 3 camadas de confiança (do mais seguro ao menos):
+--   1) 13 processos: já existia um cliente LIMPO com o mesmo nome exato em outro id --
+--      reapontar processos.cliente_id.
+--   2) 1 processo (6655, DEICY CONTESSOTTO DA SILVA URIAS): o cliente limpo só foi achado
+--      cruzando por CPF, não por nome exato — o registro "X" tinha o CPF colado no nome
+--      ("(044.966.439-28)") e o limpo não. Lição: cruzar por CPF/CNPJ além de nome exato.
+--   3) 2 processos (6612 ALEXSANDRA NICOLETTI, 6685 ELIGIA TERESINHA STARANSCHECK): sem
+--      duplicado limpo em lugar nenhum. O lado certo foi confirmado casando cada metade contra
+--      o texto real das intimações do processo, com o MESMO método/tolerância de
+--      becker_deriva_polo() (2+ tokens batendo, no máximo 1 divergente) — não um novo critério.
+--
+-- CUIDADO CONFIRMADO NA PRÁTICA — não dá para assumir "primeiro nome = nosso cliente": dos 14
+-- casos resolvidos por nome/texto, 13 bateram no lado ANTES do " X ", mas o processo
+-- 5012047-78.2024.8.24.0019 ("BRIZOLA JAPUR...LTDA X AGRO LAVOURA...FALIDO") bateu no lado
+-- DEPOIS — a AGRO LAVOURA (cliente conhecido, aparece como autor em uns processos e réu em
+-- outros) estava na segunda posição. Uma regra cega "pega sempre o primeiro" teria errado esse
+-- caso. É a mesma classe de cuidado que motivou o pedido dela: nunca inventar uma segunda forma
+-- de saber quem somos nós.
+--
+-- RESULTADO: 16 de 26 consertados. Os registros "X" antigos NÃO foram apagados — ficaram
+-- marcados `status='Duplicado (importação)'`, com a razão em `observacoes`, para auditoria.
+--
+-- OS 10 QUE FICAM SEM RESOLVER, DE PROPÓSITO — sem evidência textual nenhuma, nem no nome nem
+-- no texto das intimações, para decidir com segurança:
+--   6657 (GEORGE ALVES DA SILVA X WEG...), 6633 (EDLENE...X PANIFICADORA ITALIA), 6620 (IPREV
+--   X LUIZA NUNES...), 6686 (UNIAO-FAZENDA NACIONAL X INGRIT JUNG...), 6643 (SICOOB CREDIMOC
+--   X GISELIO...), 6611 (LUCAS GABRIEL...X FABIO STEUERNAGEL), 6617 (IGOR FABRICIO...X PAULA
+--   ISABELA...), 6605 (ESTADO DE SC X AGRO LAVOURA...), 6607 (PIERRE LOURENZETTI X UNIAO-AGU),
+--   6673 (CRESOL VANGUARDA X MASSA FALIDA DE AGRO LAVOURA...)
+-- Precisam de conferência manual (ou aguardar publicação nova com o padrão de parte) antes de
+-- qualquer correção — chutar cliente errado aqui é exatamente o risco que ela apontou como grave.
+--
+-- ACHADO LATERAL — o caso da IRIA (6667) continua com polo_cliente NULL mesmo depois do
+-- conserto do cadastro, e é o CASO CORRETO de ficar assim: as 2 únicas publicações coletadas
+-- para esse processo são avisos de distribuição puros (mesma categoria já achada hoje cedo para
+-- o TRT/TST) — "Processo 5038710-53.2026.8.24.0000 distribuído para Gab. 04 - 1ª Câmara de
+-- Direito Comercial..." — sem nenhum nome de parte. Não há texto nenhum para derivar o polo
+-- ainda. Verificado também que WILHAN DOMINGOS SCHNAIDER (6635, TRT-12) tem 20 publicações e
+-- NENHUMA com o padrão (PAPEL - NOME) — reforça que textos do PJe trabalhista frequentemente
+-- não trazem esse formato, é um buraco de cobertura já conhecido, não deste conserto.
+--
+-- VERIFICAÇÃO: `select count(*) from clientes c join processos p on p.cliente_id=c.id where
+-- c.nome ~* '\sX\s.{5,}'` caiu de 26 para 10 — os 10 restantes são exatamente os sem evidência.
