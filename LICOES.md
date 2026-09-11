@@ -254,3 +254,154 @@ processo do TRT e generalizado; nos processos do eProc ele responde 200 com dado
 **REGRA:**
 14. **Afirmação em documentação tem de vir com a medição e a data.** "Funciona" sem número é
     palpite. E resultado de um caso não vira regra geral.
+
+---
+
+## 10/09/2026 — "todo ato vira prazo" precisa de lista de exceções, e ela cresce
+
+`trt_gera_prazos` transforma todo ato trabalhista sem "Data final" em prazo estimado de 5 dias
+úteis. A lista de exceções tinha dois itens (pauta de julgamento, ata de sessão). Faltava um
+terceiro, e ele é o mais comum de todos.
+
+**Aviso de distribuição** — *"Processo 0000007-12.2025.5.12.0016 distribuído para 3ª Turma -
+Gabinete da Ministra Margareth Rodrigues Costa na data 05/09/2026. Para maiores informações,
+clique no link…"* — é o ato inteiro. Não manda fazer nada. Medido: **174 dos 1.195 atos
+trabalhistas** são isso (130 TRT + 44 TST), o maior tem **304 caracteres**, e **nenhum dos 174**
+contém qualquer palavra de ordem — nem "prazo", nem "intime", nem verbo imperativo. Já haviam
+virado **14 prazos falsos**, 6 ainda em aberto, na fila "A conferir".
+
+Prazo falso na fila é a doença dos 554 `cumprido` falsos ao contrário: lá prazo real sumia com
+cara de feito, aqui prazo inexistente ocupa a fila. Nos dois casos a fila deixa de merecer
+confiança — e fila em que não se confia deixa de ser lida.
+
+**`tipo` não serve de discriminador.** Dos 49 avisos de distribuição do TST, só 3 chegam como
+`'Lista de distribuição'`; os outros 46 chegam como `'DJEN/PJe'`, igual a um despacho. `tipo` é
+o rótulo da FONTE de coleta, nunca do ato — o mesmo achado que já valia para a dedup.
+
+**A exclusão é ancorada e com teto de tamanho**, para poder errar para o lado seguro: só casa
+quando o ato COMEÇA com a linha de distribuição E tem menos de 600 caracteres. Se um dia o
+tribunal juntar uma ordem depois da distribuição, o ato volta a gerar prazo em vez de sumir
+calado.
+
+**REGRA:**
+25. **Regra do tipo "todo X vira Y" só se sustenta com lista de exceções mantida.** Cada molde
+    novo de aviso sem ordem tem de entrar nela, ou a fila enche de item falso. E toda exceção
+    nasce com contra-guarda (aqui, o teto de tamanho) para não virar omissão silenciosa.
+
+---
+
+## 10/09/2026 — cruzar prazo com publicação: a chave depende do CAMINHO que criou o prazo
+
+Eu afirmei "o TST nunca gerou prazo nenhum". Estava errado. Cruzei por `prazos.legalmail_id`,
+que é **nulo** no caminho calculado — só o caminho do Legal Mail o preenche. A chave do caminho
+calculado é `prazos.ato_chave` (`cnj|data|ato_id`). Cruzando certo, o TST gerou 3.
+
+| caminho | quem cria | chave para cruzar |
+|---|---|---|
+| Legal Mail (exige "Data final") | `lm_upsert_prazo_por_texto` | `legalmail_id` |
+| DJEN calculado (TRT/TST) | `trt_gera_prazos` | `ato_chave` |
+
+**REGRA:**
+26. **Antes de concluir "não existe nenhum", conferir que a chave do JOIN existe naquele
+    caminho.** Zero por chave errada é indistinguível de zero de verdade — e soa igual de
+    convincente.
+
+---
+
+## 10/09/2026 — o mesmo ato chega com DOIS tribunais diferentes
+
+O prazo 5713 dizia "· TRT-12" e o ato é do TST. As 4 cópias cruas do mesmo ato vêm rotuladas
+`TRT-12` (1) e `TST` (3). A view `publicacoes_atos` escolhe a cópia de texto mais longo, então
+hoje devolve TST — mas quando o prazo nasceu, a cópia do TST ainda não tinha chegado e a
+canônica era a do TRT-12. Medido: **60 de 1.231** grupos (cnj, data) trabalhistas têm cópias com
+família de tribunal divergente.
+
+Consequência prática: **o tribunal gravado na descrição de um prazo é o rótulo da cópia canônica
+no momento da criação, e ele muda depois.** Eu ia carimbar "· ato do TST" na descrição a partir
+desse valor; seria carimbar uma coisa que vira outra.
+
+**REGRA:**
+27. **Não gravar em campo permanente um valor derivado de "a cópia canônica de agora".** Ou se
+    grava a origem (o id da linha), ou se recalcula na leitura.
+
+---
+
+## 10/09/2026 — o rótulo acusou a equipe de não ter feito o que ela tinha feito
+
+Ela conferiu os tribunais um a um no fim do dia e não achou nenhum prazo em aberto — "fechamos,
+cumprimos". O fecho das 17:30 acusava **3 fatais sem cumprir**. Os dois estavam certos.
+
+O eProc **não fecha o expediente quando a petição é protocolada.** Ele fecha na *ciência com
+renúncia ao prazo* ou na certidão do cartório: **9 vezes em 3.264 intimações (0,3%)**. Os três
+acusados estavam `Status:ABERTO`, Data final hoje 23:59:59 — cumpridos pelo escritório e abertos
+no tribunal ao mesmo tempo. Reconsultei duas horas depois: continuavam abertos. Não era atraso.
+
+O defeito não estava na medição, estava na **palavra**: `FATAIS_SEM_CUMPRIR` afirma culpa a
+partir de um dado que só sabe dizer "o expediente segue aberto". Renomeado para
+`AINDA_ABERTO_NO_TRIBUNAL`, com um campo `leia_se` na própria resposta explicando o limite.
+
+**REGRA:**
+28. **O nome do campo é uma afirmação, e responde pelo que afirma.** Se o dado sabe dizer
+    "o tribunal não fechou", o campo não pode se chamar "sem cumprir". Rótulo que afirma mais
+    que a medição manda procurar problema onde o trabalho já foi feito — e queima a confiança
+    na lista inteira.
+
+---
+
+## 10/09/2026 — "Prazo fechado" queria dizer "ainda não abriu" em 99% dos casos
+
+Eu construí o fechamento automático em cima de `Status do prazo: Prazo fechado` do Legal Mail,
+tratando isso como prova de cumprimento. Medido nas 1.970 intimações que trazem essa frase:
+
+| | intimações | tem Data final |
+|---|---|---|
+| `Status:AGUARD. ABERTURA` — **não abriu** | **1.959** | 0 |
+| `Status:FECHADO (nn - CIÊNCIA, COM RENÚNCIA AO PRAZO)` | 9 | 9 |
+| formato antigo, sem campo `Status` | 2 | 2 |
+
+O Legal Mail achata três estados do eProc em duas palavras: "fechado" cobre tanto *encerrado*
+quanto *ainda não começou*. E a mesma intimação aparece nas duas formas, em `legalmail_id`
+diferentes, conforme é recapturada antes e depois de o prazo abrir.
+
+Não houve estrago — intimação em "aguardando abertura" não tem Data final, então nunca gerou
+prazo e não havia linha para fechar (0 de 1.959). **Foi sorte, não desenho.**
+
+**REGRA:**
+29. **Antes de tratar um valor de terceiro como prova, contar em quantos sentidos ele é usado
+    nos dados reais.** Um enum de duas palavras cobrindo três estados é o caso comum, não a
+    exceção — e o sentido que interessa costuma ser o raro (aqui, 0,3%).
+30. **"Não deu problema" não é o mesmo que "está certo".** A regra errada não fechou nada só
+    porque faltava Data final naquelas linhas; qualquer mudança de formato do fornecedor teria
+    transformado o acerto acidental em prazo perdido.
+
+---
+
+## 11/09/2026 — regra de dias trabalhista não é uma, são pelo menos duas (1º e 2º grau)
+
+Ela mandou 4 PDFs reais do "Meus Expedientes" do PJe (TRT-12 e TRT-15) pedindo para conferir os
+prazos. Contei dias úteis entre Data de Ciência e Prazo Final nas 18 linhas: **7 de 7 casos de
+1º grau bateram em exatos 5 dias úteis; 5 de 5 recursos de 2º grau bateram em exatos 8.** O
+`N=5` fixo da função já estava certo para 1º grau (é o mesmo gabarito que validou o TJSC), mas
+nunca tinha sido testado contra recurso — e 8 dias é o prazo recursal correto na Justiça do
+Trabalho (CLT), não 15 (CPC) nem 5.
+
+A classe do processo (`"Recurso Ordinário Trabalhista"`, `"Agravo..."`) já estava coletada em
+`publicacoes_atos.classe` — só não estava sendo lida pela função que calcula o prazo.
+
+**REGRA:**
+31. **Um `N` fixo para "todo ato do tribunal X" quase sempre esconde uma segunda categoria.**
+    Antes de confiar num gabarito pequeno (aqui, 6 casos de TJSC), testar contra uma classe de
+    ato diferente (aqui, recurso de 2º grau) antes de assumir que a régua serve para tudo.
+
+---
+
+## 11/09/2026 — duplicado por CPF que o nome exato não achava
+
+Consertando os clientes "X" (nome colado com a parte contrária), 13 de 14 casos com duplicado
+limpo bateram por **nome exato**. Um (DEICY CONTESSOTTO DA SILVA URIAS) só apareceu cruzando
+por **CPF** — o registro "X" tinha o CPF colado no nome (`"...URIAS (044.966.439-28) X..."`) e
+o registro limpo não, então a comparação de string nunca ia bater.
+
+**REGRA:**
+32. **Achar duplicado de cliente exige cruzar por nome E por CPF/CNPJ, nunca só um dos dois.**
+    Documento sozinho já resolveu um caso que o nome, sozinho, não resolvia.

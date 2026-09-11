@@ -1,0 +1,119 @@
+-- Sinal "documento posterior à intimação, a conferir" — desenhado e testado em 11/09/2026.
+-- Edge function: whatsapp-bot/edge-function-prazos-candidato-protocolo.ts
+-- Cron: prazos_candidato_protocolo_1745 (45 20 * * * UTC = 17:45 BRT), 15 min depois do
+-- fecho das 17:30 (prazos_fechar_1730) — nunca na mesma janela de 60s.
+--
+-- POR QUE EXISTE: ela confirmou a ideia pendente — peça nossa protocolada DEPOIS da intimação
+-- é sinal de que o prazo pode já estar coberto, mesmo que o eProc ainda mostre "aberto". Mas
+-- `lawsuit/case-files` (grátis) não tem campo de autor/parte (7 campos, medido em
+-- db/legalmail_case_files.sql) — então esta função só pode dizer "algo entrou depois",
+-- NUNCA "foi nosso escritório que protocolou". Confirmar de verdade custa R$0,02/doc
+-- (docket-entry/url) e só roda sob clique humano no botão "Confirmar com IA" da tela,
+-- reaproveitando prazo-peca.ts sem alterá-lo.
+--
+-- FUNÇÃO SEPARADA de prazos-fechar.ts (não um quarto laço no mesmo cron): dobrar a chamada por
+-- processo no mesmo laço dobraria a taxa efetiva (~170 req/min, acima dos 120/min que já
+-- derrubaram o workspace em 09/09). Com função e cron separados, os três baldes do fecho das
+-- 17:30 continuam do mesmo tamanho; este sinal roda depois, com seu próprio orçamento de 429.
+--
+-- CORTE DE DATA: publicacoes.data_disponibilizacao da intimação de ORIGEM do prazo (via
+-- legalmail_id) — a MESMA âncora que prazo-peca.ts já usa (`ddAviso`) para o preview, não uma
+-- segunda noção de "início do prazo". NÃO é prazos.data (vencimento): protocolar DENTRO do
+-- prazo é justamente o caso que se quer pegar, cortar pelo vencimento perderia os casos bons.
+-- Confirmado: 125 de 125 prazos do universo de 11/09/2026 resolvem essa data (zero perda).
+--
+-- FILTRA POR PRAZO, não por processo: um processo com prazos de intimações diferentes pode ter
+-- um documento posterior à intimação A e anterior à B — cada prazo compara só contra a SUA
+-- própria data de intimação.
+--
+-- =====================================================================================
+-- ACHADO CRÍTICO: a v1 sem filtro de burocracia do tribunal era 82% ruído
+-- =====================================================================================
+-- Medido em 11/09/2026 (dry-run da v1, sem qualquer filtro de título):
+--   DOCUMENTO_POSTERIOR_A_CONFERIR = 103 de 125 prazos (82%!)
+--   196 documentos candidatos brutos; 134 (~68%) eram o PRÓPRIO TRIBUNAL registrando de novo a
+--   MESMA intimação que já abriu o prazo — não um documento de parte nenhuma.
+--
+-- Categorias de burocracia identificadas (frequência decrescente, títulos reais observados):
+--   "DISPONIBILIZADO NO DJEN" / "PUBLICADO NO DJEN" (várias variantes de data/evento, ~85×)
+--   "CONFIRMADA A INTIMAÇÃO ELETRÔNICA"
+--   "EXPEDIDA/CERTIFICADA A INTIMAÇÃO/COMUNICAÇÃO ELETRÔNICA"
+--   "CIÊNCIA COM RENÚNCIA AO PRAZO"
+--   "DECORRIDO PRAZO"
+--   "ATO ORDINATÓRIO PRATICADO" / "ATOORD1" (código curto)
+--   "AUDIÊNCIA DE CONCILIAÇÃO ... CANCELADA"
+--   "ATOS DA CONTADORIA" / "CÁLCULO DE CUSTAS" / "CUSTAS SATISFEITAS"
+--   "JUNTADA GUIA GERADA" / "JUNTADA DE CERTIDÃO FINALIZADO O PRAZO"
+--   "REMETIDOS OS AUTOS A CONTADORIA"
+--   "TRANSITADO EM JULGADO"
+--   "RELATÓRIO DE PESQUISA DE ENDEREÇO" / "REL.PESQ.ENDERECO1"
+--   "Certidão (Certidão de Publicação no DJEN)"
+--   "TRANS_REC_SISBA1"
+--   "CARTA1" / "EXPEDIÇÃO DE CARTA PELO CORREIO"
+--
+-- Documentos que sobraram como genuinamente candidatos a peça de parte, mantidos SEM filtro:
+--   "PETICAO"/"PETIÇÃO"/"PET1" (+ variantes "Refer. ao Evento ...")
+--   "Manifestação"/"MANIF_ADM_JUD1"
+--   ambíguos mas mantidos por segurança (melhor mostrar do que esconder): "CERT1", "COMP2",
+--   "GUIAS DE CUSTAS1"
+--
+-- FIX: função ehBurocraciaDoTribunal(titulo) com lista de moldes ancorados
+-- (MOLDES_NAO_PECA, 19 padrões regex) — MESMA TÉCNICA (exclusão por molde de texto medido) já
+-- usada em trt_gera_prazos para excluir "aviso de distribuição". NÃO é heurística de autoria:
+-- não tenta adivinhar se o documento é nosso ou da parte contrária, nunca cruza com
+-- polo_cliente — só reconhece o que claramente NÃO É peça de parte nenhuma (o tribunal
+-- registrando/certificando o próprio expediente). Isso respeita a regra dela de que "nosso
+-- cliente" só pode vir do cadastro (clientes.nome via processos.cliente_id) — cruzar título com
+-- polo_cliente para adivinhar autoria seria uma SEGUNDA forma de saber quem somos nós, proibida.
+--
+-- Título/tipo nulo: NÃO é tratado como burocracia (ehBurocraciaDoTribunal retorna false) —
+-- "melhor mostrar do que esconder" quando não dá para classificar.
+--
+-- RESULTADO DEPOIS DO FILTRO (redeploy v2, 11/09/2026, dry-run completo 88/88 processos,
+-- 125/125 prazos, sem 429):
+--   DOCUMENTO_POSTERIOR_A_CONFERIR: 103 → 17 (13,6% dos 125 prazos abertos, todos TJSC neste
+--   lote — universo de hoje não tinha TRT/TST com legalmail_id+lm_idprocessos preenchidos)
+--   Candidatos restantes: só títulos do tipo PETICAO/PET1/CERT1/GUIAS DE CUSTAS/PETIÇÃO —
+--   exatamente a lista de "genuinamente candidato" acima. Rodada COMMITADA em 11/09/2026,
+--   17 prazos com candidato_pos_intimacao preenchido, 108 com null explícito (verificados sem
+--   candidato nesta rodada — nunca fica "stale" com um candidato de dias atrás que já não
+--   existe mais).
+--
+-- =====================================================================================
+-- Coluna nova: prazos.candidato_pos_intimacao jsonb (migration prazo_candidato_pos_intimacao)
+-- =====================================================================================
+-- Mesmo padrão de peca_idmov/peca_url/ia_orientacao: vive na própria linha do prazo porque a
+-- tela precisa saber na hora de abrir o modal, sem escanear log. Formato quando há candidato:
+--   { "data_intimacao_usada": "AAAA-MM-DD",
+--     "candidatos": [ {idmovimentacoes, titulo, tipo, data_movimentacao}, ... ] }
+-- null explícito quando a rodada verificou o prazo e não achou candidato (nunca fica omisso).
+--
+-- Log agregado do dia: reaproveita prazo_fechamento_log (detalhe jsonb livre),
+-- origem='case-files-candidato'. Não grava em cumprido/status — só a coluna nova.
+--
+-- =====================================================================================
+-- Verificação (11/09/2026)
+-- =====================================================================================
+-- select count(*) filter (where candidato_pos_intimacao is not null) com_candidato,
+--        count(*) filter (where candidato_pos_intimacao is null and cumprido=false
+--                          and legalmail_id is not null) sem_candidato_verificado
+-- from prazos p join processos pr on pr.id=p.processo_id
+-- where p.cumprido=false and p.legalmail_id is not null and pr.lm_idprocessos is not null;
+-- -> com_candidato=17, sem_candidato_verificado=108 (17+108=125, bate com o universo inteiro)
+--
+-- Nenhum prazo teve cumprido/status alterado por esta função — só candidato_pos_intimacao.
+--
+-- =====================================================================================
+-- Riscos registrados (não resolvidos por este desenho, registrados para o futuro)
+-- =====================================================================================
+-- - A exclusão de burocracia é por molde de texto medido numa amostra de 11/09/2026. Se o
+--   Legal Mail/PJe mudar a redação de algum desses eventos, a burocracia pode voltar a aparecer
+--   como "candidato" — só conferindo a fila se descobre um molde novo, não há como detectar sozinho.
+-- - `titulo`/`tipo` NUNCA são usados para adivinhar de qual parte é o documento, em nenhuma
+--   versão futura — só para reconhecer o que claramente não é peça de parte nenhuma. Qualquer
+--   tentativa de inferir autoria por título seria a mesma classe de erro do processo 6618.
+-- - Universo de hoje (11/09/2026) não tinha nenhum prazo de TRT/TST com legalmail_id e
+--   lm_idprocessos preenchidos simultaneamente — os 17 candidatos são todos TJSC. Quando o
+--   trabalhista entrar nesse universo, os moldes de burocracia podem ser diferentes (o PJe
+--   trabalhista já mostrou, no trabalho de polo, textos com formatação distinta do TJSC) —
+--   conferir a fila depois que isso acontecer, não assumir que a lista de moldes está completa.

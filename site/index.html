@@ -4988,6 +4988,21 @@ async function verPrazo(id){
   _prazoAberto={id:p.id,texto:pub?.texto||'',cliente:p.processos?.clientes?.nome||'',
                 processo_id:p.processo_id||p.processos?.id||null};
 
+  // Sinal "documento posterior à intimação, a conferir" (case-files, grátis) — NUNCA afirma
+  // autoria (não há campo de autor no case-files) nem cumprimento. O botão custa R$0,02 e só
+  // roda sob clique — ver db/prazo_candidato_protocolo.sql.
+  const candPos=p.candidato_pos_intimacao&&Array.isArray(p.candidato_pos_intimacao.candidatos)&&p.candidato_pos_intimacao.candidatos.length
+    ?p.candidato_pos_intimacao:null;
+  const blocoCandPos=candPos?`
+  <div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.30);border-radius:8px;padding:11px 13px;margin-bottom:12px;font-size:13px">
+    <div style="font-weight:700;color:#7c3aed;margin-bottom:6px">DOCUMENTO POSTERIOR À INTIMAÇÃO — A CONFERIR</div>
+    <div style="color:#64748b;font-size:12px;margin-bottom:8px">Existe${candPos.candidatos.length>1?'m':''} ${candPos.candidatos.length} documento${candPos.candidatos.length>1?'s':''} nos autos com data posterior à intimação que abriu este prazo. NÃO significa que é nossa peça nem que o prazo está coberto — só que algo entrou depois.</div>
+    ${candPos.candidatos.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+        <span>${escHtml(String(c.titulo||c.tipo||'documento'))} <span style="color:#64748b;font-size:11px">· ${_dataBR(c.data_movimentacao)}</span></span>
+        <button class="btn btn-sm" style="background:#ede9fe;color:#7c3aed;font-weight:700;flex-shrink:0" onclick="confirmarCandidatoIA('${p.id}','${escHtml(String(c.idmovimentacoes))}')">Confirmar com IA — R$0,02</button>
+      </div>`).join('')}
+  </div>`:'';
+
   const cls=_classPrazo(p), naoConf=_naoConfirmado(p);
   const norte=_norteDoTexto(pub?.texto), ato=_tipoDoAto(pub?.texto);
   const disp=pub?.data_disponibilizacao||(p.ato_chave?String(p.ato_chave).split('|')[1]:'')||'';
@@ -5002,6 +5017,7 @@ async function verPrazo(id){
     ${p.processos?.advogado_responsavel?' · 👤 '+escHtml(_advCurto(p.processos.advogado_responsavel)):' · <span style="color:#dc2626">⚠️ sem responsável</span>'}
   </div>
   <div id="prazo-briefing" style="margin-bottom:12px"></div>
+  ${blocoCandPos}
   <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.30);border-radius:8px;padding:11px 13px;margin-bottom:12px;font-size:13px">
     <div style="font-weight:700;color:#b45309;margin-bottom:6px">PRAZO E CONTA</div>
     ${linha('Nosso cliente é:', p.processos?.polo_cliente
@@ -5152,6 +5168,24 @@ async function puxarPecaPrazo(id){
       }
     },'Puxar esta peça (R$ 0,02)');
 }
+// Espelho enxuto de puxarPecaPrazo(): o candidato já é conhecido (candidato_pos_intimacao),
+// então pula a etapa de listagem — vai direto para o clique de confirmação e a chamada paga.
+// Reaproveita prazo-peca.ts sem tocar nele: a ação 'puxar' já aceita idmovimentacoes explícito
+// de qualquer origem (confirmado lendo o arquivo).
+async function confirmarCandidatoIA(id,idmov){
+  if(!confirm('Isso vai gastar R$ 0,02 para ler este documento com IA. Confirmar?'))return;
+  const el=document.getElementById('prazo-briefing');
+  if(el)el.innerHTML='<div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:8px;padding:11px 13px;font-size:13px;color:#94a3b8">💰 puxando o documento e lendo…</div>';
+  let r=null;
+  try{ r=await chamarFuncao('prazo-peca',{prazo_id:id,action:'puxar',idmovimentacoes:Number(idmov)}); }
+  catch(e){ r={erro:e.message||'falha'}; }
+  if(r&&r.orientacao){
+    toast(r.reusou?'Documento reaproveitado — sem cobrança.':'Documento lido — R$ 0,02.','ok');
+    if(el)el.innerHTML=htmlBriefingPrazo(id,{orientacao:r.orientacao,cache:false});
+  }else{
+    if(el)el.innerHTML=htmlBriefingPrazo(id,{erro:r?.erro||r?.erro_ia||'não consegui ler o documento'});
+  }
+}
 async function refazerBriefingPrazo(id){
   const el=document.getElementById('prazo-briefing'); if(!el)return;
   el.innerHTML='<div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:8px;padding:11px 13px;font-size:13px;color:#94a3b8">🤖 lendo de novo…</div>';
@@ -5254,7 +5288,14 @@ async function novoPrazo(){
   });
 }
 async function cumprir(id){
-  await supa.from('prazos').update({cumprido:true}).eq('id',id);
+  // Estampa a autoria. `cumprido=true` sem `cumprido_por` foi o que deixou 554 prazos
+  // "cumpridos" sem prova nenhuma: a auditoria é
+  // `select count(*) from prazos where cumprido and cumprido_por is null`, e ela só continua
+  // significando alguma coisa se TODA escrita nova assinar quem fechou.
+  await supa.from('prazos').update({
+    cumprido:true, cumprido_em:new Date().toISOString(),
+    cumprido_por:(usuarioAtual?.email||'tela')
+  }).eq('id',id);
   toast('Prazo cumprido!','ok');carregarPrazos();
 }
 // Desfaz o "Cumprir". Existe porque o clique é de um toque só e já houve prazo de
@@ -5303,7 +5344,12 @@ async function confirmarPrazoOk(id){
 // bloqueando a recriação.
 async function descartarPrazo(id){
   if(!confirm('Marcar como "não era prazo nosso"?\n\nEle sai da fila e da lista de prazos em aberto. A publicação de origem continua guardada.'))return;
-  const{error}=await supa.from('prazos').update({status:'descartado',cumprido:true}).eq('id',id);
+  // `cumprido=true` é o que tira da lista (a tela inteira trata "em aberto" como
+  // cumprido=false); a autoria diz que saiu por descarte, não por cumprimento.
+  const{error}=await supa.from('prazos').update({
+    status:'descartado', cumprido:true, cumprido_em:new Date().toISOString(),
+    cumprido_por:'descartado/'+(usuarioAtual?.email||'tela')
+  }).eq('id',id);
   if(error){toast('Erro: '+error.message,'erro');return;}
   toast('Descartado — não era prazo nosso.','ok');carregarPrazos();
 }

@@ -152,3 +152,156 @@
 --
 -- AGENDADO em cron.job (nada disso rodava antes — ver db/djen_supabase_pgcron.sql):
 --   trt_prazos_diario  '20 10 * * *'  select trt_gera_prazos(current_date-15, current_date, true)
+
+-- ============================================================================
+-- 10/09/2026 — AVISO DE DISTRIBUIÇÃO NÃO É PRAZO (migration trt_ignora_distribuicao)
+-- ============================================================================
+-- Origem: pergunta dela — "verificar também tudo o TST que estão vindo também certinho".
+-- A coleta do TST estava certa. O defeito estava no que esta função faz com ela.
+--
+-- O ATO, na íntegra (263 caracteres, é tudo o que existe):
+--   "Processo 0000007-12.2025.5.12.0016 distribuído para 3ª Turma - Gabinete da Ministra
+--    Margareth Rodrigues Costa na data 05/09/2026. Para maiores informações, clique no
+--    link a seguir: https://pje.tst.jus.br/..."
+-- Não manda fazer nada. Não abre prazo. Mas a regra desta função é "todo ato sem Data final
+-- vira prazo de 5 dias úteis", e a lista de exceções só tinha pauta e ata de sessão.
+--
+-- MEDIDO em 10/09/2026, no universo trabalhista inteiro (1.195 atos em publicacoes_atos):
+--   atos que são puro aviso de distribuição ......... 174   (130 TRT + 44 TST)
+--   deles, que já haviam virado prazo ................ 14   (6 ainda em aberto)
+--   maior texto entre os 174 ......................... 304 caracteres
+--   dos 174, quantos contêm QUALQUER palavra de ordem   0   (nem "prazo", nem "intime",
+--                                                           nem verbo imperativo)
+--
+-- A REGRA (ancorada no início do texto, de propósito):
+--   texto ~* '^\s*Processo\s+[0-9.\-]+\s+distribu(i|í)do para'
+--   AND length(becker_html_texto(texto)) < 600
+-- Só casa quando o ato INTEIRO é a linha de distribuição. A guarda de tamanho hoje não tira
+-- nada (o maior tem 304); existe para o dia em que o tribunal juntar uma ordem depois da
+-- distribuição — nesse dia o ato VOLTA a gerar prazo, em vez de sumir calado.
+--
+-- POR QUE NÃO FILTRAR POR `tipo`: dos 49 avisos de distribuição do TST, só 3 chegam como
+-- 'Lista de distribuição'; os outros 46 chegam como 'DJEN/PJe', igual a um despacho.
+-- `tipo` é o rótulo da FONTE de coleta, não do ato — o mesmo achado de db/publicacoes_atos.sql.
+--
+-- CONFERÊNCIA (dry-run 2025-07-01 → 2026-09-10):
+--   TST ....... 61 candidatos ANTES  →  20 DEPOIS   (61 − 41; os outros 3 dos 44 já tinham prazo)
+--   avisos de distribuição que sobraram no dry-run: 0
+--   os 6 prazos falsos em aberto (5713, 5723, 5754, 5760, 5762, 5779) foram para
+--     status='descartado', cumprido=true, cumprido_por='descartado/aviso-de-distribuicao'
+--   auditoria "cumprido and cumprido_por is null": 570 antes, 570 depois (não cresceu)
+--   estimados: 36 → 30 · encerrados: 43 → 43 (intocados)
+--
+-- ----------------------------------------------------------------------------
+-- ACHADO LATERAL — o MESMO ato chega rotulado com DOIS tribunais diferentes
+-- ----------------------------------------------------------------------------
+-- O prazo 5713 tinha descrição "RENATO PEREZ FERNANDES · TRT-12", mas o ato é do TST.
+-- Não é bug da descrição: as 4 cópias cruas do ato (publicacoes) são
+--   id 303057  tribunal 'TRT-12'  tipo 'Publicação'                        354 car.
+--   id 377759  tribunal 'TST'     tipo 'Lista de distribuição'             383 car.
+--   id 432002  tribunal 'TST'     tipo 'DJEN/PJe'                          383 car.
+--   id 432026  tribunal 'TST'     tipo 'Diário de Justiça Eletrônico Nac.' 383 car.
+-- A view publicacoes_atos escolhe a cópia de texto mais longo → hoje devolve 'TST'. Quando o
+-- prazo nasceu, a cópia do TST ainda não tinha chegado, e a canônica era a 'TRT-12'.
+-- MEDIDO: 60 de 1.231 grupos (cnj, data) trabalhistas têm cópias com família de tribunal
+-- divergente (TRT × TST).
+-- CONSEQUÊNCIA: o tribunal gravado na descrição do prazo é o rótulo da cópia canônica NO
+-- MOMENTO DA CRIAÇÃO, e ele muda depois. Não dá para carimbar "· ato do TST" na descrição a
+-- partir desse valor — seria carimbar uma coisa que vira outra. Fica registrado; conserto de
+-- verdade é normalizar `tribunal`, que continua na fila.
+--
+-- ----------------------------------------------------------------------------
+-- CORREÇÃO DE UMA AFIRMAÇÃO MINHA
+-- ----------------------------------------------------------------------------
+-- Eu disse "o TST nunca gerou prazo nenhum". Estava errado: eu cruzei prazo × publicação pelo
+-- `legalmail_id`, que é NULO no caminho calculado (só o caminho do Legal Mail o preenche).
+-- A chave certa é `prazos.ato_chave` = cnj|data|ato_id. Cruzando certo: 3 dos 65 atos de TST
+-- geraram prazo — justamente os 3 falsos de 08/09.
+--
+-- ----------------------------------------------------------------------------
+-- O QUE FICA SEM AÇÃO (registrado de propósito)
+-- ----------------------------------------------------------------------------
+-- Classificação dos 65 atos de TST por natureza:
+--   aviso de distribuição (não tem prazo) ... 49 atos · 17 com processo · 14/07/25–08/09/26
+--   TEM ordem/prazo ......................... 11 atos ·  3 com processo · 09/07/25–25/03/26
+--   pauta/ata de sessão ......................  1 ato
+--   outro ....................................  4 atos
+-- Os 11 com ordem são TODOS anteriores a 25/03/2026 (mais de 5 meses). NÃO backfillar: criar
+-- prazo hoje para ato de março produziria 11 pendências vencidas e falsas — exatamente o
+-- defeito que esta migration conserta.
+--
+-- 125 das 188 linhas de TST não têm processo vinculado. Prazo desses nasce como
+-- "(processo a vincular)": sem cliente e sem responsável, só aparece na fila de conferência.
+--
+-- Volume do TST: 2 a 6 atos/mês, com pico de 25 em junho/2026. JULHO/2026 TEVE ZERO, com a
+-- coleta geral do mês normal (525 atos, 110 do TRT). Cabe no ruído de um fluxo de 2–6/mês,
+-- mas NÃO é prova de que a coleta não falhou naquele mês. Incerteza, não conclusão.
+
+-- ============================================================================
+-- 11/09/2026 — RECURSO TRABALHISTA (2º grau) É 8 DIAS ÚTEIS, NÃO 5 (migration trt_recurso_8_dias)
+-- ============================================================================
+-- Origem: ela mandou 4 PDFs "Meus Expedientes" reais do PJe (TRT-12 e TRT-15, 1º e 2º grau) e
+-- pediu para conferir os prazos e ver como calcular. Extraí as 18 linhas (Data de Ciência ->
+-- Prazo Final) e contei dias úteis, excluindo sáb/dom e o feriado de 07/09 (Independência).
+--
+-- RESULTADO, 11/09/2026:
+--   Ação Trabalhista (ATOrd/ATSum) e Cumprimento de Sentença, 1º grau ... 5 dias úteis, 7 de 7
+--   Recurso Ordinário / RORSum, 2º grau ...................................... 8 dias úteis, 5 de 5
+--   resto (9, 10, 15, 16 dias) ........................ 6 casos, SEM explicação sem o teor do ato
+--
+-- 8 dias úteis é o prazo recursal correto na Justiça do Trabalho (CLT) — diferente dos 15 dias
+-- úteis do CPC cível, que é o que a função implicitamente assumia ao usar N=5 sempre (o 5 vinha
+-- do gabarito de 1º grau, nunca tinha sido testado contra recurso de 2º grau).
+--
+-- A CLASSE JÁ ESTAVA NO BANCO, só não estava sendo lida: `publicacoes_atos.classe` (medido em
+-- 11/09: 448 de 1.204 atos trabalhistas preenchidos, 37% de cobertura; 48 desses já classificam
+-- como recurso). Valores reais vistos: "Recurso Ordinário Trabalhista", "Recurso Ordinário -
+-- Rito Sumaríssimo", "Agravo de Petição", "Agravo de Instrumento em Recurso de Revista",
+-- "Recurso de Revista", "Recurso de Revista com Agravo".
+--
+-- A CORREÇÃO: `n_base := case when a.classe ~* 'Recurso|Agravo' then 8 else 5 end`, e o `N`
+-- final continua sendo `least(n_base, n_dirigido)` — o texto dirigido, quando existe, continua
+-- podendo encurtar, nunca alongar (mesma regra de sempre: erra para o lado seguro).
+--
+-- SEM `classe` (63% dos casos hoje), continua caindo em 5 — MESMO comportamento de antes desta
+-- migration, mesmo lado seguro. Ninguém regride.
+--
+-- CONFERIDO após aplicar: dry-run 2025-07-01 a 2026-09-11 dá 31 atos com classe de recurso,
+-- todos com N=8; os outros 880 continuam em N<=5. Nenhum prazo já gravado (`fonte=
+-- 'DJEN/calculado'`) foi tocado — a função só afeta atos futuros, sem `on conflict` disparando
+-- update em linha existente.
+--
+-- OS 4 CASOS FORA DO PADRÃO (9, 10, 15, 16 dias úteis no gabarito de 18) FICAM SEM CORREÇÃO.
+-- Não dá para adivinhar sem o teor do ato — não inventar regra em cima de 1-2 amostras (regra 14
+-- do LICOES.md: afirmação em documentação exige medição e data, e aqui a amostra é pequena
+-- demais para virar regra).
+
+-- ============================================================================
+-- 11/09/2026 — TST: mais evidência de 15 dias úteis, mas NÃO subo o N (motivo: direção do erro)
+-- ============================================================================
+-- Ela mandou mais um PDF "Meus Expedientes", desta vez do TST (3ª/5ª/6ª Turmas). 3 linhas:
+--   RRAg 0010055-09.2023.5.15.0051 (5ª Turma): ciência 04/09 -> prazo final 28/09 = 15 dias úteis
+--   AIRR 0000824-45.2022.5.12.0028 (3ª Turma): ciência 25/08 -> prazo final 16/09 = 15 dias úteis
+--   AIRR 0010691-47.2023.5.15.0027 (6ª Turma): ciência 18/08 -> prazo final 16/09 = 20 dias úteis (fora do padrão)
+--
+-- 2 de 3 batem em exatos 15 dias úteis — reforça os 2 outliers já vistos no gabarito de ontem
+-- (CumPrSe 0010138-11 e ATOrd 0001933-49, ambos TRT 1º grau), agora com 4 casos no total.
+--
+-- MESMO ASSIM, NÃO estendo a régua para N=15 em nada agora. O motivo é a DIREÇÃO do erro, não a
+-- falta de evidência:
+--   - `N = least(n_base, n_dirigido)` sempre pega o MENOR. Se o n_base for 15 e o prazo real de
+--     um caso específico for 8 (RRAg/AIRR também aparecem na classificação "Recurso|Agravo" que
+--     hoje já vira N=8), o prazo calculado ficaria D14/D15 — DEPOIS do vencimento real. É
+--     exatamente o erro perigoso: o time confiaria numa data que já passou.
+--   - N=8 (o que já está em produção) é MENOR que 15. Se a régua certa para TST for realmente
+--     15, o sistema antecipa a data — erra para o lado seguro, o mesmo raciocínio de sempre.
+--   - Confundir dois fenômenos diferentes: os 2 outliers de TRT 1º grau (CumPrSe/ATOrd) e os 2
+--     casos novos de TST (RRAg/AIRR) batem no MESMO número por coincidência, não necessariamente
+--     pela MESMA regra jurídica — um pode ser impugnação ao cumprimento de sentença (CPC art.
+--     525, 15 dias úteis, aplicado subsidiariamente) e o outro uma regra própria do TST. Sem o
+--     teor do ato, tratar os 4 como uma coisa só seria inventar regra maior que a evidência.
+--
+-- Fica REGISTRADO para o dia em que alguém tiver o teor desses atos (RRAg/AIRR do TST
+-- especificamente) e puder confirmar se 15 dias úteis é mesmo a régua do TST em recurso de
+-- revista — aí sim vale considerar `tribunal ~* '^TST'` como um terceiro caso na função, com o
+-- cuidado de nunca deixar o N subir sem prova poder empurrar prazo pra depois do real.
