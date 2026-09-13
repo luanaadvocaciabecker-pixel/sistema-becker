@@ -4637,9 +4637,17 @@ const _naoConfirmado=p=>{const s=(p?.status||'').toLowerCase();return s==='estim
 function _seloPeticionamento(p){
   const st=p.peticionamento_status; if(!st)return'';
   const quando=p.peticionamento_em?_dataBR(String(p.peticionamento_em).slice(0,10))+' '+String(p.peticionamento_em).slice(11,16):'';
-  const pend=p.peticionamento_detalhe?.mensagem_pendencia||'';
+  const det=p.peticionamento_detalhe||{};
+  const pend=det.mensagem_pendencia||'';
+  // receipt_link: recibo em PDF do protocolo, só quando o sinal veio do webhook em tempo real
+  // (evento protocolo_finalizado) — ver db/prazo_candidato_protocolo.sql. Quando presente, o
+  // selo vira link clicável em vez de span simples.
+  const recibo=det.receipt_link||'';
+  const ambig=det.ambiguo?' ⚠ processo tinha mais de um prazo aberto — confirme qual foi respondido':'';
+  const tag=recibo?'a':'span';
+  const attrsRecibo=recibo?` href="${escHtml(recibo)}" target="_blank" rel="noopener"`:'';
   if(st==='Protocolado')
-    return` <span title="Protocolado via Legal Mail em ${quando}${p.peticionamento_detalhe?.peca?' · '+escHtml(p.peticionamento_detalhe.peca):''}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#4ade8022;color:#15803d">🟢 Protocolado</span>`;
+    return` <${tag}${attrsRecibo} title="Protocolado via Legal Mail em ${quando}${det.peca?' · '+escHtml(det.peca):''}${recibo?' · clique para abrir o recibo':''}${ambig}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#4ade8022;color:#15803d;text-decoration:none;cursor:${recibo?'pointer':'default'}">🟢 Protocolado${recibo?' 📄':''}${det.ambiguo?' ⚠':''}</${tag}>`;
   if(st==='Cancelado'||st==='Com pendências')
     return` <span title="${escHtml(st)} — conferir${pend?': '+escHtml(pend):''}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#dc262622;color:#dc2626">🔴 ${escHtml(st)} — conferir</span>`;
   return` <span title="Protocolo em andamento no Legal Mail${quando?' · enviado '+quando:''}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">🟡 ${escHtml(st)}</span>`;

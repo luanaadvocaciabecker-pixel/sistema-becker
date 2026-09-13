@@ -46,13 +46,16 @@ begin
 end $$;
 
 -- 3) Ingestão -----------------------------------------------------------------
+-- 13/09/2026: acrescentado o ramo "protocolo_finalizado" (ver seção 11 abaixo) — corpo
+-- reproduzido aqui já com a versão nova (migration lm_ingest_protocolo_finalizado).
 create or replace function public.lm_ingest(body jsonb)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare
   item jsonb; doc jsonb;
   evt text; num text; digits text; pid bigint; nid bigint;
   trib text; texto text; titulo text; link text; ddisp date; tbusca text; resp text;
-  n_evt int:=0; n_pub int:=0; n_mov int:=0; n_skip int:=0;
+  n_evt int:=0; n_pub int:=0; n_mov int:=0; n_skip int:=0; n_protfin int:=0;
+  abertos_count int;
 begin
   evt := coalesce(body->>'evento', case when body ? 'params' then 'intimacao' else 'desconhecido' end);
 
@@ -64,9 +67,47 @@ begin
       tbusca := coalesce(item->'origem'->>'tipo_busca','intimacao');
       digits := regexp_replace(coalesce(num,''),'\D','','g');
       pid := null;
-      if digits <> '' and digits !~ '^0+$' then
+      -- idprocessos (id do Legal Mail) só aparece no formato "protocolo_finalizado" — mais
+      -- confiável que o número quando disponível.
+      if item ? 'idprocessos' then
+        select p.id into pid from processos p
+         where p.lm_idprocessos = nullif(item->>'idprocessos','')::bigint limit 1;
+      end if;
+      if pid is null and digits <> '' and digits !~ '^0+$' then
         select p.id into pid from processos p
          where regexp_replace(coalesce(p.numero,''),'\D','','g') = digits limit 1;
+      end if;
+
+      -- Não tem 'documento': cai aqui ANTES do laço de documento. Ver seção 11.
+      if item->>'event' = 'protocolo_finalizado' then
+        insert into legalmail_eventos(tipo, legalmail_id, numero_processo, payload)
+        values ('protocolo_finalizado', nullif(item->>'idpeticoes','')::bigint, num, item - 'clientkey');
+        n_evt := n_evt + 1;
+        n_protfin := n_protfin + 1;
+
+        if pid is not null then
+          select count(*) into abertos_count from prazos where processo_id = pid and cumprido = false;
+          if abertos_count = 1 then
+            update prazos set peticionamento_status = 'Protocolado',
+                   peticionamento_em = now(),
+                   peticionamento_detalhe = jsonb_build_object(
+                     'origem','webhook_tempo_real',
+                     'idpeticoes', nullif(item->>'idpeticoes','')::bigint,
+                     'receipt_link', item->>'receipt_link')
+             where processo_id = pid and cumprido = false;
+          elsif abertos_count > 1 then
+            update prazos set peticionamento_status = 'Protocolado',
+                   peticionamento_em = now(),
+                   peticionamento_detalhe = jsonb_build_object(
+                     'origem','webhook_tempo_real',
+                     'idpeticoes', nullif(item->>'idpeticoes','')::bigint,
+                     'receipt_link', item->>'receipt_link',
+                     'ambiguo', true,
+                     'motivo','processo tinha mais de um prazo aberto no momento do evento — confirme qual foi respondido')
+             where processo_id = pid and cumprido = false;
+          end if;
+        end if;
+        continue;
       end if;
 
       if jsonb_typeof(item->'documento')='array' then
@@ -109,7 +150,7 @@ begin
     n_evt := n_evt + 1;
   end if;
 
-  return jsonb_build_object('eventos',n_evt,'publicacoes',n_pub,'movimentacoes',n_mov,'ignorados',n_skip,'tipo',evt);
+  return jsonb_build_object('eventos',n_evt,'publicacoes',n_pub,'movimentacoes',n_mov,'ignorados',n_skip,'protocolo_finalizado',n_protfin,'tipo',evt);
 end $$;
 
 revoke all on function public.lm_ingest(jsonb) from anon, authenticated;
@@ -279,3 +320,61 @@ alter table public.prazos add column if not exists categoria_fonte      text;
 -- hoje" segue como PENDENTE no próprio Legal Mail (atraso de detecção do
 -- peticionamento). Fechamento imediato desses depende de: (a) botão "✓ Cumprir"
 -- manual (já existe), ou (b) wiring do webhook peticao_status (próximo passo).
+
+-- =====================================================================================
+-- 11) 13/09/2026 — evento `protocolo_finalizado` estava chegando e sendo IGNORADO
+-- =====================================================================================
+-- Origem: ela reabriu a pergunta de fundo da sessão ("não tem uma configuração de webhook
+-- de movimentação em tempo real que falte fazer?") depois de ler sugestões genéricas de
+-- outra IA (Jusbrasil monitoramento, DataJud, webhook fictício). Reli a documentação da API
+-- do Legal Mail inteira (não só os trechos já citados em sessões anteriores) atrás da seção
+-- "Webhooks — eventos em tempo real".
+--
+-- RESPOSTA DIRETA: o webhook de movimentação em tempo real (notificação #1, "Intimações e
+-- movimentações", formato `clientkey`+`params`) JÁ ESTÁ CONFIGURADO E RODANDO — é o mesmo
+-- webhook que alimenta publicacoes/movimentacoes desde o início (7.086 eventos tipo=
+-- 'intimacao' até 13/09/2026). NÃO faltava configurar nada no painel do Legal Mail.
+--
+-- O QUE FALTAVA: a doc menciona, de passagem, que "Protocolos finalizados também geram o
+-- evento `protocolo_finalizado`" dentro dessa mesma notificação #1. Esse evento JÁ ESTAVA
+-- CHEGANDO (26 eventos gravados em legalmail_eventos desde 02/09/2026, comprovado por
+-- `payload::text ilike '%protocolo_finalizado%'`) mas `lm_ingest` não tinha ramo pra ele —
+-- caía no `else` genérico (linha ~99 da v1), era gravado como tipo='intimacao' e NUNCA
+-- tocava prazos. Ou seja: o sinal de peticionamento em TEMPO REAL (não o polling diário de
+-- prazos-peticionamento.ts) já estava disponível havia 11 dias, só não estava sendo lido.
+--
+-- FORMATO do evento (sem 'documento', por isso precisa de ramo próprio ANTES do laço de
+-- documento): `{"type":"Incidental","event":"protocolo_finalizado","idpeticoes":N,
+-- "idprocessos":N,"receipt_link":"<url assinada do recibo em PDF, 6 dias de validade>",
+-- "numero_processo":"..."}`. `idprocessos` é o id do Legal Mail (mais confiável que o
+-- número quando presente — passou a ser tentado primeiro na resolução de `pid`).
+--
+-- FIX (migration lm_ingest_protocolo_finalizado): novo ramo em lm_ingest — grava o evento
+-- cru (tipo='protocolo_finalizado') e, se o processo tiver EXATAMENTE 1 prazo aberto,
+-- grava peticionamento_status='Protocolado' + peticionamento_em=now() + receipt_link no
+-- MESMO INSTANTE em que o evento chega (não precisa esperar o cron das 18h/21h). Se o
+-- processo tiver MAIS de um prazo aberto, o evento não diz qual foi respondido — marca os
+-- dois como Protocolado mas com `ambiguo:true` e o motivo explícito no detalhe, em vez de
+-- escolher um dos dois por palpite (mesma regra de nunca adivinhar além do que o dado prova).
+-- NUNCA fecha `cumprido` — só o mesmo sinal informativo que prazos-peticionamento.ts já grava.
+--
+-- BACKFILL (mesmo dia, rodado uma vez via UPDATE direto, não repetir): dos 26 eventos já
+-- recebidos e perdidos, 10 prazos em aberto foram encontrados e atualizados — 8 exatos, 2
+-- ambíguos (mesmo processo, id 6703, 2 prazos abertos na mesma data de intimação). 5 desses
+-- 10 já tinham sido pegos pelo polling diário (prazos-peticionamento.ts) — bate, confirma
+-- os dois caminhos concordando —, e 5 são confirmações NOVAS que o polling ainda não tinha
+-- alcançado. Os outros 16 eventos não bateram com nenhum prazo em aberto hoje (processo sem
+-- prazo aberto no momento — o protocolo pode ter respondido um prazo já fechado por outra via,
+-- ou o prazo ainda não existia quando o protocolo aconteceu).
+--
+-- RESULTADO PRÁTICO: dali em diante, todo protocolo finalizado no Legal Mail atualiza o selo
+-- da tela (🟢 Protocolado, com link pro recibo em PDF) na hora, em vez de só no próximo
+-- polling agendado. prazos-peticionamento.ts continua rodando (cobre quem já tinha status
+-- antigo ou processo sem prazo aberto no momento do evento) — os dois caminhos se
+-- complementam, nenhum substitui o outro.
+--
+-- LIMITAÇÃO que fica registrada: o link do recibo (`receipt_link`) é assinado com validade
+-- de alguns dias (visto no exemplo: X-Amz-Expires=518400s = 6 dias) — depois disso o link
+-- para de funcionar. Não é renovado automaticamente; se precisar do recibo depois desse
+-- prazo, precisa buscar de novo via API (endpoint não mapeado ainda) ou no próprio painel
+-- do Legal Mail.
