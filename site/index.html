@@ -4630,6 +4630,20 @@ const _advCurto=s=>{if(!s)return'';const w=s.trim().split(/\s+/)[0];return w?w[0
 // 'estimado' = calculada pelo sistema (regra de dias úteis); 'estimado_ia' = lida por IA.
 // confirmarPrazo() troca o status para 'confirmado' e o prazo sai desta condição.
 const _naoConfirmado=p=>{const s=(p?.status||'').toLowerCase();return s==='estimado'||s==='estimado_ia';};
+// Selo do sinal de peticionamento (prazos.peticionamento_status, via GET /api/v1/filings do
+// Legal Mail — ver db/prazo_candidato_protocolo.sql). NULL = nenhum protocolo do Legal Mail
+// encontrado após a intimação deste prazo — pode ter sido feito direto no tribunal (não mostra
+// nada; ausência de sinal não é "não protocolado"). Reaproveitado na lista e no modal do prazo.
+function _seloPeticionamento(p){
+  const st=p.peticionamento_status; if(!st)return'';
+  const quando=p.peticionamento_em?_dataBR(String(p.peticionamento_em).slice(0,10))+' '+String(p.peticionamento_em).slice(11,16):'';
+  const pend=p.peticionamento_detalhe?.mensagem_pendencia||'';
+  if(st==='Protocolado')
+    return` <span title="Protocolado via Legal Mail em ${quando}${p.peticionamento_detalhe?.peca?' · '+escHtml(p.peticionamento_detalhe.peca):''}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#4ade8022;color:#15803d">🟢 Protocolado</span>`;
+  if(st==='Cancelado'||st==='Com pendências')
+    return` <span title="${escHtml(st)} — conferir${pend?': '+escHtml(pend):''}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#dc262622;color:#dc2626">🔴 ${escHtml(st)} — conferir</span>`;
+  return` <span title="Protocolo em andamento no Legal Mail${quando?' · enviado '+quando:''}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">🟡 ${escHtml(st)}</span>`;
+}
 function _classPrazo(p){
   // Descartado na conferência ("não era prazo nosso"). Vem antes de cumprido porque a linha fica
   // com cumprido=true para sair das listas em aberto — mas ela não foi cumprida, foi descartada,
@@ -5015,6 +5029,7 @@ async function verPrazo(id){
     ${p.processos?.numero?' · Proc. '+escHtml(p.processos.numero):''}
     ${pub?.tribunal?' · '+escHtml(pub.tribunal):''}
     ${p.processos?.advogado_responsavel?' · 👤 '+escHtml(_advCurto(p.processos.advogado_responsavel)):' · <span style="color:#dc2626">⚠️ sem responsável</span>'}
+    ${_seloPeticionamento(p)}
   </div>
   <div id="prazo-briefing" style="margin-bottom:12px"></div>
   ${blocoCandPos}
@@ -5235,13 +5250,14 @@ function renderPrazosLista(lista,comAcoes=false){
     const seloEst=est?` <span title="${explEst}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">⚠ ESTIMADO</span>`
       :estIA?` <span title="Data estimada por IA (Infinitum/Publijus, leu o documento). Confira e confirme." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#0ea5e922;color:#0369a1">🤖 Estimado por IA</span>`:'';
     const seloFonte=p.fonte==='infinitum'?` <span title="Origem: Infinitum/Publijus" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#8b5cf622;color:#7c3aed">via Infinitum</span>`:'';
+    const seloPetic=_seloPeticionamento(p);
     return`<div class="prazo-item"${naoConfirmado?' style="background:rgba(245,158,11,.05)"':''}>
       <div class="prazo-data-box ${boxK}">
         <div class="dia">${isNaN(dt)?'--':dt.getDate().toString().padStart(2,'0')}</div>
         <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
-        <h4>${p.descricao||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}</h4>
+        <h4>${p.descricao||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}${seloPetic}</h4>
         <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${mostrarCli?`🧑 ${cliNome} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:' · <span style="color:#dc2626">⚠️ sem responsável</span>'}${p.classe?` · <span style="color:#64748b">${p.classe}</span>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${cls==='excedido'?' · <b style="color:#dc2626">PERDIDO — conferir se foi peticionado</b>':''}${naoConfirmado?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
         ${sug?`<p style="margin:4px 0 0"><span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:${sug==='custas'?'#d9770622':'#7c3aed22'};color:${sug==='custas'?'#b45309':'#6d28d9'}">🤖 IA sugere: ${sug==='custas'?'💰 Custas':'📎 Documentos'}${p.categoria_confianca?` · confiança ${p.categoria_confianca}`:''}</span>${p.categoria_motivo?` <span style="color:#94a3b8;font-size:11px">— ${p.categoria_motivo}</span>`:''}</p>`:''}
       </div>
