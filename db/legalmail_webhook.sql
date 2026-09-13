@@ -438,3 +438,36 @@ alter table public.prazos add column if not exists categoria_fonte      text;
 -- publicação/prazo continuam chegando antes do processo existir —, ela pode reusar a MESMA
 -- query (join por dígitos, checando ambiguidade antes de aplicar); não foi construída agora
 -- por não ter sido pedida, só o backfill pontual.
+
+-- =====================================================================================
+-- 13) 13/09/2026 — GATILHO reativo (migration processos_relinca_orfaos_trigger), não
+-- rotina agendada — religa publicação/prazo órfão no INSTANTE em que o processo nasce
+-- =====================================================================================
+-- Ela (relayando a mesma IA, depois de ver o achado real da seção 12) sugeriu as duas
+-- opções clássicas — trigger reativo no cadastro do processo vs. rotina agendada de
+-- conciliação ("varredor das 17h") — e perguntou qual eu preferia. Escolhido o TRIGGER:
+--   - É trabalho puramente interno ao Postgres (nenhuma chamada ao Legal Mail), então não
+--     compete com o orçamento de taxa/tempo que já levou a separar prazos-fechar,
+--     prazos-candidato-protocolo e prazos-peticionamento em funções e crons distintos —
+--     não faz sentido herdar aquele problema aqui, onde ele nem existe.
+--   - É mais rápido (religa no milissegundo em que o processo é cadastrado, não espera o
+--     fim do dia) e mais barato (só roda quando um processo nasce/tem o número corrigido —
+--     evento raro — em vez de escanear a tabela inteira todo dia).
+--
+-- public.processos_relinca_orfaos(): trigger AFTER INSERT OR UPDATE OF numero em
+-- processos. Usa os MESMOS dígitos (sem pontuação, SEM strip de zero à esquerda — a seção
+-- 12 já provou que zero à esquerda não é o problema) do processo que acabou de
+-- nascer/mudar, e religa:
+--   - publicacoes com processo_id null e numero_processo batendo;
+--   - prazos com processo_id null, ligados por legalmail_id a uma dessas publicacoes.
+-- NUNCA sobrescreve processo_id já preenchido (só WHERE processo_id is null nos dois
+-- UPDATEs) e nunca toca cumprido/status — mesma garantia do backfill da seção 12, só que
+-- contínua. Testado em transação com rollback (processo/publicação fictícios,
+-- '9999999-99.2099...'): a publicação nasceu órfã, o INSERT do processo disparou o
+-- gatilho e o processo_id apareceu correto antes do ROLLBACK — nada ficou gravado no teste.
+--
+-- NÃO IMPLEMENTADO: a rotina agendada (opção 2) — o trigger já cobre o caso descrito
+-- (processo cadastrado tardiamente) sem precisar de um cron a mais nem duplicar
+-- controle_prazos/webhook_logs (schema paralelo que a proposta original sugeria e que
+-- seção 12 já rejeitou). Os 22 prazos "(processo a vincular)" de hoje continuam exigindo
+-- conferência humana — são clientes novos de fato, o gatilho não inventa isso.
