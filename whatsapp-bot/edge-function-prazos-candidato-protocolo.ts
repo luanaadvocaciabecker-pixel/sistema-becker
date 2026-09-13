@@ -1,42 +1,62 @@
-// Edge Function `prazos-candidato-protocolo` — sinal "documento posterior à intimação, a
+// Edge Function `prazos-candidato-protocolo` — dois sinais de "peça nossa pós-prazo, a
 // conferir". Copia versionada; deploy no Supabase.
 //
-// POR QUE EXISTE: ela confirmou a ideia pendente — peça nossa protocolada DEPOIS da intimação é
-// sinal de que o prazo pode já estar coberto, mesmo que o eProc ainda mostre "aberto" (ele só
-// fecha o expediente na ciência com renúncia ou na certidão do cartório — ver o cabeçalho de
-// `prazos-fechar.ts`). `GET lawsuit/case-files` é grátis e lista os documentos do processo, mas
-// tem EXATAMENTE 7 campos (medido em `db/legalmail_case_files.sql`): idmovimentacoes,
-// fk_processo, id, hash_documento, titulo, tipo, data_movimentacao. NÃO HÁ campo de autor/parte
-// que juntou o documento. Então esta função sabe dizer "algo entrou depois" — nunca "foi nosso
-// escritório que protocolou".
+// SINAL 1 (candidato_pos_intimacao) — POR QUE EXISTE: ela confirmou a ideia pendente — peça
+// nossa protocolada DEPOIS da intimação é sinal de que o prazo pode já estar coberto, mesmo que
+// o eProc ainda mostre "aberto" (ele só fecha o expediente na ciência com renúncia ou na
+// certidão do cartório — ver o cabeçalho de `prazos-fechar.ts`). `GET lawsuit/case-files` é
+// grátis e lista os documentos do processo, mas tem EXATAMENTE 7 campos (medido em
+// db/legalmail_case_files.sql): idmovimentacoes, fk_processo, id, hash_documento, titulo, tipo,
+// data_movimentacao. NÃO HÁ campo de autor/parte que juntou o documento. Então este sinal sabe
+// dizer "algo entrou depois" — nunca "foi nosso escritório que protocolou".
 //
-// *** NÃO ACRESCENTE CHAMADA PAGA AQUI. Só toca case-files (grátis). Confirmar de verdade
-// (docket-entry/url, R$0,02/doc) é o botão "Confirmar com IA" na tela, sob clique humano,
-// reaproveitando `prazo-peca.ts` — nunca automático, nunca neste cron. ***
+// SINAL 2 (peticionamento_status) — 13/09/2026, achado dela: "o Legal Mail deve ter isso em
+// algum lugar" — e tem. `GET /api/v1/filings` (GRÁTIS, confirmado com saldo antes/depois) lista
+// os protocolos feitos PELO PRÓPRIO Legal Mail (o botão de peticionar da plataforma deles), com
+// `status` (Em fila/Protocolando/Protocolado/Agendado/Cancelado/Com pendências) e
+// `protocolado_em` — data e HORA exatas de quando o tribunal aceitou o protocolo. Isso é PROVA,
+// não candidato — mas só cobre petições enviadas PELO Legal Mail. Quem protocola direto no site
+// do tribunal (ela já fez isso, ex.: processo 4063252-89.2026.8.26.0100) não aparece aqui —
+// nesse caso o campo fica null, e não é erro: é escopo do sinal.
+//
+// Verificado em 13/09/2026 contra 13 processos com prazo vencido: 4 bateram exato (protocolo do
+// Legal Mail no mesmo dia do vencimento — ex. LUCAS VIEIRA PIRES, protocolado_em 11/09 09:15,
+// prazo vencendo 11/09), 1 mostrou zero protocolos (São Clemente, confirmadamente feito direto
+// no tribunal), e para os demais os protocolos existentes eram antigos demais (semanas antes do
+// vencimento) para responder a ESTE prazo especificamente.
+//
+// *** NÃO ACRESCENTE CHAMADA PAGA AQUI. Só toca case-files e filings (ambos grátis, confirmados
+// com saldo antes/depois). Confirmar o documento com IA (docket-entry/url, R$0,02/doc) é o botão
+// "Confirmar com IA" na tela, sob clique humano, reaproveitando `prazo-peca.ts` — nunca
+// automático, nunca neste cron. ***
 //
 // POR QUE É FUNÇÃO SEPARADA de `prazos-fechar.ts`, e não um quarto laço lá dentro: dobrar a
 // chamada por processo no MESMO laço dobraria a taxa efetiva (~170 req/min, acima dos 120/min
-// que já derrubaram o workspace em 09/09) e o tempo do cron das 17:30. Com função separada, os
-// três baldes em que ela já confia continuam do tamanho de hoje; este sinal roda depois (cron
+// que já derrubaram o workspace em 09/09). Com função separada, os três baldes em que ela já
+// confia continuam do tamanho de hoje; este sinal roda depois (cron
 // `prazos_candidato_protocolo_1745`, 15 min de folga), com seu próprio orçamento de 429, e um
 // bug aqui não arrasta o fecho que já funciona.
+//
+// AGORA SÃO DUAS CHAMADAS POR PROCESSO (case-files + filings), com o mesmo PASSO_MS entre CADA
+// uma — dobra o tempo total (97 processos × 2 chamadas × 700ms ≈ 136s), ainda folgado dentro do
+// timeout da Edge Function e do limite de 120 req/min.
 //
 // O CORTE DE DATA é `publicacoes.data_disponibilizacao` da intimação de ORIGEM do prazo (via
 // `legalmail_id`), não `prazos.data` (vencimento) — é a MESMA âncora que `prazo-peca.ts` já usa
 // (`ddAviso`) para o preview, não uma segunda noção de "início do prazo". Protocolar DENTRO do
 // prazo é justamente o caso que se quer pegar; cortar pelo vencimento perderia os casos bons.
-// Confirmado em 11/09/2026: 125 de 125 prazos do universo de hoje resolvem essa data.
+// Confirmado em 11/09/2026: 125 de 125 prazos do universo daquele dia resolvem essa data.
 //
 // FILTRA POR PRAZO, não por processo: um processo com 2 prazos de intimações diferentes pode ter
-// um documento posterior à intimação A e anterior à B do mesmo processo — cada prazo compara só
-// contra a SUA própria data de intimação.
+// um documento/protocolo posterior à intimação A e anterior à B do mesmo processo — cada prazo
+// compara só contra a SUA própria data de intimação.
 //
-// `titulo`/`tipo` do documento NÃO são usados para adivinhar autoria, em nenhuma versão. Cruzar
-// com `polo_cliente` para "adivinhar" se é nossa peça criaria uma SEGUNDA forma de saber quem
-// somos nós — exatamente o que a regra dela proíbe ("nosso cliente é sempre o que tem cadastro
-// no nosso sistema"), e a mesma classe do erro do processo 6618 (resumo escrito do lado errado).
-// Esta função mostra TODOS os documentos posteriores à data, sem filtrar por título; o humano
-// decide olhando, e o botão da IA confirma com prova quando vale gastar R$0,02.
+// `titulo`/`tipo` do documento (sinal 1) NÃO são usados para adivinhar autoria, em nenhuma
+// versão. Cruzar com `polo_cliente` para "adivinhar" se é nossa peça criaria uma SEGUNDA forma
+// de saber quem somos nós — exatamente o que a regra dela proíbe ("nosso cliente é sempre o que
+// tem cadastro no nosso sistema"), e a mesma classe do erro do processo 6618 (resumo escrito do
+// lado errado). O sinal 2 não tem esse problema: `filings` já diz que foi ESTE escritório que
+// protocolou (é o próprio workspace autenticado), então status/hora são fato, não palpite.
 //
 // Auth: token fixo na query string (`?k=`), mesmo padrão de `prazos-fechar.ts`. Nenhum cron
 // chama com JWT; verify_jwt=false.
@@ -99,6 +119,14 @@ function ehBurocraciaDoTribunal(titulo: string | null | undefined): boolean {
   return MOLDES_NAO_PECA.some((re) => re.test(t));
 }
 
+async function buscarFilings(numeroProcesso: string): Promise<{ http: number, protocols: any[] }> {
+  const u = `${BASE}/api/v1/filings?api_key=${encodeURIComponent(API)}&processo=${encodeURIComponent(numeroProcesso)}&limit=50`;
+  const r = await fetch(u, { headers: { Accept: "application/json" } });
+  if (!r.ok) return { http: r.status, protocols: [] };
+  const j = await r.json().catch(() => null);
+  return { http: r.status, protocols: Array.isArray(j?.protocols) ? j.protocols : [] };
+}
+
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   if (url.searchParams.get("k") !== K) return json({ erro: "nao autorizado" }, 401);
@@ -136,11 +164,13 @@ Deno.serve(async (req) => {
     const status_vistos: Record<string, number> = {};
     const candidatos: any[] = [];
     const semReferencia: any[] = [];
+    const peticionamentos: any[] = [];
     let primeiro = true;
 
     for (const [idp, doProc] of porProc) {
       if (!primeiro) await dorme(PASSO_MS);
       primeiro = false;
+      const numeroProc = doProc[0]?.processos?.numero || "";
       let docs: any[] = [];
       try {
         const r = await fetch(`${BASE}/api/v1/lawsuit/case-files?api_key=${encodeURIComponent(API)}&idprocessos=${encodeURIComponent(idp)}`, { headers: { Accept: "application/json" } });
@@ -156,6 +186,17 @@ Deno.serve(async (req) => {
         const j = await r.json().catch(() => null);
         docs = Array.isArray(j) ? j : [];
       } catch { http_erro++; status_vistos["excecao"] = (status_vistos["excecao"] || 0) + 1; continue; }
+
+      // Segunda chamada, mesmo passo de folga — GET /api/v1/filings (grátis).
+      let protocolos: any[] = [];
+      if (numeroProc) {
+        await dorme(PASSO_MS);
+        try {
+          const { http, protocols } = await buscarFilings(numeroProc);
+          status_vistos[`filings_${http}`] = (status_vistos[`filings_${http}`] || 0) + 1;
+          protocolos = protocols;
+        } catch { /* filings é sinal a mais; não aborta a rodada por causa dele */ }
+      }
 
       for (const z of doProc) {
         const dd = ddPorLm.get(String(z.legalmail_id));
@@ -174,6 +215,20 @@ Deno.serve(async (req) => {
           candidatos.push({
             prazo: z.id, processo: z.processos?.numero, tribunal: z.processos?.tribunal || "?",
             legalmail_id: z.legalmail_id, data_prazo: z.data, data_intimacao_usada: dd, candidatos: cands,
+          });
+        }
+
+        // Peticionamento: protocolo do Legal Mail enviado DEPOIS da intimação deste prazo. Entre
+        // vários, fica o mais recente — é a resposta mais provável a ESTE aviso específico.
+        const relevantes = protocolos
+          .filter((p: any) => String(p?.enviado_em || "").slice(0, 10) > dd)
+          .sort((a: any, b: any) => String(a.enviado_em).localeCompare(String(b.enviado_em)));
+        if (relevantes.length) {
+          const p = relevantes[relevantes.length - 1];
+          peticionamentos.push({
+            prazo: z.id, processo: z.processos?.numero, status: p.status,
+            peticionado_em: p.protocolado_em || p.enviado_em || null,
+            peca: p.tipo_peca || null, mensagem_pendencia: p.mensagem_pendencia || null,
           });
         }
       }
@@ -206,12 +261,39 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ candidato_pos_intimacao: null }),
         }).catch(() => {});
       }
+
+      // Peticionamento: grava status + hora + detalhe. Mesmo cuidado de não ficar stale: quem
+      // foi verificado e não tem protocolo relevante recebe null explícito nos três campos.
+      const comPeticionamento = new Set<number>();
+      for (const p of peticionamentos) {
+        comPeticionamento.add(p.prazo);
+        await sb(`prazos?id=eq.${p.prazo}`, {
+          method: "PATCH", headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({
+            peticionamento_status: p.status,
+            peticionamento_em: p.peticionado_em,
+            peticionamento_detalhe: { peca: p.peca, mensagem_pendencia: p.mensagem_pendencia },
+          }),
+        }).catch(() => {});
+      }
+      const semPeticionamento: number[] = [];
+      for (const [, doProc] of porProc) {
+        for (const z of doProc) {
+          if (!comPeticionamento.has(z.id) && ddPorLm.get(String(z.legalmail_id))) semPeticionamento.push(z.id);
+        }
+      }
+      if (semPeticionamento.length) {
+        await sb(`prazos?id=in.(${semPeticionamento.join(",")})`, {
+          method: "PATCH", headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ peticionamento_status: null, peticionamento_em: null, peticionamento_detalhe: null }),
+        }).catch(() => {});
+      }
     }
 
     const resumo: Record<string, unknown> = {
       rodou_em: new Date().toISOString(), hoje: hojeBR(),
       segundos: +((Date.now() - t0) / 1000).toFixed(1),
-      custo: "R$ 0,00 (case-files é grátis)",
+      custo: "R$ 0,00 (case-files e filings são grátis)",
       COMPLETO: completo,
       processos_alvo: porProc.size, http_ok, http_erro, status_vistos,
       abortou_por_429_no_processo: abortou_em, retry_after_segundos: retry_after,
@@ -228,8 +310,14 @@ Deno.serve(async (req) => {
       resumo.leia_se = "Existe documento nos autos com data posterior à intimação que abriu "
         + "este prazo. NÃO significa que é nossa peça nem que o prazo está coberto — só que "
         + "algo entrou depois. Confirmar de verdade custa R$0,02 (botão na tela).";
+      // Este balde SIM é prova (o filings é o próprio workspace autenticado protocolando) —
+      // mas só cobre quem usa o botão de protocolar do Legal Mail, não quem protocola direto
+      // no site do tribunal.
+      resumo.PETICIONAMENTO_ENCONTRADO = peticionamentos.length;
+      resumo.peticionamento_encontrado = peticionamentos.slice(0, 200);
     } else {
       resumo.DOCUMENTO_POSTERIOR_A_CONFERIR = null;
+      resumo.PETICIONAMENTO_ENCONTRADO = null;
       resumo.aviso = `RODADA INCOMPLETA (${http_ok}/${porProc.size} processos consultados). `
         + (abortou_em ? `Abortada por HTTP 429 (limite de taxa)${retry_after ? `, Retry-After ${retry_after}s` : ""}. ` : "")
         + `Nada foi gravado nesta rodada.`;
