@@ -2740,6 +2740,51 @@ function novoCliente(){dadosTemp={};abrirModal('Novo Cliente',formCliente({}),as
   const{error}=await supa.from('clientes').insert([d]);
   if(error){toast('Erro: '+error.message,'erro');return false;}toast('Cliente cadastrado!','ok');buscarClientes();
 });}
+// ─── Vincular/cadastrar cliente direto do processo (mesmo padrão de vincularClienteNN) ────
+// Pedido dela: vários processos entraram sem cliente (planilha de ativos, importação antiga)
+// e hoje só dava pra resolver saindo pra aba Clientes, cadastrando lá, e voltando pra achar o
+// processo de novo. Isso faz os dois passos num só clique, sem sair da tela do processo.
+function vincularClienteProcesso(processoId){
+  abrirModal('🔗 Vincular ou cadastrar cliente',
+    `<label style="font-size:12px;color:#64748b">Buscar cliente já cadastrado</label>
+     <input id="vcp-busca" placeholder="Digite o nome..." oninput="buscarClienteProc(this.value,'${processoId}')" style="width:100%;padding:9px;margin:4px 0 8px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
+     <div id="vcp-res" style="max-height:220px;overflow:auto;margin-bottom:10px"></div>
+     <div style="border-top:1px solid var(--border);padding-top:10px">
+       <button class="btn btn-secondary" style="width:100%" onclick="novoClienteEVincular('${processoId}')">+ Cadastrar novo cliente</button>
+     </div>`,
+    null,'',false,true);
+}
+let _vcpTimer=null;
+function buscarClienteProc(q,processoId){
+  clearTimeout(_vcpTimer);
+  const el=document.getElementById('vcp-res');if(!el)return;
+  q=(q||'').trim();
+  if(q.length<2){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Digite ao menos 2 letras.</p>';return;}
+  _vcpTimer=setTimeout(async()=>{
+    const{data}=await supa.from('clientes').select('id,nome,cpf_cnpj').ilike('nome','%'+q+'%').limit(20);
+    if(!data||!data.length){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Nenhum cliente encontrado.</p>';return;}
+    el.innerHTML=data.map(c=>`<div onclick="confirmarVinculoProcesso('${processoId}',${c.id})" style="padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer">
+      <div style="font-size:13px;color:var(--texto)">${escHtml(c.nome)}</div>
+      ${c.cpf_cnpj?`<div style="font-size:11px;color:#64748b">${escHtml(c.cpf_cnpj)}</div>`:''}</div>`).join('');
+  },250);
+}
+async function confirmarVinculoProcesso(processoId,clienteId){
+  const{error}=await supa.from('processos').update({cliente_id:clienteId}).eq('id',processoId);
+  if(error){toast('Erro ao vincular.','erro');return;}
+  fecharModal();toast('✅ Cliente vinculado.','ok');abrirProcesso(processoId);
+}
+// formCliente() já cadastra com responsavel default 'Cibele Becker' (ver respNomes()) — não
+// precisa de nenhuma regra extra aqui, só o passo de ligar o cliente novo ao processo.
+function novoClienteEVincular(processoId){
+  abrirModal('Cadastrar cliente e vincular ao processo',formCliente({}),async()=>{
+    const d=coletarForm('form-cliente');if(!d.nome){toast('Informe o nome.','erro');return false;}
+    const{data,error}=await supa.from('clientes').insert([d]).select().single();
+    if(error){toast('Erro: '+error.message,'erro');return false;}
+    const{error:e2}=await supa.from('processos').update({cliente_id:data.id}).eq('id',processoId);
+    if(e2){toast('Cliente cadastrado, mas erro ao vincular: '+e2.message,'erro');return false;}
+    toast('✅ Cliente cadastrado e vinculado!','ok');abrirProcesso(processoId);
+  });
+}
 async function editarCliente(id){
   const{data}=await supa.from('clientes').select('*').eq('id',id).single();if(!data)return;
   abrirModal('Editar Cliente',formCliente(data),async()=>{
@@ -3353,7 +3398,7 @@ async function abrirProcesso(id){
     </div>
     <div class="card-body">
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;font-size:13px">
-        ${campo('Cliente',p.clientes?.nome?`<a href="#" onclick="abrirCliente('${p.clientes.id}');return false" style="color:var(--azul3)">${p.clientes.nome}</a>`:'—')}
+        ${campo('Cliente',p.clientes?.nome?`<a href="#" onclick="abrirCliente('${p.clientes.id}');return false" style="color:var(--azul3)">${p.clientes.nome}</a>`:`<button class="btn btn-sm btn-secondary" onclick="vincularClienteProcesso('${p.id}')">🔗 Vincular/Cadastrar cliente</button>`)}
         ${campo('Advogado responsável',p.advogado_responsavel,'var(--azul3)')}
         ${campo('Advogado auxiliar',p.advogado_auxiliar)}
         ${campo('Secretária responsável',p.secretaria_responsavel)}
@@ -5033,7 +5078,7 @@ async function verPrazo(id){
 
   const bloco=`
   <div style="font-size:12px;color:#94a3b8;margin-bottom:10px">
-    ${escHtml(p.processos?.clientes?.nome||'(cliente a vincular)')}
+    ${p.processos?.clientes?.nome?escHtml(p.processos.clientes.nome):(p.processo_id?`<button class="btn btn-sm btn-secondary" onclick="fecharModal();vincularClienteProcesso('${p.processo_id}')">🔗 Vincular/Cadastrar cliente</button>`:'(cliente a vincular)')}
     ${p.processos?.numero?' · Proc. '+escHtml(p.processos.numero):''}
     ${pub?.tribunal?' · '+escHtml(pub.tribunal):''}
     ${p.processos?.advogado_responsavel?' · 👤 '+escHtml(_advCurto(p.processos.advogado_responsavel)):' · <span style="color:#dc2626">⚠️ sem responsável</span>'}
