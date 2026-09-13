@@ -1,0 +1,71 @@
+-- Suporte a mais de um cliente por processo (litisconsórcio ativo).
+-- Aplicado via migration `processo_clientes_multi`.
+--
+-- POR QUE EXISTE: ao vincular os 57 processos sem cliente (13/09/2026, ver
+-- db/legalmail_webhook.sql seções 12-15), apareceram 4 casos reais com mais de uma parte
+-- do nosso lado no MESMO processo:
+--   #6739 (5004004-55...): dois exequentes — Romulo Natam Pinheiro dos Passos e Luiza
+--     Nunes dos Passos (cumprimento de sentença, aparentam ser família).
+--   #6764 (5018966-55...): três exequentes — Alessandra Machado Gonçalves, Davi Luiz
+--     Gonçalves Cardoso, Diogo Gonçalves Cardoso (parecem herdeiros/família).
+--   #6747 e #6752: "Becker Advogados Associados" (o próprio escritório) aparece como
+--     parte ao lado de outro requerente — parece cobrança de honorários. Estes dois NÃO
+--     foram resolvidos aqui (fica pra ela decidir se cadastra o escritório como cliente).
+-- `processos.cliente_id` é uma FK só — não dava pra registrar os dois/três nomes.
+--
+-- DECISÃO DE DESENHO: NÃO trocar `processos.cliente_id` por uma tabela N:N pura. Ele
+-- continua existindo e sendo o CLIENTE PRINCIPAL — é nele que todo o resto do sistema já
+-- se apoia (filtros de processos por cliente, documentos, honorários, atendimentos, chat
+-- do processo, a tela de cliente listando os processos dele) — trocar isso seria reescrever
+-- dezenas de pontos do site por um ganho que só aparece em poucos casos (4 de ~760
+-- processos, até agora). Em vez disso, `processo_clientes` é um ACRÉSCIMO: lista TODOS os
+-- clientes de um processo (o principal incluso, `principal=true`), e symmetricamente
+-- `processos.cliente_id` é sempre o mesmo valor da linha principal — nunca diverge.
+--
+-- CREATE TABLE public.processo_clientes (
+--   id bigint generated always as identity primary key,
+--   processo_id bigint not null references processos(id) on delete cascade,
+--   cliente_id  bigint not null references clientes(id)  on delete cascade,
+--   principal   boolean not null default false,
+--   created_at  timestamptz not null default now(),
+--   unique (processo_id, cliente_id)
+-- );
+-- RLS: policy becker_staff_all (for all to authenticated using (true) with check (true)) —
+--   mesmo padrão de processos/clientes (app só para a equipe, sem RLS por linha).
+--
+-- BACKFILL (rodado uma vez, na mesma migration): todo processo com cliente_id ganhou a
+-- linha correspondente com principal=true. Conferido: 708 processos com cliente_id = 708
+-- linhas principal=true criadas (bate exato).
+--
+-- UI (site/index.html, função abrirProcesso): o campo "Cliente" virou "Cliente(s)" — lista
+-- todos os nomes ligados (cada um clicável pro perfil dele) e sempre tem um botão
+-- "+ outro cliente" (mesmo quando já tem um) pra litisconsórcio. A função
+-- `ligarClienteAoProcesso(processoId, clienteId)` decide sozinha se é o primeiro (grava
+-- cliente_id também, além da linha em processo_clientes) ou um adicional (só
+-- processo_clientes) — reaproveitada tanto por `confirmarVinculoProcesso` (cliente já
+-- existente) quanto por `novoClienteEVincular` (cliente novo, cadastrado ali mesmo).
+--
+-- ESCOPO DELIBERADAMENTE FORA: o modal do prazo (verPrazo) continua mostrando só o
+-- cliente PRINCIPAL (join direto processos->clientes, sem trocar pra processo_clientes) —
+-- é sinalização rápida no meio de um prazo, não o lugar de gerenciar litisconsórcio; quem
+-- precisa ver/adicionar todos os clientes abre o processo.
+--
+-- RESOLVIDOS na mesma migration (13/09/2026), com o novo esquema:
+--   #6739 -> principal: Luiza Nunes dos Passos (cliente 860, já cadastrada)
+--            adicional: Romulo Natam Pinheiro dos Passos (cliente novo 1521)
+--   #6764 -> principal: Alessandra Machado Gonçalves (cliente novo 1522)
+--            adicionais: Davi Luiz Gonçalves Cardoso (1523), Diogo Gonçalves Cardoso (1524)
+-- Todos os 4 clientes novos cadastrados com responsavel='Cibele Becker' (mesmo default do
+-- formCliente() da tela).
+--
+-- AINDA PENDENTES (não resolvidos, fora do escopo desta migration):
+--   #6747 (5004101-55...) e #6752 (5065310-48...) — a única/uma das partes é "Becker
+--   Advogados Associados" (o próprio escritório). Decisão de negócio, não técnica: cadastrar
+--   o escritório como "cliente" dele mesmo (pra aparecer nas telas de honorários/cobrança)
+--   ou deixar esses dois processos sem cliente_id de verdade. Perguntar antes de mexer.
+--
+-- Verificação:
+--   select count(*) from processos where cliente_id is not null;                    -- 710
+--   select count(*) from processo_clientes;                                        -- >=712
+--   select processo_id, count(*) from processo_clientes group by 1 having count(*)>1;
+--     -- só #6739 e #6764 devem aparecer aqui (2 e 3 linhas, respectivamente)

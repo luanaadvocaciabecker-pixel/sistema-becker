@@ -2768,8 +2768,25 @@ function buscarClienteProc(q,processoId){
       ${c.cpf_cnpj?`<div style="font-size:11px;color:#64748b">${escHtml(c.cpf_cnpj)}</div>`:''}</div>`).join('');
   },250);
 }
+// Liga o cliente ao processo em processo_clientes (fonte de verdade pra litisconsórcio —
+// ver db/legalmail_webhook.sql, migration processo_clientes_multi). Se o processo ainda não
+// tem cliente_id, este é o principal e processos.cliente_id também é preenchido (tudo o
+// resto do sistema — filtros, documentos, honorários, chat — continua lendo só esse campo,
+// sem quebrar nada); senão, entra só como cliente adicional do mesmo processo.
+async function ligarClienteAoProcesso(processoId,clienteId){
+  const{data:proc}=await supa.from('processos').select('cliente_id').eq('id',processoId).single();
+  const ehPrimeiro=!proc?.cliente_id;
+  const{error}=await supa.from('processo_clientes').upsert(
+    {processo_id:processoId,cliente_id:clienteId,principal:ehPrimeiro},{onConflict:'processo_id,cliente_id'});
+  if(error)return error;
+  if(ehPrimeiro){
+    const{error:e2}=await supa.from('processos').update({cliente_id:clienteId}).eq('id',processoId);
+    if(e2)return e2;
+  }
+  return null;
+}
 async function confirmarVinculoProcesso(processoId,clienteId){
-  const{error}=await supa.from('processos').update({cliente_id:clienteId}).eq('id',processoId);
+  const error=await ligarClienteAoProcesso(processoId,clienteId);
   if(error){toast('Erro ao vincular.','erro');return;}
   fecharModal();toast('✅ Cliente vinculado.','ok');abrirProcesso(processoId);
 }
@@ -2780,7 +2797,7 @@ function novoClienteEVincular(processoId){
     const d=coletarForm('form-cliente');if(!d.nome){toast('Informe o nome.','erro');return false;}
     const{data,error}=await supa.from('clientes').insert([d]).select().single();
     if(error){toast('Erro: '+error.message,'erro');return false;}
-    const{error:e2}=await supa.from('processos').update({cliente_id:data.id}).eq('id',processoId);
+    const e2=await ligarClienteAoProcesso(processoId,data.id);
     if(e2){toast('Cliente cadastrado, mas erro ao vincular: '+e2.message,'erro');return false;}
     toast('✅ Cliente cadastrado e vinculado!','ok');abrirProcesso(processoId);
   });
@@ -3381,7 +3398,19 @@ async function abrirProcesso(id){
   const rows=res.ok?await res.json():[];
   const p=Array.isArray(rows)?rows[0]:null;
   if(!p){toast('Erro ao carregar processo.','erro');ir('judiciais');return;}
+  // Suporte a mais de um cliente por processo (litisconsórcio) — processo_clientes lista
+  // todos, processos.cliente_id continua sendo o principal (ver db/legalmail_webhook.sql).
+  const pcRes=await fetch(`${SUPA_URL}/rest/v1/processo_clientes?processo_id=eq.${id}&select=cliente_id,principal,clientes(id,nome)&order=principal.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+  const clientesLigados=pcRes.ok?await pcRes.json():[];
   const campo=(lbl,val,cor)=>val?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${lbl}</span><div style="margin-top:3px${cor?';color:'+cor:''}">${val}</div></div>`:'';
+  const blocoClientes=clientesLigados.length
+    ?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Cliente${clientesLigados.length>1?'s':''}</span>
+        <div style="margin-top:3px;display:flex;flex-direction:column;align-items:flex-start;gap:3px">
+          ${clientesLigados.map(cl=>`<a href="#" onclick="abrirCliente('${cl.clientes.id}');return false" style="color:var(--azul3)">${escHtml(cl.clientes.nome)}</a>`).join('')}
+          <button class="btn-icon" title="Adicionar outro cliente a este processo (litisconsórcio)" onclick="vincularClienteProcesso('${p.id}')" style="font-size:11px;padding:2px 6px">+ outro cliente</button>
+        </div></div>`
+    :`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Cliente</span>
+        <div style="margin-top:3px"><button class="btn btn-sm btn-secondary" onclick="vincularClienteProcesso('${p.id}')">🔗 Vincular/Cadastrar cliente</button></div></div>`;
   const atualizado=p.updated_at?new Date(p.updated_at).toLocaleDateString('pt-BR'):'';
   c.innerHTML=`
   <div style="margin-bottom:16px"><button class="btn btn-secondary" onclick="ir('judiciais')">← Voltar</button></div>
@@ -3398,7 +3427,7 @@ async function abrirProcesso(id){
     </div>
     <div class="card-body">
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;font-size:13px">
-        ${campo('Cliente',p.clientes?.nome?`<a href="#" onclick="abrirCliente('${p.clientes.id}');return false" style="color:var(--azul3)">${p.clientes.nome}</a>`:`<button class="btn btn-sm btn-secondary" onclick="vincularClienteProcesso('${p.id}')">🔗 Vincular/Cadastrar cliente</button>`)}
+        ${blocoClientes}
         ${campo('Advogado responsável',p.advogado_responsavel,'var(--azul3)')}
         ${campo('Advogado auxiliar',p.advogado_auxiliar)}
         ${campo('Secretária responsável',p.secretaria_responsavel)}
