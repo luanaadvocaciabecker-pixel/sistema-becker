@@ -505,3 +505,55 @@ alter table public.prazos add column if not exists categoria_fonte      text;
 -- TRT-12, TJSP). Corrigido com UPDATE direto usando o valor exato que o DataJud devolveu
 -- (mesma grafia sem hífen já usada em outras 500+ linhas de `processos.tribunal`, ex.
 -- "TRT12"/"TRF04" — não "TRT-12"). Só o campo tribunal foi tocado; nada de cliente.
+
+-- =====================================================================================
+-- 15) 13/09/2026 — Legal Mail TEM o texto de intimações antigas que a gente nunca puxou
+-- (achado real, via notices-to-comply) + 7 clientes vinculados dos 57
+-- =====================================================================================
+-- Ela perguntou se o Legal Mail não dava pra puxar o texto dessas intimações. Testado ao
+-- vivo (sondagem temporária lm-lawsuitall-probe, neutralizada depois de usar):
+--
+-- 1) `GET /lawsuit/all` (grátis) — dos 57 processos sem cliente, 43 JÁ ESTAVAM cadastrados
+-- no workspace do Legal Mail (a maioria nunca tinha `lm_idprocessos` sincronizado — rodado
+-- de novo, 124 processos no total ganharam o id, não só os 57). Os outros 14 (#6280,
+-- #6713, #6716, #6721, #6722, #6723, #6725, #6727, #6730, #6737, #6746, #6749, #6759,
+-- #6768) NÃO existem no Legal Mail — para esses, não tem texto nenhum lá, ponto final.
+--
+-- 2) `GET /pleading/notices-to-comply` (grátis, mesmo endpoint de prazos-fechar.ts) nos 43:
+-- 30 têm ZERO intimação registrada até no próprio Legal Mail (bate com nossa base vazia —
+-- não era falha de sincronização, é ausência real de evento). 13 TINHAM histórico real que
+-- nunca tinha chegado na nossa `publicacoes` — a intimação existe há mais tempo do que o
+-- nosso webhook, e não há backfill automático de histórico antigo (só o que chega dali pra
+-- frente é capturado). Do texto limpo (tags removidas), o padrão "(PAPEL - NOME)" logo após
+-- "Refer. ao Evento N" identifica a QUE PARTE aquele evento specific se refere, e
+-- "Destinatário: Cibele Becker Friedrichsen" no mesmo registro é o mesmo sinal forte já
+-- usado na seção 12 (ela é advogada de registro daquela parte).
+--
+-- ACHADO QUE MUDA UM CASO JÁ REPORTADO: #6742 (5000173-67...) tinha sido listado com
+-- "Autor: Adelson Garcia x Réu: Klaus Wilhelm Dietrich" sem saber qual lado é nosso. O
+-- texto do Legal Mail mostra Cibele Becker como destinatária do evento referente ao
+-- "(RÉU - KLAUS WILHELM DIETRICH)" — ou seja, o cliente aqui é o RÉU, não o autor.
+--
+-- LIMITE DO SCHEMA que apareceu por causa disso: `processos.cliente_id` é 1-para-1 (uma
+-- FK só). Casos com MAIS DE UMA parte do nosso lado no mesmo processo (#6739: dois
+-- exequentes, Romulo Natam Pinheiro dos Passos E Luiza Nunes dos Passos; #6764: três
+-- exequentes, Alessandra/Davi/Diogo Gonçalves; #6747 e #6752: "BECKER ADVOGADOS
+-- ASSOCIADOS" aparece como a própria parte, ao lado de outro requerente — parece cobrança
+-- de honorários) NÃO cabem hoje num vínculo só — ficam pendentes de decisão humana (qual
+-- nome vira o cliente_id, ou se o sistema precisa de uma tabela N:N no futuro). Não
+-- resolvido automaticamente, registrado para quando ela decidir.
+--
+-- VINCULADOS de fato (13/09/2026, só os casos SEM ambiguidade — um nome só por processo,
+-- Cibele confirmada como advogada dele; a maioria já era cliente cadastrado por outro
+-- processo, só faltava ligar este):
+--   #6744 -> cliente 1202 (Stela Maris Finder, já cadastrada)
+--   #6762 -> cliente 1357 (Diamond Transportes Ltda, já cadastrada)
+--   #6763 -> cliente 214  (Vinicius de Assis Pereira, já cadastrado)
+--   #6735 -> cliente 680  (Jessica Wuerz Berger, já cadastrada)
+--   #6742 -> cliente 766  (Klaus Wilhelm Dietrich, já cadastrado)
+--   #6751 -> cliente 364  (Daiana Najara Leandro Zeferino, já cadastrada — existe também um
+--             cadastro parecido id 1325 "Daiana Najara Leandro", possível duplicata a
+--             revisar depois, não mexido agora)
+--   #6738 -> cliente NOVO 1520 (Andre de Oliveira, não existia — cadastrado com
+--             responsavel='Cibele Becker', mesmo default do formCliente())
+-- Nenhum outro campo do processo foi tocado — só cliente_id.
