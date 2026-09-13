@@ -439,3 +439,33 @@
 -- é GRÁTIS na tabela de preços e devolve os documentos com data. Peça nossa com data posterior
 -- à intimação seria a evidência que falta. NÃO TESTADO ainda — a função lm-casefiles-probe
 -- existe e é o caminho para testar.
+
+-- ============================================================================
+-- 13) 13/09/2026 — "não perdemos prazo ultimamente" testado contra o tribunal, e corrigido
+-- ============================================================================
+-- Ela pediu pra fechar em bloco os prazos vencidos sem sinal nenhum (21 deles), com a
+-- justificativa "não perdemos nenhum prazo ultimamente". Avisado o risco (é exatamente o
+-- erro dos 554 prazos fechados só por data, sem prova — migration prazo_nao_fecha_por_data,
+-- seção 11 acima) e ela confirmou que queria mesmo assim.
+--
+-- Antes de fechar qualquer coisa, rodado `prazos-fechar?commit=0` (grátis, já existente) só
+-- pra ver o status REAL desses 21 no tribunal, via Legal Mail. Resultado: 7 dos 21
+-- apareciam como "aberto" no PRÓPRIO TRIBUNAL — não ausência de sinal, status ativo mesmo.
+-- Ou seja, a premissa "não perdemos nenhum" tinha 7 exceções que precisavam de conferência
+-- humana antes de fechar, exatamente o motivo de nunca fechar por indício.
+--
+-- Mostrados os 7 (com cliente e advogado responsável) pra ela conferir um a um:
+--   5572 Vinicius de Assis Pereira · 5575 Thiago Vieira Barbosa ·
+--   5576 Norberto Petzold Junior · 5638 Agro Lavoura Comércio de Produtos Agropecuários ·
+--   5584/5585/5586 Eduardo José Bolivar São Clemente (mesmo processo, 3 prazos)
+-- Ela confirmou os 7 (clique humano via chat, não a tela) — fechados com
+-- cumprido_por='confirmacao_luana_13-09-2026_chat_apesar_status_aberto_no_tribunal' (deixa
+-- registrado que o tribunal ainda mostrava aberto no momento do fechamento — auditoria
+-- futura sabe que não foi silêncio, foi confirmação humana apesar do sinal contrário).
+--
+-- OS OUTROS ~14 (dos 21 "sem sinal nenhum") FICARAM EM ABERTO, sem decisão: sem resposta do
+-- tribunal nenhuma (nem aberto nem fechado) ou sem processo vinculado — continuam
+-- precisando de conferência caso a caso, não fechados em bloco. À PARTE desses 21, ainda tem
+-- 4 vencidos com peticionamento_status='Protocolado' (prova real, ver
+-- db/prazo_candidato_protocolo.sql) que também não foram fechados nesta rodada — ação futura
+-- óbvia, ficou só fora do escopo do pedido dela (que era sobre os "sem sinal nenhum").
