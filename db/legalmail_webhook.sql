@@ -471,3 +471,37 @@ alter table public.prazos add column if not exists categoria_fonte      text;
 -- controle_prazos/webhook_logs (schema paralelo que a proposta original sugeria e que
 -- seção 12 já rejeitou). Os 22 prazos "(processo a vincular)" de hoje continuam exigindo
 -- conferência humana — são clientes novos de fato, o gatilho não inventa isso.
+
+-- =====================================================================================
+-- 14) 13/09/2026 — checagem via DataJud dos 57 processos sem cliente: número certo, mas
+-- DataJud NÃO tem nome de parte (achado já documentado, reconfirmado) — e conserta o
+-- `tribunal` errado de 17 desses 57
+-- =====================================================================================
+-- Ela pediu pra checar numa API se os números dos 57 processos sem cliente estavam certos
+-- e "puxar o texto". Dois testes, feitos ao vivo:
+--
+-- 1) Dígito verificador do CNJ (validação LOCAL, sem chamar API nenhuma — mod 97, art. 1º
+-- da Resolução CNJ 65/2008: DD = 98 - ((sequencial+ano+justiça+tribunal+origem || '00')
+-- mod 97)): as 57 números TODOS batem o dígito verificador. Nenhum tem erro de dígito.
+--
+-- 2) DataJud (mesma API pública já usada em prazo_auditoria_datajud.sql): 36 dos 57 foram
+-- ENCONTRADOS (existem de verdade, com classe/órgão/tribunal reais); 21 não foram
+-- encontrados HOJE — mas isso não prova número errado: é a MESMA defasagem de indexação já
+-- documentada (tribunal manda em lote, alguns tribunais/varas demoram mais que outros a
+-- aparecer). Nenhuma evidência de número incorreto nos 57 — dígito bate em 57/57, e "não
+-- achei" no DataJud não é o mesmo que "não existe".
+--
+-- RECONFIRMADO (não é novidade, é a MESMA limitação já registrada em db/trt_gera_prazos.sql
+-- e db/legalmail_case_files.sql): o schema do DataJud NÃO TEM CAMPO DE PARTE NENHUM —
+-- só tribunal/grau/classe/assunto/órgão julgador/movimentos. "Puxar o texto" das partes
+-- não é possível por aqui, nem pros 36 encontrados. Os 16 processos sem publicação
+-- guardada continuam sem fonte de nome de parte — precisam do nome dela ou de uma fonte
+-- nova (a íntegra, por exemplo).
+--
+-- ACHADO LATERAL ÚTIL: o DataJud devolve o TRIBUNAL real de cada processo encontrado, e
+-- 17 dos 36 tinham `processos.tribunal` errado no nosso banco — todos os 57 vieram da
+-- importação da "planilha de ativos" com um valor default (a maioria virou "TJSC" mesmo
+-- quando o processo é de outro tribunal, ex.: TRT-15, TRF-3/4, TJRS, TJPR, TRT-9,
+-- TRT-12, TJSP). Corrigido com UPDATE direto usando o valor exato que o DataJud devolveu
+-- (mesma grafia sem hífen já usada em outras 500+ linhas de `processos.tribunal`, ex.
+-- "TRT12"/"TRF04" — não "TRT-12"). Só o campo tribunal foi tocado; nada de cliente.
