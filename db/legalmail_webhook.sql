@@ -378,3 +378,63 @@ alter table public.prazos add column if not exists categoria_fonte      text;
 -- para de funcionar. Não é renovado automaticamente; se precisar do recibo depois desse
 -- prazo, precisa buscar de novo via API (endpoint não mapeado ainda) ou no próprio painel
 -- do Legal Mail.
+
+-- =====================================================================================
+-- 12) 13/09/2026 — TESTADA (e refutada) uma proposta genérica de outra IA sobre
+-- normalização de número/CNJ e vinculação de cliente por regex — achado real foi outro
+-- =====================================================================================
+-- Ela mandou um "prompt pronto para o Claude" de outra IA propondo: (a) schema paralelo
+-- (controle_prazos/webhook_logs, duplicando prazos/legalmail_eventos que já existem e
+-- funcionam), (b) normalizar CNJ removendo zeros à esquerda para casar processo, citando o
+-- exemplo concreto 0001706-96.2026.5.12.0050 como "processo a vincular" por causa disso,
+-- (c) extrair Reclamante/Reclamado por regex pra descobrir automaticamente o cliente e o
+-- advogado responsável, (d) fechar prazo sozinho quando o texto da movimentação contém
+-- palavras como "contestação"/"recurso"/"embargos". Nomes de evento como
+-- `peticao.protocolada_sucesso`/`movimentacao.nova`/`prazo.recebido` NÃO EXISTEM na API
+-- real do Legal Mail (conferido contra o spec OpenAPI de novo) — são invenção genérica.
+--
+-- TESTADO CONTRA O BANCO REAL, com o exemplo dela:
+--   processo 0001706-96.2026.5.12.0050 (id 6756) JÁ EXISTE, casado por número EXATO (sem
+--   qualquer diferença de zero à esquerda), com advogado_responsavel='Samaira Leite da
+--   Silva' — já correto, sem precisar de regex nenhuma. O único campo vazio é cliente_id.
+--   Texto da publicação: RECLAMANTE "VALDINEIA FONSECA DE SOUZA", RECLAMADO "JAH AÇAÍ
+--   JOINVILLE LTDA" — NENHUM dos dois existe em `clientes`. Ou seja: não é bug de
+--   normalização, é cliente novo mesmo, ainda não cadastrado — "(processo a vincular)"
+--   está fazendo exatamente o que deveria (pedir conferência humana), não uma falha.
+--
+-- TESTADO EM ESCALA (não só o exemplo dela): comparado, para toda `publicacoes` órfã
+-- (processo_id null), se bateria com algum processo REMOVENDO zeros à esquerda além do
+-- que já fazemos (remover só pontuação): 0 casos a mais. A tese de "zero à esquerda quebra
+-- o casamento" não se sustenta nos nossos dados — nenhuma publicação órfã seria resolvida
+-- só por essa normalização extra.
+--
+-- ACHADO REAL (diferente do que a proposta dizia, achado testando a mesma área): 510
+-- publicações (430 nos últimos 30 dias) e 17 prazos (todos já cumpridos) tinham
+-- processo_id NULL mesmo com o número batendo EXATO (sem normalização nenhuma) contra um
+-- processo já cadastrado — o processo só foi cadastrado/current DEPOIS que a publicação
+-- chegou, e `lm_ingest` só tenta casar uma vez, no instante da chegada; nunca volta pra
+-- religar depois. Conferido que cada casamento era 1-para-1 (nunca ambíguo) antes de
+-- aplicar. CORRIGIDO com um backfill único (UPDATE direto, não é rotina agendada ainda):
+-- as 510 publicações e os 17 prazos ganharam o processo_id correto. Nenhum `cumprido`,
+-- `status` ou outro campo de conteúdo foi tocado — só a chave estrangeira. Dos 22 prazos
+-- HOJE em aberto marcados "(processo a vincular)", NENHUM se beneficiou (nenhum tinha
+-- processo já cadastrado pra casar) — são genuinamente clientes/processos novos, mesma
+-- conclusão do exemplo dela.
+--
+-- NÃO IMPLEMENTADO, de propósito, por contradizer regras já estabelecidas neste projeto:
+--   - Fechar prazo (cumprido=true) por regex de palavra-chave na movimentação
+--     ("contestação"/"recurso"/"embargos" etc.) — é exatamente o padrão "nunca fecha prazo
+--     automaticamente" que este arquivo já reforça na seção 10. Palavra-chave no texto não
+--     prova que FOI NOSSO escritório que protocolou (pode ser a parte contrária, pode ser
+--     referência a outro recurso) — mesmo problema, em pior lugar, do sinal 1 de
+--     db/prazo_candidato_protocolo.sql (que por isso nunca afirma autoria).
+--   - Adivinhar o cliente cruzando Reclamante/Reclamado (texto livre) com o cadastro —
+--     mesma classe do erro do processo 6618 (resumo escrito do lado errado) e da regra dela
+--     de que "nosso cliente é sempre o que tem cadastro no nosso sistema". Uma segunda forma
+--     de decidir quem é o cliente, por fora do cadastro, foi rejeitada nesta sessão mais de
+--     uma vez por esse motivo exato — não muda porque veio de um prompt pronto.
+--
+-- SE UMA ROTINA PERIÓDICA de relink (não só este backfill único) fizer sentido no futuro —
+-- publicação/prazo continuam chegando antes do processo existir —, ela pode reusar a MESMA
+-- query (join por dígitos, checando ambiguidade antes de aplicar); não foi construída agora
+-- por não ter sido pedida, só o backfill pontual.
