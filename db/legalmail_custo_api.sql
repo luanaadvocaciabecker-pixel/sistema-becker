@@ -469,3 +469,60 @@
 -- 4 vencidos com peticionamento_status='Protocolado' (prova real, ver
 -- db/prazo_candidato_protocolo.sql) que também não foram fechados nesta rodada — ação futura
 -- óbvia, ficou só fora do escopo do pedido dela (que era sobre os "sem sinal nenhum").
+
+-- ============================================================================
+-- 14) 14/09/2026 — "ache o erro" + tira Vencidos da tela (pedido do dia seguinte)
+-- ============================================================================
+-- Ela pediu duas coisas juntas: (a) achar o erro por trás de tanto prazo ficar sem sinal
+-- automático (ela não quer ficar fazendo conferência manual pra sempre), e (b) tirar a opção
+-- "Vencidos" da tela de Prazos — na visão dela, depois que a data passa não tem mais ação
+-- possível, não tem por que continuar mostrando.
+--
+-- INVESTIGAÇÃO (2 agentes Explore, só leitura, achados independentes):
+--   1. `prazos.legalmail_id` ausente: só 7 de 191 prazos abertos — pequeno, não é a causa.
+--   2. `processos.lm_idprocessos` ausente: 0 de 169 processos com prazo aberto — cobertura
+--      hoje é 100%, MAS só porque alguém rodou a sincronização (`legalmail-autos?
+--      action=sync_ids`, GET /lawsuit/all, grátis) manualmente em algum momento. NUNCA
+--      existiu um `cron.job` chamando essa função — é o "erro" real: uma peça manual que
+--      devia ser automática. Processo novo fica sem esse id (e por tabela, invisível aos
+--      3 robôs de checagem) até alguém lembrar de rodar de novo.
+--   3. Cron dos 3 robôs de checagem (prazos-fechar/candidato-protocolo/peticionamento):
+--      rodando limpo, sem erro, sem 429, cobertura completa nos últimos 10+ dias — NÃO é a
+--      causa dos "sem sinal".
+--   4. A maioria dos "sem sinal nenhum" (com os dois ids certos, robôs rodando limpo) é
+--      ausência GENUÍNA de dado — Legal Mail/tribunal não tinha nada novo pra informar
+--      ainda. Só o próprio tribunal ou a auditoria mensal via DataJud (já existe,
+--      `prazos-auditoria-datajud`) resolve — não é bug, é limite real da fonte.
+--
+-- FIX 1 — migration `cron_legalmail_autos_sync_ids_fix` (a v1,
+-- `cron_legalmail_autos_sync_ids`, usava `vault.decrypted_secrets` pra pegar a chave do
+-- header, mas esse projeto não guarda segredo de Edge Function no Vault — a tabela vem
+-- vazia, o header ficaria null e a chamada daria 401 todo dia, silenciosamente. Corrigido
+-- pro MESMO padrão hardcoded já usado em legalmail-reconcile-horario/
+-- legalmail_reconcile_diario, mesma LEGALMAIL_WEBHOOK_KEY). Agendado
+-- `legalmail_autos_sync_ids_0950`, 09:50 UTC (06:50 BRT) — antes de todo o lote das 10h UTC
+-- (djen_fire/process, legalmail_reconcile_diario, polo_diario, trt_prazos_diario), pra
+-- processo criado no dia já ter o id antes de qualquer prazo dele precisar ser checado.
+-- Testado manualmente após corrigir: HTTP 200, `{"total_listado":696,"atualizados":88}`.
+--
+-- FIX 2 — site/index.html, `renderPrazos()`: prazo "vencido" (data passou, cumprido=false,
+-- sem outro status terminal) agora é filtrado FORA de `base` logo no início da função — não
+-- só escondido depois. Isso esvazia `g.vencido` em TODO lugar (card próprio removido do
+-- array de stats; as listas combinadas custas/documentos/audiências/todos que faziam
+-- `...g.vencido` continuam no código mas sempre recebem array vazio dali; o contador "X já
+-- passou da data" do banner "a conferir" foi removido por ficar sempre zero).
+--
+-- RISCO REGISTRADO, aceito por ela conscientemente (pergunta direta feita antes de
+-- implementar): um prazo vencido sem NENHUM sinal positivo (peticionamento_status,
+-- candidato_pos_intimacao, protocolo_finalizado) fica sem aparecer em NENHUMA lista da tela
+-- de Prazos daqui pra frente — só reaparece se abrir o processo direto, ou se algum sinal
+-- popular esses campos (aí ele passa a `cumprido=true` por conferência humana normal, nunca
+-- sozinho). Isso inclui os que têm sinal NEGATIVO
+-- (peticionamento_status='Cancelado'/'Com pendências' — sinal de problema real, não
+-- ausência) — não foi feita exceção pra esses, por decisão explícita dela de tirar TODOS,
+-- não só os sem sinal. Registrado aqui pra quem revisar essa decisão no futuro.
+--
+-- NÃO MEXIDO: o chip "⏰ N prazos vencidos" do Painel Cibele (`pCibele()`, contagem
+-- independente por `data<=hoje`) — o pedido dela foi especificamente sobre a tela de Prazos
+-- ("tire as opções de prazos vencidos de lá"), então esse chip continua do jeito que estava
+-- até ela confirmar se quer o mesmo tratamento lá.

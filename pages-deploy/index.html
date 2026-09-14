@@ -4913,7 +4913,14 @@ function renderPrazos(){
   // Compara por nome normalizado (MAIÚSCULO/trim); '__SEM__' = prazo sem responsável no processo.
   const _advKey=s=>{const t=(s||'').trim().toUpperCase();return t?t:'__SEM__';};
   const _advMatch=(p,v)=>{if(!v)return true;const k=_advKey(advDe(p));return v==='__SEM__'?k==='__SEM__':k.includes(v);};
-  const base=prazosCache.filter(p=>_advMatch(p,prazoAdv)&&_noPeriodo(p));
+  // 14/09/2026, pedido dela: prazo vencido (data passou, cumprido=false, sem outro status
+  // terminal) some da tela INTEIRA — não só do card próprio. Ela decidiu isso sabendo do
+  // risco (fica sem nenhuma lista até que algum sinal apareça em cumprido_por/peticionamento
+  // via robô, ou alguém abra o processo direto) — ver db/legalmail_custo_api.sql seção 13/14
+  // pro raciocínio completo. Filtra ANTES de entrar em _classPrazo/g, não só esconde depois:
+  // assim nem as listas combinadas (custas/documentos/audiências/todos, que fazem
+  // ...g.vencido) voltam a mostrar.
+  const base=prazosCache.filter(p=>_advMatch(p,prazoAdv)&&_noPeriodo(p)&&_classPrazo(p)!=='vencido');
   // Seletor de responsável (inclui Cibele e "Sem responsável" pra nenhum prazo ficar
   // escondido). A contagem entre parênteses é a mesma que os chips mostravam: em aberto
   // daqui para frente.
@@ -4948,14 +4955,12 @@ function renderPrazos(){
     ['aberto','Em aberto',g.aberto.length,'#60a5fa'],
     ['conferir','⚠ A conferir',aConferir.length,'#f59e0b'],
     ['custas','💰 Custas',nCat('custas'),'#d97706'],
-    ['documentos','📎 Documentos',nCat('documentos'),'#7c3aed'],
-    ['vencido','Vencidos',g.vencido.length,'#fbbf24']
+    ['documentos','📎 Documentos',nCat('documentos'),'#7c3aed']
   ].map(([k,lbl,n,cor])=>`<div class="stat-card" style="cursor:pointer;${prazoBucket===k?'outline:2px solid '+cor+';outline-offset:-1px':''}" onclick="prazoBucket='${k}';renderPrazos()">
     <div class="stat-val" style="color:${cor}">${n}</div><div class="stat-label">${lbl}</div></div>`).join('');
   const el=document.getElementById('prazos-lista');if(!el)return;
   let lista, vazio='Nenhum prazo nesta categoria.';
   if(prazoBucket==='hoje'){lista=g.hoje;vazio='Nenhum prazo vencendo hoje. 👍';}
-  else if(prazoBucket==='vencido'){lista=g.vencido;vazio='Nenhum prazo decorrido em aberto. ✅';}
   else if(prazoBucket==='aberto')lista=g.aberto;
   else if(prazoBucket==='cumprido')lista=g.cumprido;
   else if(prazoBucket==='custas'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='custas');vazio='Nenhum prazo de custas em aberto. 💰';}
@@ -4975,9 +4980,10 @@ function renderPrazos(){
   // Aviso da fila de conferência. Fica no topo porque prazo com data calculada que ninguém olha
   // é pior do que prazo nenhum: passa a impressão de estar controlado.
   if(aConferir.length && prazoBucket!=='conferir'){
-    const jaVenceu=aConferir.filter(p=>_classPrazo(p)==='vencido').length;
+    // "já passou da data" foi removido: base já não contém vencido nenhum (ver filtro
+    // acima), então essa contagem sempre daria zero.
     html += `<div onclick="prazoBucket='conferir';renderPrazos()" style="cursor:pointer;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.40);border-radius:10px;padding:12px 14px;margin-bottom:12px;color:#b45309;font-size:13px;font-weight:700">
-      ⚠ ${aConferir.length} prazo(s) com data CALCULADA pelo sistema — clique para conferir e confirmar${jaVenceu?` · <span style="color:#dc2626">${jaVenceu} já passou da data</span>`:''}</div>`;
+      ⚠ ${aConferir.length} prazo(s) com data CALCULADA pelo sistema — clique para conferir e confirmar</div>`;
   }
   html += lista.length?`<div class="card"><div class="card-body">${renderPrazosLista(lista,true)}</div></div>`
     :`<div class="empty-state"><div class="icon">✅</div><p>${vazio}</p></div>`;
