@@ -780,3 +780,38 @@
 --   0011176-49.2023.5.15.0091 (TRT-15) — PAULO SERGIO ZAMPIERI E OUTROS (texto não deixa claro
 --     quem é recorrente/recorrido)
 --   0011220-44.2025.5.15.0044 (TRT-15) — EMERSON BONFIM FRANCISCO E OUTROS (3)
+
+-- ============================================================================================
+-- 14/09/2026 — mais 21 CNJs excluídos: "Umberto Carlos Becker" (OAB/PR 15743) como advogado
+-- não é nosso, mesmo quando Cibele Becker Friedrichsen também aparece listada no mesmo ato
+--
+-- Depois da exclusão do CNJ da Tania (seção anterior), ela confirmou a regra de forma mais
+-- ampla: "isso os que tem umberto nao é nosso" — qualquer processo onde Umberto Carlos Becker
+-- aparece como advogado não é da Becker Advocacia, mesmo nos casos em que ele aparece JUNTO
+-- com Cibele Becker Friedrichsen (e frequentemente também Fernanda Golinelli Gongora e
+-- Vanderlei Iori) — não é um sinal de que o caso é nosso, é o time do escritório do Umberto.
+--
+-- Busca em `publicacoes.texto` por "umberto" (excluindo falso positivo "Humberto Theodoro
+-- Júnior", jurista citado em petições) achou 22 CNJs distintos. Maioria são ações contra
+-- bancos (CEF, Banco J. Safra, Bradesco Financiamentos, BMG, Votorantim, Itaú) — sugere um
+-- time de advogados que atua em causas bancárias, registrado com Cibele em conjunto.
+--
+-- 3 desses 22 já tinham processo cadastrado:
+--   - id 6732 (0002335-53.2021.4.03.6202, TRF3) — sem cliente, 0 prazos/financeiro/documentos,
+--     18 movimentações — deletado (cascata limpou as movimentações; publicações desvinculadas).
+--   - id 6745 (0001408-71.2026.5.09.0670, TJSC) — sem cliente, 1 audiência auto-extraída do
+--     Legal Mail (id 129, sem confirmação humana) — audiência deletada primeiro (FK não é
+--     cascade), processo deletado depois; publicações desvinculadas.
+--   - id 6101 (0010055-09.2023.5.15.0051, TRT-15) — **NÃO EXCLUÍDO**: diferente dos outros,
+--     tem cliente real vinculado (DIEGO SALES LIMA, id 1323, cadastrado em 08/06/2026 — 3
+--     meses antes desta sessão, não foi um cadastro apressado desta sessão) e 1 prazo em
+--     aberto rastreado. Fica de fora da exclusão até ela confirmar especificamente este caso
+--     — é diferente o suficiente do padrão (processo órfão recém-cadastrado sem cliente) pra
+--     merecer confirmação à parte antes de mexer num cliente real já em acompanhamento.
+--
+-- FEITO: INSERT dos 21 CNJs restantes em `processos_nao_nossos` (mesma tabela da seção
+-- anterior). Nenhum prazo já gravado (`prazos.ato_chave`) referenciava esses CNJs — nada foi
+-- tocado além do cadastro dos 2 processos órfãos acima.
+--
+-- CONFERIDO: dry-run trt_gera_prazos('2020-01-01', current_date+1, false) não traz mais
+-- nenhum desses 21 CNJs, em nenhuma janela.
