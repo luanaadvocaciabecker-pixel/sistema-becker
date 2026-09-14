@@ -5065,6 +5065,14 @@ function _tipoDoAto(txt){
   const orgao=(s.match(/(\d+ª\s+VARA DO TRABALHO DE [A-ZÀ-Ú\s]+|CEJUSC-JT\/\S+)/i)||[])[1]||null;
   return{tipo:tipo||null,orgao:orgao?orgao.trim().replace(/\s{2,}/g,' '):null};
 }
+// Corpo legível da intimação: o texto que chega (Legal Mail/DJEN) traz um cabeçalho de
+// metadados (Fonte, Disponibilização, Status do prazo, Destinatário, ID do evento...) que já
+// aparece resumido na caixa "PRAZO E CONTA" acima — aqui só atrapalha a leitura do ato em si.
+function _corpoIntimacao(txt){
+  const s=String(txt||'');
+  const semCabecalho=s.replace(/^(?:\s*(?:Fonte|Termo monitorado|Link|Disponibiliza[çc][ãa]o|Data de disponibiliza[çc][ãa]o|Status do prazo|Destinat[áa]rio|ID do evento):[^\n]*\n*)+/i,'');
+  return semCabecalho.replace(/\n{3,}/g,'\n\n').trim();
+}
 let _prazoAberto=null;   // guarda o prazo do modal, para o botão da IA não passar texto por atributo
 async function verPrazo(id){
   const{data:p}=await supa.from('prazos').select('*,processos(numero,advogado_responsavel,polo_cliente,polo_papeis,clientes(nome))').eq('id',id).single();
@@ -5108,7 +5116,7 @@ async function verPrazo(id){
   const cls=_classPrazo(p), naoConf=_naoConfirmado(p);
   const norte=_norteDoTexto(pub?.texto), ato=_tipoDoAto(pub?.texto);
   const disp=pub?.data_disponibilizacao||(p.ato_chave?String(p.ato_chave).split('|')[1]:'')||'';
-  const conta=(p.descricao||'').match(/\+1\+(\d+) dias úteis/);
+  const conta=(p.descricao||'').match(/\+[12]\+(\d+) dias úteis/);
   const linha=(rot,val)=>`<div style="display:flex;gap:8px;padding:3px 0"><span style="color:#94a3b8;min-width:132px;flex-shrink:0">${rot}</span><span>${val}</span></div>`;
 
   const bloco=`
@@ -5133,7 +5141,7 @@ async function verPrazo(id){
     ${norte.dataFinal?linha('Data final do tribunal:', '<b style="color:#4ade80">'+escHtml(norte.dataFinal)+'</b> <span style="color:#64748b;font-size:11px">(data oficial, não estimada)</span>'):''}
     ${norte.statusPrazo?linha('Status no tribunal:', escHtml(norte.statusPrazo)):''}
     ${linha('Data do prazo:', '<b>'+_dataBR(p.data||p.data_prazo)+'</b>'+(naoConf?' <span style="color:#b45309">(estimada pelo sistema)</span>':''))}
-    ${disp&&naoConf?linha('Conta:', 'disp. '+_dataBR(disp)+' + 1 dia útil (ciência)'+(conta?' + '+conta[1]+' dias úteis':'')):''}
+    ${disp&&naoConf?linha('Conta:', 'disp. '+_dataBR(disp)+' + 2 dias úteis (publicação + ciência)'+(conta?' + '+conta[1]+' dias úteis':'')):''}
     ${ato.tipo||ato.orgao?linha('Ato:', escHtml([ato.tipo,ato.orgao].filter(Boolean).join(' · '))):''}
     ${p.categoria==='custas'?linha('Categoria:','<b style="color:#d97706">💰 Recolher custas</b>'):p.categoria==='documentos'?linha('Categoria:','<b style="color:#7c3aed">📎 Apresentar documento</b>'):''}
   </div>
@@ -5141,8 +5149,8 @@ async function verPrazo(id){
     INTIMAÇÃO ${pub?.tipo?'· '+escHtml(pub.tipo):''}
     ${pub?.link?'· <a href="'+escHtml(pub.link)+'" target="_blank" rel="noopener" style="color:var(--azul3)">abrir no DJEN</a>':''}
   </div>
-  <div style="white-space:pre-wrap;font-size:13px;line-height:1.5;max-height:42vh;overflow:auto;background:rgba(7,18,32,.6);padding:12px;border-radius:8px">${
-    pub?.texto?escHtml(pub.texto)
+  <div style="white-space:pre-wrap;font-size:13px;line-height:1.6;max-height:42vh;overflow:auto;background:rgba(7,18,32,.6);padding:12px;border-radius:8px">${
+    pub?.texto?escHtml(_corpoIntimacao(pub.texto))
     :'<span style="color:#94a3b8">Sem publicação de origem guardada — este prazo foi criado à mão. O texto está no PJe.</span>'}</div>
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:13px;padding-top:11px;border-top:1px solid var(--border)">
     ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d;font-weight:700" onclick="fecharModal();cumprir('${p.id}')">✓ Cumprir</button>`:''}
@@ -5333,7 +5341,7 @@ function renderPrazosLista(lista,comAcoes=false){
     // O texto do aviso muda com a origem: o prazo do TRT vem da regra de dias úteis conferida
     // contra o PJe, e não de um "+15 dias" genérico (que era o que este título dizia antes).
     const explEst=p.fonte==='DJEN/calculado'
-      ? 'Data CALCULADA: disponibilização + 1 dia útil (ciência) + 5 dias úteis, descontando fim de semana e feriado. O diário do TRT não publica a data-limite, por isso ela é calculada. A regra bateu com a tela do PJe em 6 de 6 casos conferidos. Confira e confirme.'
+      ? 'Data CALCULADA: disponibilização + 2 dias úteis (publicação + ciência) + 5 dias úteis, descontando fim de semana e feriado. O diário do TRT não publica a data-limite, por isso ela é calculada. Confira e confirme.'
       : 'Data estimada pelo sistema. Confira e confirme.';
     const seloEst=est?` <span title="${explEst}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">⚠ ESTIMADO</span>`
       :estIA?` <span title="Data estimada por IA (Infinitum/Publijus, leu o documento). Confira e confirme." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#0ea5e922;color:#0369a1">🤖 Estimado por IA</span>`:'';

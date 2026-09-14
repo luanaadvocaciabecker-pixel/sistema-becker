@@ -439,3 +439,68 @@
 -- Sondagem usada (`legalmail-varredura-probe`, case-files + lawsuit/all, tudo grátis) já
 -- neutralizada.
 --   Nenhum prazo já gravado é alterado por esta migration — só atos futuros/não gravados.
+--
+-- ============================================================================
+-- 15) CORRIGIDO: ciência leva DOIS dias úteis após a disponibilização, não um — 14/09/2026
+-- ============================================================================
+-- Ela mandou um caso novo com as datas oficiais escritas por ela (não estimadas):
+-- `0001706-96.2026.5.12.0050` (VALDINEIA FONSECA DE SOUZA x JAH AÇAI JOINVILLE LTDA, nosso
+-- cliente): Disponibilização 03/09 (qui), Publicação 04/09 (sex), início da contagem 07/09
+-- (seg), 8 dias úteis, termina 17/09. E confirmou por escrito a regra: "disponibilização, o
+-- dia da publicação (que é o primeiro dia útil seguinte ao da disponibilização) e o início
+-- efetivo do prazo, que ocorre no primeiro dia útil seguinte ao da publicação."
+--
+-- Base legal: Lei 11.419/2006 art. 4º §3º (publicação = 1º dia útil seguinte à
+-- disponibilização) + CPC art. 224 c/c 231, II (a contagem do prazo começa no 1º dia útil
+-- seguinte à PUBLICAÇÃO, não à disponibilização). Ou seja, são DOIS saltos de dia útil, não
+-- um só. A função sempre usou só um
+-- (`becker_dias_uteis(becker_dias_uteis(disp,1,abr),n,abr)`), fórmula "validada 6/6 contra o
+-- PJe" em 09/09 (seção 1) — o gabarito de 6 nunca cruzou uma disponibilização numa
+-- sexta-feira nem foi conferido contra a "Data de Publicação" separada, só contra o "Prazo
+-- Final" mostrado na tela, então o erro de 1 dia útil passou despercebido até agora.
+--
+-- CONFERIDO com dados reais antes de mexer (nunca só no exemplo dela):
+--   `0001337-59` (disp 09/09 qua): +2 → 11/09; +5 → 18/09. Print do tribunal: 18/09. BATEU.
+--   `0001359-63` (disp 08/09 ter): +2 → 10/09; +5 → 17/09. Print: 17/09. BATEU.
+--   `0001806-14` (disp 10/09 qui, é Sentença → Recurso Ordinário, N=8): +2 → 14/09; +8 →
+--     24/09. Print: 24/09. BATEU EXATO — resolve também o mistério do prazo 5802 (seção 14,
+--     grupo C): o valor gravado (23/09) provavelmente foi corrigido à mão por alguém usando
+--     N=8 mas ainda com a ciência errada de +1; com a ciência certa (+2) E N=8, dá 24/09.
+--   `0002658-17` (disp 03/09 qui): +2 → 07/09; +5 → 14/09. Print: 15/09. NÃO bateu — mas
+--     esse caso já tinha aviso "texto cita 5 dias — conferir" (pode ser problema à parte, no
+--     N, não na ciência). Não investigado a fundo, fica registrado.
+--   `0001742-10` (disp 11/09 sex): a rodada anterior tinha esse como "bateu exato" com a
+--     fórmula ANTIGA (21/09). Com +2 daria 22/09. Não dá pra reconferir o print original
+--     (não guardei a imagem) — hipótese mais provável é erro de transcrição minha (21 vs 22).
+--     Fica pendente de reconferência manual, não impediu a correção da regra geral.
+--
+-- BOA NOTÍCIA: o erro (usar +1) sempre calculava uma data 1 dia útil MAIS CEDO que a real —
+-- nunca fez perder prazo (o erro sempre foi pro lado seguro, "sobra tempo"), só gerava alarme
+-- de urgência falso e podia levar a confirmar/protocolar antes da hora achando que o prazo
+-- era mais curto do que é.
+--
+-- FEITO: `becker_dias_uteis(disp,1,abr)` → `becker_dias_uteis(disp,2,abr)` em
+-- `trt_gera_prazos` (CREATE OR REPLACE, mesma função, só essa linha + a descrição gerada
+-- passa a dizer "+2+N" em vez de "+1+N"). Reprocessados os 21 prazos que ainda estavam
+-- `status='estimado'` (nunca toquei `confirmado`/`cumprido` — mesma disciplina de sempre):
+-- deletados pelo id exato e regerados via `trt_gera_prazos('2026-08-25','2026-09-14',true)`,
+-- que também pegou 6 atos novos que a janela mais larga alcançou (27 gravados no total).
+-- Conferido: nenhuma duplicata de mesmo evento (processos com mais de um prazo aberto agora
+-- são sempre atos DIFERENTES, ato_chave com data/id distintos — checado um a um nos casos
+-- com 2+ prazos DJEN/calculado).
+--
+-- NÃO MEXIDO (de propósito): os prazos já `confirmado`/`cumprido` anteriores a hoje. A
+-- conferência mostrou que boa parte dos `confirmado` bate com a fórmula ANTIGA (+1) — o que
+-- é esperado, já que foi o valor que o sistema sugeriu e alguém clicou "Data confere" em
+-- cima dele; não é prova de que a data real do tribunal é essa, só que ninguém a contestou.
+-- Ou seja, é bem possível que existam prazos `confirmado` no passado que também estejam 1
+-- dia útil adiantados — mas corrigir isso é uma decisão à parte (reabrir prazo confirmado
+-- exige a mesma prova que fechar um, pela regra de `prazo_nao_fecha_por_data`), não entra
+-- nesta migration.
+--
+-- UI (`site/index.html`, `verPrazo`): a linha "Conta:" e o tooltip do selo "⚠ ESTIMADO"
+-- atualizados pra dizer "+2 dias úteis (publicação + ciência)" em vez de "+1 dia útil
+-- (ciência)". Também aproveitado o mesmo commit para reformatar a caixa cinza do texto da
+-- intimação (pedido dela, print à parte): nova `_corpoIntimacao(txt)` remove o cabeçalho de
+-- metadados repetido (Fonte/Disponibilização/Status do prazo/Destinatário/ID do evento — já
+-- aparecem na caixa "PRAZO E CONTA" acima) antes de exibir, só isso, não mexe no dado gravado.
