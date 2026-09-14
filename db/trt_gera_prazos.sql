@@ -542,3 +542,39 @@
 -- 75 atos históricos já identificados não foram tocados — a maioria já tem prazo gravado com
 -- algum status (confirmado/cumprido/vencido antigo), e a mesma disciplina de sempre (nunca
 -- reabrir prazo fechado sem prova) se aplica.
+--
+-- ============================================================================
+-- 17) BACKFILL retroativo: janela larga (desde 2023) pra pegar o que nunca foi processado
+-- ============================================================================
+-- Ela pediu direto: "arrumou no sistema já? todos que estão lá e são TRABALHISTA?" — depois
+-- de saber que 67 dos 75 atos de "ciência de Sentença" nunca tiveram prazo nenhum gerado
+-- (fora da janela de 15 dias do cron `trt_prazos_diario`), pediu pra rodar numa janela larga
+-- mesmo sabendo que ia trazer muita coisa histórica.
+--
+-- Rodado `trt_gera_prazos('2023-10-30','2026-09-14', false)` (dry-run primeiro): 936
+-- candidatos, TODOS já com `prazo_calculado` no passado (disponibilização entre jul/2025 e
+-- ago/2026) — não é só os 67 de Sentença, é qualquer ato TRT/TST de qualquer tipo que nunca
+-- caiu numa janela de 15 dias.
+--
+-- Antes de gravar, mostrei o número real (936, não os 67 que motivaram a pergunta) e perguntei
+-- de novo — ela respondeu "faz os em aberto ainda melhor só", ou seja: só os que ainda
+-- parecem realmente pendentes, não gravar tudo às cegas.
+--
+-- FEITO (commit + filtro na sequência, mesma transação de raciocínio):
+--   1. Rodado `trt_gera_prazos(..., true)` — gravou os 936 (ids 5879-6814).
+--   2. Deletados os que NÃO parecem mais "em aberto de verdade", usando só sinais que já
+--      temos no próprio banco (sem custo, sem chamada de API):
+--        - processo sem `cliente_id`... não, sem `processo_id` vinculado (167) — não dá pra
+--          julgar "ainda aberto" sem processo cadastrado, mesma disciplina dos 6 CNJs órfãos
+--          da seção 14 (cadastrar processo é decisão à parte, não bloqueia aqui).
+--        - processo com `situacao` diferente de "Ativo" (marcado arquivado/encerrado).
+--        - processo que já tem outro prazo MAIS NOVO gravado antes desta operação (o caso
+--          se moveu — o prazo antigo virou moot).
+--   Restaram **316 prazos** (de 936) — todos `status='estimado'`, `cumprido=false`,
+--   disponibilização entre 16/07/2025 e 02/09/2026. 23 deles já usam a regra nova N=8 (seção
+--   16, "ciência de Sentença"). 7 ainda sem cliente vinculado (processo existe, cliente não).
+--
+-- NÃO é garantia de 100% "ainda aberto" — é o melhor filtro dá pra fazer só com os dados que
+-- já temos, sem gastar em API por 936 consultas. Pode sobrar prazo falso-positivo (caso
+-- resolvido fora do sistema, sem deixar rastro de prazo mais novo aqui) — ela sabia disso e
+-- decidiu mesmo assim. Nenhum prazo pré-existente (`id<=5878`, qualquer status) foi tocado.
