@@ -588,3 +588,47 @@
 -- Banco voltou ao estado de antes da seção 17. A correção da fórmula (seções 15 e 16)
 -- continua valendo só pra atos futuros/dentro da janela normal do cron — não geramos mais
 -- retroativo de prazo já vencido.
+--
+-- ============================================================================
+-- 18) CORRIGIDO: Recurso de Revista é N=8, não N=15 — achado que veio de um caso real grave
+-- ============================================================================
+-- A regra de N=15 pra "Recurso de Revista" (migration trt_recurso_revista_15_dias, seção 13)
+-- tinha sido validada contra a tela "Meus Expedientes" do próprio tribunal — PDFs reais que
+-- ela mandou, nenhum caso batendo em 8 dias, todos em 15+. Pareceu prova sólida na hora.
+--
+-- Ela então lembrou de um caso real: um prazo que o TRIBUNAL mostrava como 14 dias pra
+-- fechar, mas o certo era 8 — o escritório confiou no número maior, protocolou dentro do
+-- prazo que o tribunal indicava, e o próprio tribunal considerou INTEMPESTIVO (fora do prazo
+-- real). Ou seja: a tela do tribunal pode mostrar prazo ERRADO — maior que o legal — e foi
+-- exatamente esse tipo de erro que gerou dano real antes. A "validação contra Meus
+-- Expedientes" da seção 13 pode ter só copiado esse mesmo erro de exibição do tribunal, não
+-- confirmado a lei.
+--
+-- Ela então mandou a fonte oficial (não mais tela de tribunal, texto de lei): CLT art. 896 c/c
+-- 900 — Recurso de Revista é 8 dias úteis, igual Recurso Ordinário, Agravo de Instrumento,
+-- Agravo de Petição e Contrarrazões/Contraminuta. Confirmado, e é consistente com a "Regra
+-- de Ouro dos 8 dias" da Justiça do Trabalho — o outlier era o N=15, não o contrário.
+--
+-- FEITO: removida a classe especial "Recurso de Revista" → 15; agora cai no mesmo bucket de
+-- "Recurso|Agravo" → 8, junto com RO/AI/AP. `becker_dias_uteis` e a regra de +2 dias úteis de
+-- ciência (seção 15) continuam iguais — só o N mudou.
+--
+-- IMPACTO NOS PRAZOS JÁ GRAVADOS: ZERO precisou mudar — conferido, não existe HOJE nenhum
+-- prazo com N=15 em `status` nenhum (nem estimado, nem confirmado). Os 17 atos históricos de
+-- Recurso de Revista identificados (seção 14) ficaram assim: 3 já tinham prazo próprio com
+-- N=5 (de antes da regra de 15 sequer existir — mais curto que os 8 corretos, lado seguro,
+-- não mexidos, 2 já `encerrado` e 1 `confirmado`) e os outros 14 NUNCA geraram prazo nenhum
+-- (fora da janela de 15 dias do cron, mesmo buraco da seção 17). Rodado dry-run com N=8 pra
+-- ver quais desses 14 ainda estão em aberto: TODOS os 13 candidatos simulados (um dos 14 caiu
+-- fora por já ter prazo) têm `prazo_calculado` entre abr/2026 e 31/08/2026 — ou seja, TODOS
+-- já vencidos também, igual o backfill da seção 17. Por instrução dela ("os que já foram só
+-- ignorar"), não gerados — mesma decisão de ontem, mesmo motivo.
+--
+-- Outros pontos da fonte oficial que ela mandou, já batendo com o que o sistema faz:
+--   Embargos de Declaração = 5 dias (art. 897-A) — cai no "else 5" default, sem precisar de
+--     caso especial.
+--   Embargos à Execução / Impugnação à Sentença de Liquidação = 5 dias (art. 884) — confirma
+--     que excluir "Cumprimento Provisório de Sentença" da regra de Sentença→8 (seção 16) foi
+--     a decisão certa; esse é um contexto de execução com prazo de 5, não de recurso com 8.
+--   Prazo em dobro pra Fazenda Pública/MPT (Decreto-Lei 779/69) — NÃO implementado, sinalizado
+--     a ela como lacuna conhecida, pendente de saber se o escritório tem esse tipo de caso.
