@@ -922,3 +922,40 @@
 -- revertida): a linha "Conta:" do modal do prazo (verPrazo) e o tooltip do selo "⚠ ESTIMADO"
 -- (ambos agora dizem "+1 dia útil", e a linha "Conta:" só aparece pra fonte='DJEN/calculado' —
 -- não faz sentido pra audiência marcada).
+
+-- ============================================================================================
+-- 24) FIX: categoria "custas" não confere negação — achado no card do Guilherme Hoepers
+-- Meneghelli (0001024-22.2025.5.12.0004, mesma sessão)
+-- ============================================================================================
+-- Ela estranhou o selo de custas no card do Guilherme e perguntou "você não tem o despacho
+-- aí?" — puxei o texto: é a decisão de ADMISSIBILIDADE do Recurso de Revista dele (recorrente,
+-- nosso cliente), "OJC de Análise de Recurso", concluindo "Recebo parcialmente o recurso.
+-- Publique-se e intime-se." — confirma que o recurso subiu (foi recebido, ao menos em parte)
+-- pro TST. Nada de custas a pagar.
+--
+-- `lm_categoria_prazo(t)` categorizava como 'custas' só com `t ~* 'custas|recolh|preparo|...'`,
+-- sem checar negação. O despacho diz literalmente **"Desnecessário o preparo."** — o oposto de
+-- custas devida — e mesmo assim bateu na keyword "preparo". Corrigido: agora checa primeiro se
+-- a palavra vem negada (desnecessário/dispensado/isento/sem necessidade de + guia/GRU/taxa/
+-- custas/recolhimento/preparo) numa janela curta, e só categoriza 'custas' se não for negação.
+--
+-- Medido: só o prazo do Guilherme (id 6837) tinha esse problema especificamente hoje. Outros
+-- `categoria='custas'` existentes não usam a keyword negada — conferido caso a caso, a função
+-- nova não muda a categoria deles.
+--
+-- Achado lateral (mesmo texto, mesmo tipo de bug): a keyword "apresent" (pra categoria
+-- 'documentos') também deu falso positivo no mesmo despacho — bateu em "recurso apresentado em
+-- 12/08/2026" (constatação de tempestividade, não ordem de apresentar nada). Por isso o prazo
+-- 6837 foi corrigido direto pra categoria='geral' (não usando o resultado da função, que ainda
+-- erraria pra 'documentos' por esse motivo diferente) — esse segundo bug (keyword "apresent"
+-- capturando qualquer uso da palavra, não só ordem de apresentar) fica registrado, não
+-- corrigido agora — mexer nele exige mais cuidado (negative lookaheads pra "apresentado"/
+-- "apresentação" vs a ordem imperativa "apresente"), fora do escopo desta correção pontual.
+--
+-- Achado lateral 2 (não corrigido, avisado a ela): o ato do Guilherme tem `classe=null` em
+-- `publicacoes_atos` (não foi coletada pra esse tipo de ato "OJC de Análise de Recurso"), então
+-- o prazo caiu no N=5 padrão em vez de N=8 (regra Recurso/Agravo) — mesmo sendo, na prática,
+-- uma janela pra avaliar Agravo de Instrumento em Recurso de Revista (AIRR) contra os pontos do
+-- recurso que não foram admitidos. Lado seguro (avisa 3 dias antes, nunca depois), não
+-- corrigido nesta migration — decisão de generalizar por padrão de texto (não só classe) fica
+-- pra depois, se ela confirmar que quer.
