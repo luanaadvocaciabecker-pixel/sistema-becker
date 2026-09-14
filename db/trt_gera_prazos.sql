@@ -692,3 +692,45 @@
 -- confirmado): 3 confirmado + 40 encerrado. Mantidos 19 com `data >= current_date` — todos os
 -- `confirmado` que sobraram (incluindo o Recurso de Revista, id 5775, agora 18/09) e alguns
 -- `encerrado`/`descartado` cuja data recalculada bateu ser hoje/futuro por coincidência.
+--
+-- ============================================================================
+-- 21) FERIADO REAL: suspensão TRT-12 de 11/09/2026 (chuvas, Ato Seap nº 11/2026)
+-- ============================================================================
+-- Ela mandou um resumo de terceiro alegando essa suspensão, citando fonte de Instagram — testei
+-- (WebSearch) e NÃO achei confirmação: as suspensões reais de 2026 do TRT-12 por chuva que
+-- apareceram foram todas em outubro (4-6, 9-11, 16-18) e uma em 26-29/09 por instabilidade do
+-- PJe, não chuva. Reportei a ela como não verificada, pedindo a fonte oficial antes de mexer.
+--
+-- Ela mandou o PDF da página oficial (portal.trt12.jus.br), publicada HOJE 11/09/2026 16h16:
+-- "Prazos processuais de sexta-feira (11/9) são suspensos devido às fortes chuvas" — real,
+-- confirma "Ato Seap nº 11/2026". O WebSearch simplesmente não tinha indexado a notícia ainda
+-- (publicada horas antes da minha busca). Lição: fonte de terceiro sem link oficial verificável
+-- (Instagram) foi certo desconfiar, mas a notícia em si era verdadeira — vale sempre pedir a
+-- fonte primária antes de descartar OU de aceitar.
+--
+-- FEITO: inserido `('2026-09-11','Suspensão de prazos processuais — fortes chuvas (Ato Seap nº
+-- 11/2026)','TRT12')` em `feriados`. Como `becker_dias_uteis` já lê `feriados` via EXISTS por
+-- abrangência, isso corrige automaticamente qualquer cálculo futuro sem mexer em código.
+--
+-- Recalculados TODOS os prazos TRT-12 `fonte='DJEN/calculado'` (qualquer status, mesmo padrão
+-- da seção 19) cuja janela de contagem atravessa 11/09 — 24 prazos, todos andaram exatamente
+-- +1 dia útil pra FRENTE (nunca pra trás — excluir um dia útil só pode alongar, nunca
+-- encurtar, então não existe risco de criar um "vencido" novo aqui; nenhuma exclusão foi
+-- necessária desta vez).
+--
+-- ACHADO CRÍTICO: 2 prazos (ids 5863, 5866 — SEBASTIÃO MARCAL DE FREITAS e um processo a
+-- vincular, mesma disp. 01/09) tinham vencimento calculado EXATAMENTE em 11/09 — o dia
+-- suspenso. Antes da correção, hoje (14/09) eles já apareceriam vencidos (3 dias). Com a
+-- correção, o vencimento real é HOJE (14/09) — não amanhã, não passado, hoje. É o mesmíssimo
+-- card do SEBASTIÃO que ela mandou de print no começo da sessão perguntando "esse estimado é
+-- como?" — o print de fato estava mostrando prazo errado, só que por causa desse feriado que
+-- faltava, não só pela fórmula antiga.
+--
+-- PENDÊNCIA NOVA: id 5802 (0001806-14, Sentença→Recurso Ordinário, ver seções 14/15) andou de
+-- 24/09 pra 25/09 com essa correção — mas o print do tribunal que ela mandou (conferido como
+-- "bateu exato" na seção 15) dizia 24/09. Se aquele print já foi tirado DEPOIS do Ato Seap
+-- (bem provável, já que o ato é de hoje e o print é de dias atrás — precisa checar a data do
+-- print), o 24/09 do próprio tribunal pode já estar certo e a nossa conta pode estar
+-- contando 11/09 como suspenso quando o tribunal, na prática, não aplicou a suspensão a esse
+-- prazo específico (ela pode ter sido só de 1º grau, e esse processo já estar em 2º grau/TST
+-- — não confirmado). Fica registrado como discrepância aberta, não corrigido às cegas.
