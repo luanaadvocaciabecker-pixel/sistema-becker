@@ -379,6 +379,7 @@
 --   3 já tinham prazo gravado (não tocados); 14 ainda não — esses passam de N=8 para N=15.
 --   Todos os outros 894 candidatos do dry-run permanecem exatamente iguais (871 em N=5,
 --   18 em N=8 — os "Recurso Ordinário"/RORSum/Agravo de Petição continuam intocados).
+--   Nenhum prazo já gravado é alterado por esta migration — só atos futuros/não gravados.
 --
 -- ============================================================================
 -- 14) Conferência contra 3 prints "Meus Expedientes" (TRT-12 Joinville + TRT-15) — 14/09/2026
