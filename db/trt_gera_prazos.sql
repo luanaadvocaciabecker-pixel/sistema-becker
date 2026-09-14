@@ -870,3 +870,55 @@
 -- mostra que isso pode gerar prazo nosso por engano quando a ordem é claramente pra outra
 -- parte. Precisa de investigação própria (quantos outros prazos abertos hoje têm esse mesmo
 -- problema) antes de decidir como resolver.
+
+-- ============================================================================================
+-- 23) NOVO: designação de audiência não gera prazo (14/09/2026, mesma sessão)
+-- ============================================================================================
+-- Ela apontou o card de Adna Paola Batista Breitenbach (0002542-11.2025.5.12.0016, um dos 2
+-- que viraram "hoje" na correção da seção 22) — o despacho em questão só designa audiência de
+-- instrução (18/02/2027) e traz cláusulas CONDICIONAIS ("em 5 dias, sob pena de preclusão" —
+-- só se houver conflito de agenda dos procuradores; "em até 5 dias úteis antes da audiência" —
+-- só se for arrolar testemunha; "prazo mínimo de cinco dias" — só se precisar de intérprete
+-- de Libras). Nenhuma é ordem incondicional de verdade pra cumprir agora. Confirmado pela
+-- própria tela oficial "Expediente(s) do processo" do PJe: essa intimação aparece com
+-- **Prazo: 0, Fim do Prazo: --** — o tribunal também não conta isso como prazo.
+--
+-- O sistema tinha gerado prazo mesmo assim porque o texto cita "em 5 dias" em algum lugar (a
+-- cláusula condicional), e isso bateu por coincidência com o n_base=5 padrão (default de
+-- qualquer ato trabalhista sem classe de recurso/sentença) — não veio do n_dirigido (o verbo
+-- "solicitar" não está na lista de verbos de ordem que a função já reconhece, então n_dirigido
+-- ficou null, corretamente).
+--
+-- Medido: 15 CNJs distintos em `publicacoes_atos` têm esse mesmo padrão ("Designo o dia
+-- dd/mm/aaaa... audiência", boilerplate padrão de TRT-12/Joinville com instruções de Zoom) —
+-- só 1 tinha prazo aberto gerado (o da Adna Paola, id 6849, removido). Nenhum é classe
+-- "Recurso/Agravo". Os outros 14 são históricos, sem prazo gerado atualmente.
+--
+-- FEITO: `trt_gera_prazos` ganhou um filtro extra — exclui o candidato quando o texto casa
+-- "Designo o dia dd/mm/aaaa...audiência/instrução" E `n_dirigido` está null (nenhuma ordem
+-- dirigida de verdade foi detectada no mesmo texto). Se um despacho de designação de audiência
+-- também trouxer uma ordem substantiva separada (verbo diga/junte/apresente/etc + N dias),
+-- n_dirigido não fica null e o prazo continua sendo gerado normalmente — só exclui quando é
+-- PURO agendamento.
+--
+-- CONFERIDO: dry-run não traz mais candidato pro CNJ da Adna Paola em nenhuma janela; prazo
+-- id 6849 removido.
+
+-- ADENDO à seção 23 (mesma sessão, minutos depois): em vez de simplesmente excluir o
+-- candidato de designação de audiência, ela pediu pra avisar mesmo assim — "bom abrir prazo
+-- para ciência" / "colocar algo tipo no prazo, avisar audiência marcada". Trocado: quando
+-- `is_audiencia` (designação de audiência sem ordem dirigida), o candidato passa a ser gravado
+-- com a DATA DA AUDIÊNCIA (extraída do texto via "Designo o dia dd/mm/aaaa...") em vez de uma
+-- contagem de dias úteis, descrição "AUDIÊNCIA MARCADA: dd/mm/aaaa, às HHh" em vez de
+-- "ESTIMADO: ... dias úteis", e `fonte='DJEN/audiencia'` (em vez de 'DJEN/calculado') pra não
+-- carregar a explicação de fórmula de dias úteis, que não se aplica aqui.
+--
+-- Isso não gera alarme de urgência (a data é a da audiência, normalmente meses no futuro, não
+-- um prazo de poucos dias) — resolve o pedido dela sem inventar tabela nova nem mexer na aba
+-- Audiências (que é de outro fluxo, alimentado separadamente pelo Legal Mail).
+--
+-- Aproveitado pra corrigir 2 textos da UI (site/index.html) que tinham ficado desatualizados
+-- da reversão da seção 22 (ainda diziam "+2 dias úteis" hardcoded, da fórmula errada que foi
+-- revertida): a linha "Conta:" do modal do prazo (verPrazo) e o tooltip do selo "⚠ ESTIMADO"
+-- (ambos agora dizem "+1 dia útil", e a linha "Conta:" só aparece pra fonte='DJEN/calculado' —
+-- não faz sentido pra audiência marcada).
