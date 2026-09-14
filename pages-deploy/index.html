@@ -2139,8 +2139,13 @@ function renderSidebarMenu(){
     ${grupoMenu('clientes','clientes','Clientes','clientes',[
       ['clientes','clientes','Todos os Clientes'],['novo-cliente','plus','Novo Cliente','novoCliente()'],['contratos','file','Contratos'],['documentacao','edit','Procurações']
     ])}
+    ${/* 14/09/2026: "Documentos" tirado do menu Processos Judiciais a pedido dela — os
+         documentos já aparecem dentro de cada processo (abrirProcesso, seção "Documentos &
+         íntegra"), a aba própria só duplicava a mesma tabela sem filtro. pDocumentos/
+         carregarDocs/novoDoc/excluirDoc continuam intactos, só sem porta de menu aqui —
+         reativar: devolver o item ['documentos','folder','Documentos'] na lista abaixo. */ ''}
     ${grupoMenu('judiciais','judicial','Processos Judiciais','judiciais',[
-      ['judiciais','judicial','Todos os Processos'],['movimentacoes','refresh','Movimentações'],['prazos','clock','Prazos'],['audiencias','court','Audiências'],['documentos','folder','Documentos'],['datajud','zap','Atualização Processual']
+      ['judiciais','judicial','Todos os Processos'],['movimentacoes','refresh','Movimentações'],['prazos','clock','Prazos'],['audiencias','court','Audiências'],['datajud','zap','Atualização Processual']
     ])}
     <div class="nav-item" data-page="novos-negocios" data-leaf="true" onclick="ir('novos-negocios')"><span class="nav-emoji">${iconeMenu('handshake')}</span>Novos Negócios</div>
     ${/* O grupo 'Processos Administrativos' foi escondido antes com a nota "0 cadastros, sem uso".
