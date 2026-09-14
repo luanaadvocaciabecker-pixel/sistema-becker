@@ -125,3 +125,99 @@
 --
 -- NÃO CONSTRUÍDO (fora de escopo, evitar over-building sem pedido): alerta/badge de prazo de
 -- demanda de assessoria; coluna `uploaded_by` em `documentos`.
+
+-- ============================================================================
+-- Migration `assessoria_pastas_schema` (14/09/2026, mesma sessão) — pastas fixas por cliente
+-- ============================================================================
+-- POR QUE: a "pasta livre tipo OneDrive" (seção anterior) ficou adiada porque na hora parecia
+-- ser uma árvore de nome arbitrário. Ela mandou um exemplo concreto (print + um contrato de
+-- prestação de serviços de verdade em .docx) mostrando que, na prática, todo cliente de
+-- assessoria tem a MESMA taxonomia fixa de 7 pastas — não é livre, é sempre esse conjunto:
+--
+--   📄 CONTRATO BECKER (Contrato de Prestação de Serviços, Aditivos Contratuais)
+--   👥 DOCUMENTOS DE FUNCIONÁRIOS (1 subpasta por funcionário, cresce com o tempo)
+--   🏢 DOCUMENTOS EMPRESARIAIS (Contratos, Notificações, Termos, Outros)
+--   ✍️ DOCUMENTOS ELABORADOS (Pareceres, Notificações, Consultas, Outros)
+--   🔎 AUDITORIA (Auditoria Trabalhista, Auditoria Cível, Relatórios/Pendências)
+--   ⚖️ PROCESSOS JUDICIAIS
+--   🏛️ PROCESSOS ADMINISTRATIVOS
+--
+-- As duas últimas ela foi explícita que NÃO são pasta de arquivo: "dentro de cada parte só vai
+-- aparecer o que é realmente ou da panificadora ou do jhonis" — ou seja, puxar os processos que
+-- JÁ existem cadastrados (tabelas `processos`/`processos_adm`), filtrados por `cliente_id`, sem
+-- duplicar dado (mesmo raciocínio da remoção da aba Documentos redundante, seção anterior desta
+-- sessão).
+--
+-- Funcionários: "cadastro formal, mas também tudo dentro daquela acessória específica daquele
+-- comércio para não se perder" — nome/cargo/cpf viram um cadastro de verdade (não só uma pasta
+-- com nome livre), sempre amarrado a um cliente.
+--
+-- Auditoria: "arquivos e criar pendência" — as duas coisas, não uma ou outra: arquivo (reaproveita
+-- a mesma categoria de documento) E uma lista de pendência com status, no mesmo espírito das
+-- Demandas já existentes.
+--
+-- DESENHO: aditivo de novo — 2 tabelas novas + 3 colunas novas em `documentos` (nenhuma coluna
+-- existente muda, nenhuma pasta/aba antiga perde dado).
+--
+-- CREATE TABLE public.assessoria_funcionarios (
+--   id         bigint generated always as identity primary key,
+--   cliente_id bigint not null references clientes(id) on delete cascade,
+--   nome       text not null,
+--   cargo      text,
+--   cpf        text,
+--   created_at timestamptz not null default now()
+-- );
+-- `on delete cascade` (não `set null`) de propósito: é exatamente o "para não se perder" dela —
+-- o funcionário só existe dentro daquele cliente de assessoria, mesmo espírito de `assessorias`.
+--
+-- CREATE TABLE public.assessoria_pendencias (
+--   id            bigint generated always as identity primary key,
+--   cliente_id    bigint not null references clientes(id) on delete cascade,
+--   tipo          text,               -- datalist livre (Trabalhista/Cível/Geral), não enum
+--   titulo        text not null,
+--   descricao     text,
+--   status        text not null default 'Pendente',   -- Pendente | Concluída
+--   concluido_em  timestamptz,
+--   concluido_por text,               -- carimbado do perfil, mesma disciplina de autoria de
+--                                     -- cumprir()/marcarInformativoEnviado()
+--   created_at    timestamptz not null default now()
+-- );
+--
+-- ALTER TABLE public.documentos
+--   ADD COLUMN categoria text,                          -- 'contrato_becker' | 'funcionario' |
+--                                                        -- 'empresarial' | 'elaborado' |
+--                                                        -- 'auditoria' — NULL para todo
+--                                                        -- documento fora de Assessoria
+--                                                        -- (comportamento antigo intocado)
+--   ADD COLUMN subcategoria text,                        -- datalist livre por categoria
+--                                                        -- (Contratos/Notificações/Termos/...)
+--   ADD COLUMN assessoria_funcionario_id bigint
+--     REFERENCES assessoria_funcionarios(id) ON DELETE SET NULL;   -- mesmo padrão de
+--                                                                  -- cliente_id/processo_id em
+--                                                                  -- documentos: apagar o
+--                                                                  -- funcionário não apaga o
+--                                                                  -- arquivo, só desvincula
+--
+-- RLS: policy becker_staff_all nas 2 tabelas novas, mesmo padrão de sempre (conferido via
+-- pg_policies antes de aplicar — as 3 tabelas de referência, processos/clientes/assessorias,
+-- têm a mesma policy byte-idêntica).
+--
+-- UI (site/index.html): `abrirAssessoriaCliente`/`carregarAssessoriaCliente` ganham 6 blocos
+-- novos, todos reaproveitando `documentos`/o bucket `documentos-clientes` já existentes — nenhum
+-- upload/storage novo:
+--   - `carregarDocsCategoria(clienteId, categoria, elId)` — genérica, serve Contrato Becker,
+--     Empresariais, Elaborados e os arquivos de Auditoria (só muda o valor de `categoria`).
+--   - `carregarFuncionariosAssessoria` + `carregarDocsFuncionario` — CRUD de funcionário e, por
+--     funcionário, upload filtrado por `assessoria_funcionario_id` (categoria='funcionario').
+--   - `carregarAuditoriaAssessoria` — pendências (`assessoria_pendencias`, CRUD completo com
+--     concluir/reabrir, mesmo padrão de `cumprirPrazoDemanda`/`reabrirPrazoDemanda`) + arquivos
+--     via `carregarDocsCategoria(...,'auditoria',...)`.
+--   - `carregarProcessosAssessoria` — só leitura, 2 queries diretas (`processos`/`processos_adm`
+--     filtradas por `cliente_id`, sem embed entre tabelas novas — mesma cautela da seção
+--     anterior contra embed sem FK real), clicando abre `abrirProcesso`/`editarProcessoAdm` já
+--     existentes.
+--
+-- Testado direto no banco antes de publicar (cliente de teste): funcionário + documento
+-- vinculado, documento de categoria solta, pendência criada e concluída, cascade de
+-- `assessoria_funcionario_id` (ON DELETE SET NULL) confirmado ao excluir o funcionário — o
+-- documento continua existindo, só perde o vínculo. Tudo limpo depois (0 linhas de teste).
