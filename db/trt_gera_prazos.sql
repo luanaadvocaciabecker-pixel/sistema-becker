@@ -632,3 +632,51 @@
 --     a decisão certa; esse é um contexto de execução com prazo de 5, não de recurso com 8.
 --   Prazo em dobro pra Fazenda Pública/MPT (Decreto-Lei 779/69) — NÃO implementado, sinalizado
 --     a ela como lacuna conhecida, pendente de saber se o escritório tem esse tipo de caso.
+--
+-- ============================================================================
+-- 19) SOBRESCRITOS prazos trabalhistas já confirmado/cumprido — decisão explícita dela
+-- ============================================================================
+-- Depois da correção da seção 18, ela pediu direto: "muda os prazos ja gravados d
+-- etrabalhista". Perguntado se isso incluía `confirmado`/`cumprido` (não só `estimado`, que
+-- já estava certo) — ela confirmou que sim, mesmo sabendo que quebra a disciplina de nunca
+-- reabrir prazo fechado sem prova. Decisão dela, registrada.
+--
+-- Recalculados TODOS os prazos `fonte='DJEN/calculado'` com `status='confirmado'` OU
+-- `cumprido=true` (isso inclui `confirmado`, `cumprido`, `encerrado` e `descartado` — todo
+-- prazo trabalhista já gravado, não só os em aberto), usando a fórmula atual completa: +2
+-- dias úteis de ciência (seção 15) + N correto por classe/texto, incluindo Sentença→8 (seção
+-- 16) e Recurso de Revista→8 (seção 18). Só os campos `data`/`data_prazo` e o trecho
+-- "+N+M dias úteis" da `descricao` foram sobrescritos — `status`/`cumprido`/`cumprido_em`/
+-- `cumprido_por` NÃO foram tocados, nenhum prazo fechado foi reaberto.
+--
+-- 64 prazos recalculados (de todos com ato_chave e status confirmado/cumprido/encerrado/
+-- descartado). Achados que pedem atenção:
+--
+--   **3 prazos CONFIRMADO (ainda em aberto, cumprido=false) ficaram VENCIDOS depois da
+--   correção** — antes pareciam confortáveis, a data real já passou:
+--     id 5714 — EDILSON ANTONIO DA SILVA (proc. 0000023-84.2026.5.12.0030, TRT-12,
+--       resp. Samaira) — era 16/09 (ou o que estava confirmado), agora 11/09 (3 dias vencido).
+--     id 5736 — KAUE BRIGADEIRO DOS SANTOS (proc. 0001216-43.2026.5.12.0028, TRT-12,
+--       resp. Samaira) — mesma disp. 01/09, mesmo N=5, agora 11/09.
+--     id 5773 — JOSÉ JUAREZ DA SILVEIRA (proc. 0002620-60.2025.5.12.0030, TRT-12,
+--       resp. Samaira) — mesma disp. 01/09, mesmo N=5, agora 11/09.
+--   Como esses 3 continuam `cumprido=false`, e a tela já não mostra mais "Vencidos" (seção
+--   17/decisão de ontem), eles vão SUMIR da lista principal de Prazos sem avisar ninguém.
+--   Reportado a ela com urgência — precisam de conferência humana imediata (será que já foi
+--   protocolado e só não foi marcado? é caso real perdido?), não é para ignorar.
+--
+--   **id 5775 — Recurso de Revista (DIEGO SALES LIMA, TRT-15) andou 10 dias pra TRÁS**:
+--   estava confirmado em 28/09, virou 18/09 — efeito direto da correção N=15→8 da seção 18.
+--   Ainda não vencido (18/09 é daqui a poucos dias úteis), mas a folga que alguém pensava ter
+--   encolheu bastante. Também reportado com destaque.
+--
+--   id 5824 (0001742-10, ver seção 14 grupo B) andou de 21/09 para 22/09 — é o caso que já
+--   estava pendente de reconferência manual (print antigo dizia 21/09, a fórmula nova dá
+--   22/09). Continua sem resolução — ela ainda não confirmou se o print estava certo.
+--
+--   id 5802 (0001806-14, ver seções 14/15) andou de 23/09 para 24/09 — agora bate EXATO com
+--   o print do tribunal (24/09) que já tínhamos registrado como não resolvido. Resolvido.
+--
+-- Os outros ~58 prazos recalculados são `encerrado`/`descartado` (já fechados sem
+-- conferência individual antes) ou `confirmado` com data ainda confortavelmente no futuro —
+-- só correção de registro histórico, sem ação pendente.
