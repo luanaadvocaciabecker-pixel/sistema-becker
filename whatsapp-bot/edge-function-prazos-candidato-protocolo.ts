@@ -21,6 +21,16 @@
 // `prazos_candidato_protocolo_1745`, 15 min de folga), com seu próprio orçamento de 429, e um
 // bug aqui não arrasta o fecho que já funciona.
 //
+// 13/09/2026 — TENTATIVA (revertida) de acrescentar aqui um SEGUNDO sinal (peticionamento via
+// GET /api/v1/filings, achado dela: "o Legal Mail deve ter isso em algum lugar"). Medido ao vivo:
+// dobrar a chamada por processo (case-files + filings, mesmo PASSO_MS) deu HTTP 504 em ~150s —
+// o orçamento de tempo do invocation não é "folgado" como a conta ingênua (97×2×700ms≈136s)
+// sugeria; o round-trip real de 194 chamadas HTTP estoura o teto do gateway. MESMA razão pela
+// qual esta função já é separada de `prazos-fechar.ts`: dobrar chamada por processo no mesmo
+// laço não cabe no orçamento de tempo. O sinal de peticionamento foi para função própria —
+// `prazos-peticionamento.ts` — com seu próprio cron (`prazos_peticionamento_2100`, 15 min depois
+// deste). Ver o cabeçalho de lá para o porquê e o que ele faz.
+//
 // O CORTE DE DATA é `publicacoes.data_disponibilizacao` da intimação de ORIGEM do prazo (via
 // `legalmail_id`), não `prazos.data` (vencimento) — é a MESMA âncora que `prazo-peca.ts` já usa
 // (`ddAviso`) para o preview, não uma segunda noção de "início do prazo". Protocolar DENTRO do

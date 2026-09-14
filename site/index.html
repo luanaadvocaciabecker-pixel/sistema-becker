@@ -2740,6 +2740,68 @@ function novoCliente(){dadosTemp={};abrirModal('Novo Cliente',formCliente({}),as
   const{error}=await supa.from('clientes').insert([d]);
   if(error){toast('Erro: '+error.message,'erro');return false;}toast('Cliente cadastrado!','ok');buscarClientes();
 });}
+// ─── Vincular/cadastrar cliente direto do processo (mesmo padrão de vincularClienteNN) ────
+// Pedido dela: vários processos entraram sem cliente (planilha de ativos, importação antiga)
+// e hoje só dava pra resolver saindo pra aba Clientes, cadastrando lá, e voltando pra achar o
+// processo de novo. Isso faz os dois passos num só clique, sem sair da tela do processo.
+function vincularClienteProcesso(processoId){
+  abrirModal('🔗 Vincular ou cadastrar cliente',
+    `<label style="font-size:12px;color:#64748b">Buscar cliente já cadastrado</label>
+     <input id="vcp-busca" placeholder="Digite o nome..." oninput="buscarClienteProc(this.value,'${processoId}')" style="width:100%;padding:9px;margin:4px 0 8px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
+     <div id="vcp-res" style="max-height:220px;overflow:auto;margin-bottom:10px"></div>
+     <div style="border-top:1px solid var(--border);padding-top:10px">
+       <button class="btn btn-secondary" style="width:100%" onclick="novoClienteEVincular('${processoId}')">+ Cadastrar novo cliente</button>
+     </div>`,
+    null,'',false,true);
+}
+let _vcpTimer=null;
+function buscarClienteProc(q,processoId){
+  clearTimeout(_vcpTimer);
+  const el=document.getElementById('vcp-res');if(!el)return;
+  q=(q||'').trim();
+  if(q.length<2){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Digite ao menos 2 letras.</p>';return;}
+  _vcpTimer=setTimeout(async()=>{
+    const{data}=await supa.from('clientes').select('id,nome,cpf_cnpj').ilike('nome','%'+q+'%').limit(20);
+    if(!data||!data.length){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Nenhum cliente encontrado.</p>';return;}
+    el.innerHTML=data.map(c=>`<div onclick="confirmarVinculoProcesso('${processoId}',${c.id})" style="padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer">
+      <div style="font-size:13px;color:var(--texto)">${escHtml(c.nome)}</div>
+      ${c.cpf_cnpj?`<div style="font-size:11px;color:#64748b">${escHtml(c.cpf_cnpj)}</div>`:''}</div>`).join('');
+  },250);
+}
+// Liga o cliente ao processo em processo_clientes (fonte de verdade pra litisconsórcio —
+// ver db/legalmail_webhook.sql, migration processo_clientes_multi). Se o processo ainda não
+// tem cliente_id, este é o principal e processos.cliente_id também é preenchido (tudo o
+// resto do sistema — filtros, documentos, honorários, chat — continua lendo só esse campo,
+// sem quebrar nada); senão, entra só como cliente adicional do mesmo processo.
+async function ligarClienteAoProcesso(processoId,clienteId){
+  const{data:proc}=await supa.from('processos').select('cliente_id').eq('id',processoId).single();
+  const ehPrimeiro=!proc?.cliente_id;
+  const{error}=await supa.from('processo_clientes').upsert(
+    {processo_id:processoId,cliente_id:clienteId,principal:ehPrimeiro},{onConflict:'processo_id,cliente_id'});
+  if(error)return error;
+  if(ehPrimeiro){
+    const{error:e2}=await supa.from('processos').update({cliente_id:clienteId}).eq('id',processoId);
+    if(e2)return e2;
+  }
+  return null;
+}
+async function confirmarVinculoProcesso(processoId,clienteId){
+  const error=await ligarClienteAoProcesso(processoId,clienteId);
+  if(error){toast('Erro ao vincular.','erro');return;}
+  fecharModal();toast('✅ Cliente vinculado.','ok');abrirProcesso(processoId);
+}
+// formCliente() já cadastra com responsavel default 'Cibele Becker' (ver respNomes()) — não
+// precisa de nenhuma regra extra aqui, só o passo de ligar o cliente novo ao processo.
+function novoClienteEVincular(processoId){
+  abrirModal('Cadastrar cliente e vincular ao processo',formCliente({}),async()=>{
+    const d=coletarForm('form-cliente');if(!d.nome){toast('Informe o nome.','erro');return false;}
+    const{data,error}=await supa.from('clientes').insert([d]).select().single();
+    if(error){toast('Erro: '+error.message,'erro');return false;}
+    const e2=await ligarClienteAoProcesso(processoId,data.id);
+    if(e2){toast('Cliente cadastrado, mas erro ao vincular: '+e2.message,'erro');return false;}
+    toast('✅ Cliente cadastrado e vinculado!','ok');abrirProcesso(processoId);
+  });
+}
 async function editarCliente(id){
   const{data}=await supa.from('clientes').select('*').eq('id',id).single();if(!data)return;
   abrirModal('Editar Cliente',formCliente(data),async()=>{
@@ -3336,7 +3398,19 @@ async function abrirProcesso(id){
   const rows=res.ok?await res.json():[];
   const p=Array.isArray(rows)?rows[0]:null;
   if(!p){toast('Erro ao carregar processo.','erro');ir('judiciais');return;}
+  // Suporte a mais de um cliente por processo (litisconsórcio) — processo_clientes lista
+  // todos, processos.cliente_id continua sendo o principal (ver db/legalmail_webhook.sql).
+  const pcRes=await fetch(`${SUPA_URL}/rest/v1/processo_clientes?processo_id=eq.${id}&select=cliente_id,principal,clientes(id,nome)&order=principal.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+  const clientesLigados=pcRes.ok?await pcRes.json():[];
   const campo=(lbl,val,cor)=>val?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${lbl}</span><div style="margin-top:3px${cor?';color:'+cor:''}">${val}</div></div>`:'';
+  const blocoClientes=clientesLigados.length
+    ?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Cliente${clientesLigados.length>1?'s':''}</span>
+        <div style="margin-top:3px;display:flex;flex-direction:column;align-items:flex-start;gap:3px">
+          ${clientesLigados.map(cl=>`<a href="#" onclick="abrirCliente('${cl.clientes.id}');return false" style="color:var(--azul3)">${escHtml(cl.clientes.nome)}</a>`).join('')}
+          <button class="btn-icon" title="Adicionar outro cliente a este processo (litisconsórcio)" onclick="vincularClienteProcesso('${p.id}')" style="font-size:11px;padding:2px 6px">+ outro cliente</button>
+        </div></div>`
+    :`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Cliente</span>
+        <div style="margin-top:3px"><button class="btn btn-sm btn-secondary" onclick="vincularClienteProcesso('${p.id}')">🔗 Vincular/Cadastrar cliente</button></div></div>`;
   const atualizado=p.updated_at?new Date(p.updated_at).toLocaleDateString('pt-BR'):'';
   c.innerHTML=`
   <div style="margin-bottom:16px"><button class="btn btn-secondary" onclick="ir('judiciais')">← Voltar</button></div>
@@ -3353,7 +3427,7 @@ async function abrirProcesso(id){
     </div>
     <div class="card-body">
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;font-size:13px">
-        ${campo('Cliente',p.clientes?.nome?`<a href="#" onclick="abrirCliente('${p.clientes.id}');return false" style="color:var(--azul3)">${p.clientes.nome}</a>`:'—')}
+        ${blocoClientes}
         ${campo('Advogado responsável',p.advogado_responsavel,'var(--azul3)')}
         ${campo('Advogado auxiliar',p.advogado_auxiliar)}
         ${campo('Secretária responsável',p.secretaria_responsavel)}
@@ -4630,6 +4704,28 @@ const _advCurto=s=>{if(!s)return'';const w=s.trim().split(/\s+/)[0];return w?w[0
 // 'estimado' = calculada pelo sistema (regra de dias úteis); 'estimado_ia' = lida por IA.
 // confirmarPrazo() troca o status para 'confirmado' e o prazo sai desta condição.
 const _naoConfirmado=p=>{const s=(p?.status||'').toLowerCase();return s==='estimado'||s==='estimado_ia';};
+// Selo do sinal de peticionamento (prazos.peticionamento_status, via GET /api/v1/filings do
+// Legal Mail — ver db/prazo_candidato_protocolo.sql). NULL = nenhum protocolo do Legal Mail
+// encontrado após a intimação deste prazo — pode ter sido feito direto no tribunal (não mostra
+// nada; ausência de sinal não é "não protocolado"). Reaproveitado na lista e no modal do prazo.
+function _seloPeticionamento(p){
+  const st=p.peticionamento_status; if(!st)return'';
+  const quando=p.peticionamento_em?_dataBR(String(p.peticionamento_em).slice(0,10))+' '+String(p.peticionamento_em).slice(11,16):'';
+  const det=p.peticionamento_detalhe||{};
+  const pend=det.mensagem_pendencia||'';
+  // receipt_link: recibo em PDF do protocolo, só quando o sinal veio do webhook em tempo real
+  // (evento protocolo_finalizado) — ver db/prazo_candidato_protocolo.sql. Quando presente, o
+  // selo vira link clicável em vez de span simples.
+  const recibo=det.receipt_link||'';
+  const ambig=det.ambiguo?' ⚠ processo tinha mais de um prazo aberto — confirme qual foi respondido':'';
+  const tag=recibo?'a':'span';
+  const attrsRecibo=recibo?` href="${escHtml(recibo)}" target="_blank" rel="noopener"`:'';
+  if(st==='Protocolado')
+    return` <${tag}${attrsRecibo} title="Protocolado via Legal Mail em ${quando}${det.peca?' · '+escHtml(det.peca):''}${recibo?' · clique para abrir o recibo':''}${ambig}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#4ade8022;color:#15803d;text-decoration:none;cursor:${recibo?'pointer':'default'}">🟢 Protocolado${recibo?' 📄':''}${det.ambiguo?' ⚠':''}</${tag}>`;
+  if(st==='Cancelado'||st==='Com pendências')
+    return` <span title="${escHtml(st)} — conferir${pend?': '+escHtml(pend):''}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#dc262622;color:#dc2626">🔴 ${escHtml(st)} — conferir</span>`;
+  return` <span title="Protocolo em andamento no Legal Mail${quando?' · enviado '+quando:''}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">🟡 ${escHtml(st)}</span>`;
+}
 function _classPrazo(p){
   // Descartado na conferência ("não era prazo nosso"). Vem antes de cumprido porque a linha fica
   // com cumprido=true para sair das listas em aberto — mas ela não foi cumprida, foi descartada,
@@ -4817,7 +4913,14 @@ function renderPrazos(){
   // Compara por nome normalizado (MAIÚSCULO/trim); '__SEM__' = prazo sem responsável no processo.
   const _advKey=s=>{const t=(s||'').trim().toUpperCase();return t?t:'__SEM__';};
   const _advMatch=(p,v)=>{if(!v)return true;const k=_advKey(advDe(p));return v==='__SEM__'?k==='__SEM__':k.includes(v);};
-  const base=prazosCache.filter(p=>_advMatch(p,prazoAdv)&&_noPeriodo(p));
+  // 14/09/2026, pedido dela: prazo vencido (data passou, cumprido=false, sem outro status
+  // terminal) some da tela INTEIRA — não só do card próprio. Ela decidiu isso sabendo do
+  // risco (fica sem nenhuma lista até que algum sinal apareça em cumprido_por/peticionamento
+  // via robô, ou alguém abra o processo direto) — ver db/legalmail_custo_api.sql seção 13/14
+  // pro raciocínio completo. Filtra ANTES de entrar em _classPrazo/g, não só esconde depois:
+  // assim nem as listas combinadas (custas/documentos/audiências/todos, que fazem
+  // ...g.vencido) voltam a mostrar.
+  const base=prazosCache.filter(p=>_advMatch(p,prazoAdv)&&_noPeriodo(p)&&_classPrazo(p)!=='vencido');
   // Seletor de responsável (inclui Cibele e "Sem responsável" pra nenhum prazo ficar
   // escondido). A contagem entre parênteses é a mesma que os chips mostravam: em aberto
   // daqui para frente.
@@ -4852,14 +4955,12 @@ function renderPrazos(){
     ['aberto','Em aberto',g.aberto.length,'#60a5fa'],
     ['conferir','⚠ A conferir',aConferir.length,'#f59e0b'],
     ['custas','💰 Custas',nCat('custas'),'#d97706'],
-    ['documentos','📎 Documentos',nCat('documentos'),'#7c3aed'],
-    ['vencido','Vencidos',g.vencido.length,'#fbbf24']
+    ['documentos','📎 Documentos',nCat('documentos'),'#7c3aed']
   ].map(([k,lbl,n,cor])=>`<div class="stat-card" style="cursor:pointer;${prazoBucket===k?'outline:2px solid '+cor+';outline-offset:-1px':''}" onclick="prazoBucket='${k}';renderPrazos()">
     <div class="stat-val" style="color:${cor}">${n}</div><div class="stat-label">${lbl}</div></div>`).join('');
   const el=document.getElementById('prazos-lista');if(!el)return;
   let lista, vazio='Nenhum prazo nesta categoria.';
   if(prazoBucket==='hoje'){lista=g.hoje;vazio='Nenhum prazo vencendo hoje. 👍';}
-  else if(prazoBucket==='vencido'){lista=g.vencido;vazio='Nenhum prazo decorrido em aberto. ✅';}
   else if(prazoBucket==='aberto')lista=g.aberto;
   else if(prazoBucket==='cumprido')lista=g.cumprido;
   else if(prazoBucket==='custas'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='custas');vazio='Nenhum prazo de custas em aberto. 💰';}
@@ -4879,9 +4980,10 @@ function renderPrazos(){
   // Aviso da fila de conferência. Fica no topo porque prazo com data calculada que ninguém olha
   // é pior do que prazo nenhum: passa a impressão de estar controlado.
   if(aConferir.length && prazoBucket!=='conferir'){
-    const jaVenceu=aConferir.filter(p=>_classPrazo(p)==='vencido').length;
+    // "já passou da data" foi removido: base já não contém vencido nenhum (ver filtro
+    // acima), então essa contagem sempre daria zero.
     html += `<div onclick="prazoBucket='conferir';renderPrazos()" style="cursor:pointer;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.40);border-radius:10px;padding:12px 14px;margin-bottom:12px;color:#b45309;font-size:13px;font-weight:700">
-      ⚠ ${aConferir.length} prazo(s) com data CALCULADA pelo sistema — clique para conferir e confirmar${jaVenceu?` · <span style="color:#dc2626">${jaVenceu} já passou da data</span>`:''}</div>`;
+      ⚠ ${aConferir.length} prazo(s) com data CALCULADA pelo sistema — clique para conferir e confirmar</div>`;
   }
   html += lista.length?`<div class="card"><div class="card-body">${renderPrazosLista(lista,true)}</div></div>`
     :`<div class="empty-state"><div class="icon">✅</div><p>${vazio}</p></div>`;
@@ -4963,6 +5065,14 @@ function _tipoDoAto(txt){
   const orgao=(s.match(/(\d+ª\s+VARA DO TRABALHO DE [A-ZÀ-Ú\s]+|CEJUSC-JT\/\S+)/i)||[])[1]||null;
   return{tipo:tipo||null,orgao:orgao?orgao.trim().replace(/\s{2,}/g,' '):null};
 }
+// Corpo legível da intimação: o texto que chega (Legal Mail/DJEN) traz um cabeçalho de
+// metadados (Fonte, Disponibilização, Status do prazo, Destinatário, ID do evento...) que já
+// aparece resumido na caixa "PRAZO E CONTA" acima — aqui só atrapalha a leitura do ato em si.
+function _corpoIntimacao(txt){
+  const s=String(txt||'');
+  const semCabecalho=s.replace(/^(?:\s*(?:Fonte|Termo monitorado|Link|Disponibiliza[çc][ãa]o|Data de disponibiliza[çc][ãa]o|Status do prazo|Destinat[áa]rio|ID do evento):[^\n]*\n*)+/i,'');
+  return semCabecalho.replace(/\n{3,}/g,'\n\n').trim();
+}
 let _prazoAberto=null;   // guarda o prazo do modal, para o botão da IA não passar texto por atributo
 async function verPrazo(id){
   const{data:p}=await supa.from('prazos').select('*,processos(numero,advogado_responsavel,polo_cliente,polo_papeis,clientes(nome))').eq('id',id).single();
@@ -5006,15 +5116,16 @@ async function verPrazo(id){
   const cls=_classPrazo(p), naoConf=_naoConfirmado(p);
   const norte=_norteDoTexto(pub?.texto), ato=_tipoDoAto(pub?.texto);
   const disp=pub?.data_disponibilizacao||(p.ato_chave?String(p.ato_chave).split('|')[1]:'')||'';
-  const conta=(p.descricao||'').match(/\+1\+(\d+) dias úteis/);
+  const conta=(p.descricao||'').match(/\+[12]\+(\d+) dias úteis/);
   const linha=(rot,val)=>`<div style="display:flex;gap:8px;padding:3px 0"><span style="color:#94a3b8;min-width:132px;flex-shrink:0">${rot}</span><span>${val}</span></div>`;
 
   const bloco=`
   <div style="font-size:12px;color:#94a3b8;margin-bottom:10px">
-    ${escHtml(p.processos?.clientes?.nome||'(cliente a vincular)')}
+    ${p.processos?.clientes?.nome?escHtml(p.processos.clientes.nome):(p.processo_id?`<button class="btn btn-sm btn-secondary" onclick="fecharModal();vincularClienteProcesso('${p.processo_id}')">🔗 Vincular/Cadastrar cliente</button>`:'(cliente a vincular)')}
     ${p.processos?.numero?' · Proc. '+escHtml(p.processos.numero):''}
     ${pub?.tribunal?' · '+escHtml(pub.tribunal):''}
     ${p.processos?.advogado_responsavel?' · 👤 '+escHtml(_advCurto(p.processos.advogado_responsavel)):' · <span style="color:#dc2626">⚠️ sem responsável</span>'}
+    ${_seloPeticionamento(p)}
   </div>
   <div id="prazo-briefing" style="margin-bottom:12px"></div>
   ${blocoCandPos}
@@ -5030,7 +5141,7 @@ async function verPrazo(id){
     ${norte.dataFinal?linha('Data final do tribunal:', '<b style="color:#4ade80">'+escHtml(norte.dataFinal)+'</b> <span style="color:#64748b;font-size:11px">(data oficial, não estimada)</span>'):''}
     ${norte.statusPrazo?linha('Status no tribunal:', escHtml(norte.statusPrazo)):''}
     ${linha('Data do prazo:', '<b>'+_dataBR(p.data||p.data_prazo)+'</b>'+(naoConf?' <span style="color:#b45309">(estimada pelo sistema)</span>':''))}
-    ${disp&&naoConf?linha('Conta:', 'disp. '+_dataBR(disp)+' + 1 dia útil (ciência)'+(conta?' + '+conta[1]+' dias úteis':'')):''}
+    ${disp&&naoConf?linha('Conta:', 'disp. '+_dataBR(disp)+' + 2 dias úteis (publicação + ciência)'+(conta?' + '+conta[1]+' dias úteis':'')):''}
     ${ato.tipo||ato.orgao?linha('Ato:', escHtml([ato.tipo,ato.orgao].filter(Boolean).join(' · '))):''}
     ${p.categoria==='custas'?linha('Categoria:','<b style="color:#d97706">💰 Recolher custas</b>'):p.categoria==='documentos'?linha('Categoria:','<b style="color:#7c3aed">📎 Apresentar documento</b>'):''}
   </div>
@@ -5038,8 +5149,8 @@ async function verPrazo(id){
     INTIMAÇÃO ${pub?.tipo?'· '+escHtml(pub.tipo):''}
     ${pub?.link?'· <a href="'+escHtml(pub.link)+'" target="_blank" rel="noopener" style="color:var(--azul3)">abrir no DJEN</a>':''}
   </div>
-  <div style="white-space:pre-wrap;font-size:13px;line-height:1.5;max-height:42vh;overflow:auto;background:rgba(7,18,32,.6);padding:12px;border-radius:8px">${
-    pub?.texto?escHtml(pub.texto)
+  <div style="white-space:pre-wrap;font-size:13px;line-height:1.6;max-height:42vh;overflow:auto;background:rgba(7,18,32,.6);padding:12px;border-radius:8px">${
+    pub?.texto?escHtml(_corpoIntimacao(pub.texto))
     :'<span style="color:#94a3b8">Sem publicação de origem guardada — este prazo foi criado à mão. O texto está no PJe.</span>'}</div>
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:13px;padding-top:11px;border-top:1px solid var(--border)">
     ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d;font-weight:700" onclick="fecharModal();cumprir('${p.id}')">✓ Cumprir</button>`:''}
@@ -5230,18 +5341,19 @@ function renderPrazosLista(lista,comAcoes=false){
     // O texto do aviso muda com a origem: o prazo do TRT vem da regra de dias úteis conferida
     // contra o PJe, e não de um "+15 dias" genérico (que era o que este título dizia antes).
     const explEst=p.fonte==='DJEN/calculado'
-      ? 'Data CALCULADA: disponibilização + 1 dia útil (ciência) + 5 dias úteis, descontando fim de semana e feriado. O diário do TRT não publica a data-limite, por isso ela é calculada. A regra bateu com a tela do PJe em 6 de 6 casos conferidos. Confira e confirme.'
+      ? 'Data CALCULADA: disponibilização + 2 dias úteis (publicação + ciência) + 5 dias úteis, descontando fim de semana e feriado. O diário do TRT não publica a data-limite, por isso ela é calculada. Confira e confirme.'
       : 'Data estimada pelo sistema. Confira e confirme.';
     const seloEst=est?` <span title="${explEst}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#f59e0b22;color:#b45309">⚠ ESTIMADO</span>`
       :estIA?` <span title="Data estimada por IA (Infinitum/Publijus, leu o documento). Confira e confirme." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#0ea5e922;color:#0369a1">🤖 Estimado por IA</span>`:'';
     const seloFonte=p.fonte==='infinitum'?` <span title="Origem: Infinitum/Publijus" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#8b5cf622;color:#7c3aed">via Infinitum</span>`:'';
+    const seloPetic=_seloPeticionamento(p);
     return`<div class="prazo-item"${naoConfirmado?' style="background:rgba(245,158,11,.05)"':''}>
       <div class="prazo-data-box ${boxK}">
         <div class="dia">${isNaN(dt)?'--':dt.getDate().toString().padStart(2,'0')}</div>
         <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
-        <h4>${p.descricao||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}</h4>
+        <h4>${p.descricao||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}${seloPetic}</h4>
         <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${mostrarCli?`🧑 ${cliNome} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:' · <span style="color:#dc2626">⚠️ sem responsável</span>'}${p.classe?` · <span style="color:#64748b">${p.classe}</span>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${cls==='excedido'?' · <b style="color:#dc2626">PERDIDO — conferir se foi peticionado</b>':''}${naoConfirmado?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
         ${sug?`<p style="margin:4px 0 0"><span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:${sug==='custas'?'#d9770622':'#7c3aed22'};color:${sug==='custas'?'#b45309':'#6d28d9'}">🤖 IA sugere: ${sug==='custas'?'💰 Custas':'📎 Documentos'}${p.categoria_confianca?` · confiança ${p.categoria_confianca}`:''}</span>${p.categoria_motivo?` <span style="color:#94a3b8;font-size:11px">— ${p.categoria_motivo}</span>`:''}</p>`:''}
       </div>
@@ -6096,7 +6208,9 @@ async function pCibele(){
   const [rCl,rPr,rPz,rTk,rHon,rAlv,rAud]=await Promise.all([
     supa.from('clientes').select('id',{count:'exact'}),
     somenteProcessosPrincipais(supa.from('processos').select('id,situacao,advogado_responsavel,updated_at')),
-    supa.from('prazos').select('id',{count:'exact',head:true}).eq('cumprido',false).lte('data',hojStr),
+    // "decorrido" (perdemos o prazo) é data < hoje, nunca <=: vencer HOJE ainda dá tempo de
+    // agir, é a mesma semântica que _classPrazo() já usa pra separar 'hoje' de 'vencido'.
+    supa.from('prazos').select('id',{count:'exact',head:true}).eq('cumprido',false).lt('data',hojStr),
     supa.from('tarefas').select('id,status,responsavel,prazo,titulo').neq('status','Concluido').limit(300).catch(function(){return{data:[]};}),
     supa.from('honorarios').select('id,valor_total,status').limit(500),
     supa.from('alvaras').select('id,etapa,valor,processos(numero)').neq('etapa','Finalizado').limit(100).catch(function(){return{data:[]};}),

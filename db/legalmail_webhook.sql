@@ -46,13 +46,16 @@ begin
 end $$;
 
 -- 3) Ingestão -----------------------------------------------------------------
+-- 13/09/2026: acrescentado o ramo "protocolo_finalizado" (ver seção 11 abaixo) — corpo
+-- reproduzido aqui já com a versão nova (migration lm_ingest_protocolo_finalizado).
 create or replace function public.lm_ingest(body jsonb)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare
   item jsonb; doc jsonb;
   evt text; num text; digits text; pid bigint; nid bigint;
   trib text; texto text; titulo text; link text; ddisp date; tbusca text; resp text;
-  n_evt int:=0; n_pub int:=0; n_mov int:=0; n_skip int:=0;
+  n_evt int:=0; n_pub int:=0; n_mov int:=0; n_skip int:=0; n_protfin int:=0;
+  abertos_count int;
 begin
   evt := coalesce(body->>'evento', case when body ? 'params' then 'intimacao' else 'desconhecido' end);
 
@@ -64,9 +67,47 @@ begin
       tbusca := coalesce(item->'origem'->>'tipo_busca','intimacao');
       digits := regexp_replace(coalesce(num,''),'\D','','g');
       pid := null;
-      if digits <> '' and digits !~ '^0+$' then
+      -- idprocessos (id do Legal Mail) só aparece no formato "protocolo_finalizado" — mais
+      -- confiável que o número quando disponível.
+      if item ? 'idprocessos' then
+        select p.id into pid from processos p
+         where p.lm_idprocessos = nullif(item->>'idprocessos','')::bigint limit 1;
+      end if;
+      if pid is null and digits <> '' and digits !~ '^0+$' then
         select p.id into pid from processos p
          where regexp_replace(coalesce(p.numero,''),'\D','','g') = digits limit 1;
+      end if;
+
+      -- Não tem 'documento': cai aqui ANTES do laço de documento. Ver seção 11.
+      if item->>'event' = 'protocolo_finalizado' then
+        insert into legalmail_eventos(tipo, legalmail_id, numero_processo, payload)
+        values ('protocolo_finalizado', nullif(item->>'idpeticoes','')::bigint, num, item - 'clientkey');
+        n_evt := n_evt + 1;
+        n_protfin := n_protfin + 1;
+
+        if pid is not null then
+          select count(*) into abertos_count from prazos where processo_id = pid and cumprido = false;
+          if abertos_count = 1 then
+            update prazos set peticionamento_status = 'Protocolado',
+                   peticionamento_em = now(),
+                   peticionamento_detalhe = jsonb_build_object(
+                     'origem','webhook_tempo_real',
+                     'idpeticoes', nullif(item->>'idpeticoes','')::bigint,
+                     'receipt_link', item->>'receipt_link')
+             where processo_id = pid and cumprido = false;
+          elsif abertos_count > 1 then
+            update prazos set peticionamento_status = 'Protocolado',
+                   peticionamento_em = now(),
+                   peticionamento_detalhe = jsonb_build_object(
+                     'origem','webhook_tempo_real',
+                     'idpeticoes', nullif(item->>'idpeticoes','')::bigint,
+                     'receipt_link', item->>'receipt_link',
+                     'ambiguo', true,
+                     'motivo','processo tinha mais de um prazo aberto no momento do evento — confirme qual foi respondido')
+             where processo_id = pid and cumprido = false;
+          end if;
+        end if;
+        continue;
       end if;
 
       if jsonb_typeof(item->'documento')='array' then
@@ -109,7 +150,7 @@ begin
     n_evt := n_evt + 1;
   end if;
 
-  return jsonb_build_object('eventos',n_evt,'publicacoes',n_pub,'movimentacoes',n_mov,'ignorados',n_skip,'tipo',evt);
+  return jsonb_build_object('eventos',n_evt,'publicacoes',n_pub,'movimentacoes',n_mov,'ignorados',n_skip,'protocolo_finalizado',n_protfin,'tipo',evt);
 end $$;
 
 revoke all on function public.lm_ingest(jsonb) from anon, authenticated;
@@ -279,3 +320,240 @@ alter table public.prazos add column if not exists categoria_fonte      text;
 -- hoje" segue como PENDENTE no próprio Legal Mail (atraso de detecção do
 -- peticionamento). Fechamento imediato desses depende de: (a) botão "✓ Cumprir"
 -- manual (já existe), ou (b) wiring do webhook peticao_status (próximo passo).
+
+-- =====================================================================================
+-- 11) 13/09/2026 — evento `protocolo_finalizado` estava chegando e sendo IGNORADO
+-- =====================================================================================
+-- Origem: ela reabriu a pergunta de fundo da sessão ("não tem uma configuração de webhook
+-- de movimentação em tempo real que falte fazer?") depois de ler sugestões genéricas de
+-- outra IA (Jusbrasil monitoramento, DataJud, webhook fictício). Reli a documentação da API
+-- do Legal Mail inteira (não só os trechos já citados em sessões anteriores) atrás da seção
+-- "Webhooks — eventos em tempo real".
+--
+-- RESPOSTA DIRETA: o webhook de movimentação em tempo real (notificação #1, "Intimações e
+-- movimentações", formato `clientkey`+`params`) JÁ ESTÁ CONFIGURADO E RODANDO — é o mesmo
+-- webhook que alimenta publicacoes/movimentacoes desde o início (7.086 eventos tipo=
+-- 'intimacao' até 13/09/2026). NÃO faltava configurar nada no painel do Legal Mail.
+--
+-- O QUE FALTAVA: a doc menciona, de passagem, que "Protocolos finalizados também geram o
+-- evento `protocolo_finalizado`" dentro dessa mesma notificação #1. Esse evento JÁ ESTAVA
+-- CHEGANDO (26 eventos gravados em legalmail_eventos desde 02/09/2026, comprovado por
+-- `payload::text ilike '%protocolo_finalizado%'`) mas `lm_ingest` não tinha ramo pra ele —
+-- caía no `else` genérico (linha ~99 da v1), era gravado como tipo='intimacao' e NUNCA
+-- tocava prazos. Ou seja: o sinal de peticionamento em TEMPO REAL (não o polling diário de
+-- prazos-peticionamento.ts) já estava disponível havia 11 dias, só não estava sendo lido.
+--
+-- FORMATO do evento (sem 'documento', por isso precisa de ramo próprio ANTES do laço de
+-- documento): `{"type":"Incidental","event":"protocolo_finalizado","idpeticoes":N,
+-- "idprocessos":N,"receipt_link":"<url assinada do recibo em PDF, 6 dias de validade>",
+-- "numero_processo":"..."}`. `idprocessos` é o id do Legal Mail (mais confiável que o
+-- número quando presente — passou a ser tentado primeiro na resolução de `pid`).
+--
+-- FIX (migration lm_ingest_protocolo_finalizado): novo ramo em lm_ingest — grava o evento
+-- cru (tipo='protocolo_finalizado') e, se o processo tiver EXATAMENTE 1 prazo aberto,
+-- grava peticionamento_status='Protocolado' + peticionamento_em=now() + receipt_link no
+-- MESMO INSTANTE em que o evento chega (não precisa esperar o cron das 18h/21h). Se o
+-- processo tiver MAIS de um prazo aberto, o evento não diz qual foi respondido — marca os
+-- dois como Protocolado mas com `ambiguo:true` e o motivo explícito no detalhe, em vez de
+-- escolher um dos dois por palpite (mesma regra de nunca adivinhar além do que o dado prova).
+-- NUNCA fecha `cumprido` — só o mesmo sinal informativo que prazos-peticionamento.ts já grava.
+--
+-- BACKFILL (mesmo dia, rodado uma vez via UPDATE direto, não repetir): dos 26 eventos já
+-- recebidos e perdidos, 10 prazos em aberto foram encontrados e atualizados — 8 exatos, 2
+-- ambíguos (mesmo processo, id 6703, 2 prazos abertos na mesma data de intimação). 5 desses
+-- 10 já tinham sido pegos pelo polling diário (prazos-peticionamento.ts) — bate, confirma
+-- os dois caminhos concordando —, e 5 são confirmações NOVAS que o polling ainda não tinha
+-- alcançado. Os outros 16 eventos não bateram com nenhum prazo em aberto hoje (processo sem
+-- prazo aberto no momento — o protocolo pode ter respondido um prazo já fechado por outra via,
+-- ou o prazo ainda não existia quando o protocolo aconteceu).
+--
+-- RESULTADO PRÁTICO: dali em diante, todo protocolo finalizado no Legal Mail atualiza o selo
+-- da tela (🟢 Protocolado, com link pro recibo em PDF) na hora, em vez de só no próximo
+-- polling agendado. prazos-peticionamento.ts continua rodando (cobre quem já tinha status
+-- antigo ou processo sem prazo aberto no momento do evento) — os dois caminhos se
+-- complementam, nenhum substitui o outro.
+--
+-- LIMITAÇÃO que fica registrada: o link do recibo (`receipt_link`) é assinado com validade
+-- de alguns dias (visto no exemplo: X-Amz-Expires=518400s = 6 dias) — depois disso o link
+-- para de funcionar. Não é renovado automaticamente; se precisar do recibo depois desse
+-- prazo, precisa buscar de novo via API (endpoint não mapeado ainda) ou no próprio painel
+-- do Legal Mail.
+
+-- =====================================================================================
+-- 12) 13/09/2026 — TESTADA (e refutada) uma proposta genérica de outra IA sobre
+-- normalização de número/CNJ e vinculação de cliente por regex — achado real foi outro
+-- =====================================================================================
+-- Ela mandou um "prompt pronto para o Claude" de outra IA propondo: (a) schema paralelo
+-- (controle_prazos/webhook_logs, duplicando prazos/legalmail_eventos que já existem e
+-- funcionam), (b) normalizar CNJ removendo zeros à esquerda para casar processo, citando o
+-- exemplo concreto 0001706-96.2026.5.12.0050 como "processo a vincular" por causa disso,
+-- (c) extrair Reclamante/Reclamado por regex pra descobrir automaticamente o cliente e o
+-- advogado responsável, (d) fechar prazo sozinho quando o texto da movimentação contém
+-- palavras como "contestação"/"recurso"/"embargos". Nomes de evento como
+-- `peticao.protocolada_sucesso`/`movimentacao.nova`/`prazo.recebido` NÃO EXISTEM na API
+-- real do Legal Mail (conferido contra o spec OpenAPI de novo) — são invenção genérica.
+--
+-- TESTADO CONTRA O BANCO REAL, com o exemplo dela:
+--   processo 0001706-96.2026.5.12.0050 (id 6756) JÁ EXISTE, casado por número EXATO (sem
+--   qualquer diferença de zero à esquerda), com advogado_responsavel='Samaira Leite da
+--   Silva' — já correto, sem precisar de regex nenhuma. O único campo vazio é cliente_id.
+--   Texto da publicação: RECLAMANTE "VALDINEIA FONSECA DE SOUZA", RECLAMADO "JAH AÇAÍ
+--   JOINVILLE LTDA" — NENHUM dos dois existe em `clientes`. Ou seja: não é bug de
+--   normalização, é cliente novo mesmo, ainda não cadastrado — "(processo a vincular)"
+--   está fazendo exatamente o que deveria (pedir conferência humana), não uma falha.
+--
+-- TESTADO EM ESCALA (não só o exemplo dela): comparado, para toda `publicacoes` órfã
+-- (processo_id null), se bateria com algum processo REMOVENDO zeros à esquerda além do
+-- que já fazemos (remover só pontuação): 0 casos a mais. A tese de "zero à esquerda quebra
+-- o casamento" não se sustenta nos nossos dados — nenhuma publicação órfã seria resolvida
+-- só por essa normalização extra.
+--
+-- ACHADO REAL (diferente do que a proposta dizia, achado testando a mesma área): 510
+-- publicações (430 nos últimos 30 dias) e 17 prazos (todos já cumpridos) tinham
+-- processo_id NULL mesmo com o número batendo EXATO (sem normalização nenhuma) contra um
+-- processo já cadastrado — o processo só foi cadastrado/current DEPOIS que a publicação
+-- chegou, e `lm_ingest` só tenta casar uma vez, no instante da chegada; nunca volta pra
+-- religar depois. Conferido que cada casamento era 1-para-1 (nunca ambíguo) antes de
+-- aplicar. CORRIGIDO com um backfill único (UPDATE direto, não é rotina agendada ainda):
+-- as 510 publicações e os 17 prazos ganharam o processo_id correto. Nenhum `cumprido`,
+-- `status` ou outro campo de conteúdo foi tocado — só a chave estrangeira. Dos 22 prazos
+-- HOJE em aberto marcados "(processo a vincular)", NENHUM se beneficiou (nenhum tinha
+-- processo já cadastrado pra casar) — são genuinamente clientes/processos novos, mesma
+-- conclusão do exemplo dela.
+--
+-- NÃO IMPLEMENTADO, de propósito, por contradizer regras já estabelecidas neste projeto:
+--   - Fechar prazo (cumprido=true) por regex de palavra-chave na movimentação
+--     ("contestação"/"recurso"/"embargos" etc.) — é exatamente o padrão "nunca fecha prazo
+--     automaticamente" que este arquivo já reforça na seção 10. Palavra-chave no texto não
+--     prova que FOI NOSSO escritório que protocolou (pode ser a parte contrária, pode ser
+--     referência a outro recurso) — mesmo problema, em pior lugar, do sinal 1 de
+--     db/prazo_candidato_protocolo.sql (que por isso nunca afirma autoria).
+--   - Adivinhar o cliente cruzando Reclamante/Reclamado (texto livre) com o cadastro —
+--     mesma classe do erro do processo 6618 (resumo escrito do lado errado) e da regra dela
+--     de que "nosso cliente é sempre o que tem cadastro no nosso sistema". Uma segunda forma
+--     de decidir quem é o cliente, por fora do cadastro, foi rejeitada nesta sessão mais de
+--     uma vez por esse motivo exato — não muda porque veio de um prompt pronto.
+--
+-- SE UMA ROTINA PERIÓDICA de relink (não só este backfill único) fizer sentido no futuro —
+-- publicação/prazo continuam chegando antes do processo existir —, ela pode reusar a MESMA
+-- query (join por dígitos, checando ambiguidade antes de aplicar); não foi construída agora
+-- por não ter sido pedida, só o backfill pontual.
+
+-- =====================================================================================
+-- 13) 13/09/2026 — GATILHO reativo (migration processos_relinca_orfaos_trigger), não
+-- rotina agendada — religa publicação/prazo órfão no INSTANTE em que o processo nasce
+-- =====================================================================================
+-- Ela (relayando a mesma IA, depois de ver o achado real da seção 12) sugeriu as duas
+-- opções clássicas — trigger reativo no cadastro do processo vs. rotina agendada de
+-- conciliação ("varredor das 17h") — e perguntou qual eu preferia. Escolhido o TRIGGER:
+--   - É trabalho puramente interno ao Postgres (nenhuma chamada ao Legal Mail), então não
+--     compete com o orçamento de taxa/tempo que já levou a separar prazos-fechar,
+--     prazos-candidato-protocolo e prazos-peticionamento em funções e crons distintos —
+--     não faz sentido herdar aquele problema aqui, onde ele nem existe.
+--   - É mais rápido (religa no milissegundo em que o processo é cadastrado, não espera o
+--     fim do dia) e mais barato (só roda quando um processo nasce/tem o número corrigido —
+--     evento raro — em vez de escanear a tabela inteira todo dia).
+--
+-- public.processos_relinca_orfaos(): trigger AFTER INSERT OR UPDATE OF numero em
+-- processos. Usa os MESMOS dígitos (sem pontuação, SEM strip de zero à esquerda — a seção
+-- 12 já provou que zero à esquerda não é o problema) do processo que acabou de
+-- nascer/mudar, e religa:
+--   - publicacoes com processo_id null e numero_processo batendo;
+--   - prazos com processo_id null, ligados por legalmail_id a uma dessas publicacoes.
+-- NUNCA sobrescreve processo_id já preenchido (só WHERE processo_id is null nos dois
+-- UPDATEs) e nunca toca cumprido/status — mesma garantia do backfill da seção 12, só que
+-- contínua. Testado em transação com rollback (processo/publicação fictícios,
+-- '9999999-99.2099...'): a publicação nasceu órfã, o INSERT do processo disparou o
+-- gatilho e o processo_id apareceu correto antes do ROLLBACK — nada ficou gravado no teste.
+--
+-- NÃO IMPLEMENTADO: a rotina agendada (opção 2) — o trigger já cobre o caso descrito
+-- (processo cadastrado tardiamente) sem precisar de um cron a mais nem duplicar
+-- controle_prazos/webhook_logs (schema paralelo que a proposta original sugeria e que
+-- seção 12 já rejeitou). Os 22 prazos "(processo a vincular)" de hoje continuam exigindo
+-- conferência humana — são clientes novos de fato, o gatilho não inventa isso.
+
+-- =====================================================================================
+-- 14) 13/09/2026 — checagem via DataJud dos 57 processos sem cliente: número certo, mas
+-- DataJud NÃO tem nome de parte (achado já documentado, reconfirmado) — e conserta o
+-- `tribunal` errado de 17 desses 57
+-- =====================================================================================
+-- Ela pediu pra checar numa API se os números dos 57 processos sem cliente estavam certos
+-- e "puxar o texto". Dois testes, feitos ao vivo:
+--
+-- 1) Dígito verificador do CNJ (validação LOCAL, sem chamar API nenhuma — mod 97, art. 1º
+-- da Resolução CNJ 65/2008: DD = 98 - ((sequencial+ano+justiça+tribunal+origem || '00')
+-- mod 97)): as 57 números TODOS batem o dígito verificador. Nenhum tem erro de dígito.
+--
+-- 2) DataJud (mesma API pública já usada em prazo_auditoria_datajud.sql): 36 dos 57 foram
+-- ENCONTRADOS (existem de verdade, com classe/órgão/tribunal reais); 21 não foram
+-- encontrados HOJE — mas isso não prova número errado: é a MESMA defasagem de indexação já
+-- documentada (tribunal manda em lote, alguns tribunais/varas demoram mais que outros a
+-- aparecer). Nenhuma evidência de número incorreto nos 57 — dígito bate em 57/57, e "não
+-- achei" no DataJud não é o mesmo que "não existe".
+--
+-- RECONFIRMADO (não é novidade, é a MESMA limitação já registrada em db/trt_gera_prazos.sql
+-- e db/legalmail_case_files.sql): o schema do DataJud NÃO TEM CAMPO DE PARTE NENHUM —
+-- só tribunal/grau/classe/assunto/órgão julgador/movimentos. "Puxar o texto" das partes
+-- não é possível por aqui, nem pros 36 encontrados. Os 16 processos sem publicação
+-- guardada continuam sem fonte de nome de parte — precisam do nome dela ou de uma fonte
+-- nova (a íntegra, por exemplo).
+--
+-- ACHADO LATERAL ÚTIL: o DataJud devolve o TRIBUNAL real de cada processo encontrado, e
+-- 17 dos 36 tinham `processos.tribunal` errado no nosso banco — todos os 57 vieram da
+-- importação da "planilha de ativos" com um valor default (a maioria virou "TJSC" mesmo
+-- quando o processo é de outro tribunal, ex.: TRT-15, TRF-3/4, TJRS, TJPR, TRT-9,
+-- TRT-12, TJSP). Corrigido com UPDATE direto usando o valor exato que o DataJud devolveu
+-- (mesma grafia sem hífen já usada em outras 500+ linhas de `processos.tribunal`, ex.
+-- "TRT12"/"TRF04" — não "TRT-12"). Só o campo tribunal foi tocado; nada de cliente.
+
+-- =====================================================================================
+-- 15) 13/09/2026 — Legal Mail TEM o texto de intimações antigas que a gente nunca puxou
+-- (achado real, via notices-to-comply) + 7 clientes vinculados dos 57
+-- =====================================================================================
+-- Ela perguntou se o Legal Mail não dava pra puxar o texto dessas intimações. Testado ao
+-- vivo (sondagem temporária lm-lawsuitall-probe, neutralizada depois de usar):
+--
+-- 1) `GET /lawsuit/all` (grátis) — dos 57 processos sem cliente, 43 JÁ ESTAVAM cadastrados
+-- no workspace do Legal Mail (a maioria nunca tinha `lm_idprocessos` sincronizado — rodado
+-- de novo, 124 processos no total ganharam o id, não só os 57). Os outros 14 (#6280,
+-- #6713, #6716, #6721, #6722, #6723, #6725, #6727, #6730, #6737, #6746, #6749, #6759,
+-- #6768) NÃO existem no Legal Mail — para esses, não tem texto nenhum lá, ponto final.
+--
+-- 2) `GET /pleading/notices-to-comply` (grátis, mesmo endpoint de prazos-fechar.ts) nos 43:
+-- 30 têm ZERO intimação registrada até no próprio Legal Mail (bate com nossa base vazia —
+-- não era falha de sincronização, é ausência real de evento). 13 TINHAM histórico real que
+-- nunca tinha chegado na nossa `publicacoes` — a intimação existe há mais tempo do que o
+-- nosso webhook, e não há backfill automático de histórico antigo (só o que chega dali pra
+-- frente é capturado). Do texto limpo (tags removidas), o padrão "(PAPEL - NOME)" logo após
+-- "Refer. ao Evento N" identifica a QUE PARTE aquele evento specific se refere, e
+-- "Destinatário: Cibele Becker Friedrichsen" no mesmo registro é o mesmo sinal forte já
+-- usado na seção 12 (ela é advogada de registro daquela parte).
+--
+-- ACHADO QUE MUDA UM CASO JÁ REPORTADO: #6742 (5000173-67...) tinha sido listado com
+-- "Autor: Adelson Garcia x Réu: Klaus Wilhelm Dietrich" sem saber qual lado é nosso. O
+-- texto do Legal Mail mostra Cibele Becker como destinatária do evento referente ao
+-- "(RÉU - KLAUS WILHELM DIETRICH)" — ou seja, o cliente aqui é o RÉU, não o autor.
+--
+-- LIMITE DO SCHEMA que apareceu por causa disso: `processos.cliente_id` é 1-para-1 (uma
+-- FK só). Casos com MAIS DE UMA parte do nosso lado no mesmo processo (#6739: dois
+-- exequentes, Romulo Natam Pinheiro dos Passos E Luiza Nunes dos Passos; #6764: três
+-- exequentes, Alessandra/Davi/Diogo Gonçalves; #6747 e #6752: "BECKER ADVOGADOS
+-- ASSOCIADOS" aparece como a própria parte, ao lado de outro requerente — parece cobrança
+-- de honorários) NÃO cabem hoje num vínculo só — ficam pendentes de decisão humana (qual
+-- nome vira o cliente_id, ou se o sistema precisa de uma tabela N:N no futuro). Não
+-- resolvido automaticamente, registrado para quando ela decidir.
+--
+-- VINCULADOS de fato (13/09/2026, só os casos SEM ambiguidade — um nome só por processo,
+-- Cibele confirmada como advogada dele; a maioria já era cliente cadastrado por outro
+-- processo, só faltava ligar este):
+--   #6744 -> cliente 1202 (Stela Maris Finder, já cadastrada)
+--   #6762 -> cliente 1357 (Diamond Transportes Ltda, já cadastrada)
+--   #6763 -> cliente 214  (Vinicius de Assis Pereira, já cadastrado)
+--   #6735 -> cliente 680  (Jessica Wuerz Berger, já cadastrada)
+--   #6742 -> cliente 766  (Klaus Wilhelm Dietrich, já cadastrado)
+--   #6751 -> cliente 364  (Daiana Najara Leandro Zeferino, já cadastrada — existe também um
+--             cadastro parecido id 1325 "Daiana Najara Leandro", possível duplicata a
+--             revisar depois, não mexido agora)
+--   #6738 -> cliente NOVO 1520 (Andre de Oliveira, não existia — cadastrado com
+--             responsavel='Cibele Becker', mesmo default do formCliente())
+-- Nenhum outro campo do processo foi tocado — só cliente_id.

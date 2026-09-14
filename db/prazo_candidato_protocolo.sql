@@ -117,3 +117,87 @@
 --   trabalhista entrar nesse universo, os moldes de burocracia podem ser diferentes (o PJe
 --   trabalhista já mostrou, no trabalho de polo, textos com formatação distinta do TJSC) —
 --   conferir a fila depois que isso acontecer, não assumir que a lista de moldes está completa.
+
+-- =====================================================================================
+-- 13/09/2026 — SEGUNDO SINAL (prova, não indício): peticionamento via GET /api/v1/filings
+-- =====================================================================================
+-- Edge function: whatsapp-bot/edge-function-prazos-peticionamento.ts (FUNÇÃO PRÓPRIA, não
+-- dentro de prazos-candidato-protocolo.ts — ver "ACHADO: 504 por orçamento de tempo" abaixo).
+-- Cron: prazos_peticionamento_2100 (0 21 * * * UTC = 18:00 BRT), 15 min depois do
+-- prazos_candidato_protocolo_1745 (17:45 BRT).
+--
+-- ORIGEM: ela lembrou de marcar "fechar o prazo" na hora de peticionar na própria plataforma do
+-- Legal Mail, e apontou "algum lugar deve ter essa informação". Achado: `GET /api/v1/filings`
+-- (GRÁTIS, confirmado com saldo antes/depois) lista os protocolos que O PRÓPRIO escritório
+-- enviou pelo botão de peticionar do Legal Mail — com `status` (Em fila/Protocolando/
+-- Protocolado/Agendado/Cancelado/Com pendências) e `protocolado_em` (data e HORA exatas de
+-- quando o tribunal aceitou). Isso é PROVA (o próprio workspace autenticado protocolando), não
+-- indício — diferente do sinal 1 (case-files), que nunca sabe "quem".
+--
+-- ESCOPO — só cobre quem usa o botão de peticionar do Legal Mail. Quem protocola direto no site
+-- do tribunal (ela já fez isso, ex.: processo 4063252-89.2026.8.26.0100, "São Clemente") não
+-- aparece em `filings` — nesse caso peticionamento_status fica null, e NÃO é erro, é o limite
+-- documentado do sinal.
+--
+-- VERIFICADO em 13/09/2026 contra 13 processos com prazo vencido (checagem manual, antes do
+-- deploy): 4 bateram exato (protocolo do Legal Mail no mesmo dia do vencimento — ex. LUCAS
+-- VIEIRA PIRES, protocolado_em 11/09 09:15, prazo vencendo 11/09), 1 mostrou zero protocolos
+-- (São Clemente, confirmado feito direto no tribunal), os demais tinham só protocolos antigos
+-- demais (semanas antes) para responder a ESTE prazo especificamente.
+--
+-- =====================================================================================
+-- ACHADO: HTTP 504 por orçamento de TEMPO, não de taxa — por que é função separada
+-- =====================================================================================
+-- TENTATIVA original: acrescentar este sinal como uma segunda chamada por processo DENTRO do
+-- mesmo laço de prazos-candidato-protocolo.ts (case-files + filings, mesmo PASSO_MS=700ms).
+-- A conta ingênua parecia caber (97 processos × 2 chamadas × 700ms ≈ 136s, dentro do teto de
+-- 150s que os crons já usam em timeout_milliseconds). MEDIDO ao vivo: HTTP 504 em ~150,4s —
+-- o tempo real de rede das 194 chamadas HTTP (não só o sleep entre elas) estourou o teto do
+-- invocation. Não é o limite de taxa de 120/min (que já levou à separação de
+-- prazos-candidato-protocolo.ts de prazos-fechar.ts) — é um segundo teto, de TEMPO por
+-- invocation, que a conta de "dobrar o sleep" não via.
+--
+-- FIX: revertida a tentativa (prazos-candidato-protocolo.ts volta a fazer só 1 chamada por
+-- processo — case-files), e o sinal de peticionamento foi para função e cron PRÓPRIOS. Cada uma
+-- volta a caber no orçamento já provado (~97 × 700ms ≈ 68-97s, medido: candidato-protocolo em
+-- 96,6s e peticionamento em 88,2/92,3s, ambos 97/97 processos, 0 erros, 0 429).
+--
+-- =====================================================================================
+-- Coluna nova: prazos.peticionamento_status/_em/_detalhe (colunas soltas, não jsonb único)
+-- =====================================================================================
+--   peticionamento_status text          -- Em fila/Protocolando/Protocolado/Agendado/
+--                                           Cancelado/Com pendências; null = nenhum protocolo do
+--                                           Legal Mail encontrado após a intimação deste prazo
+--                                           (pode ter sido feito direto no tribunal).
+--   peticionamento_em timestamptz        -- protocolado_em (ou enviado_em, se ainda não
+--                                           protocolado) do protocolo mais recente relevante.
+--   peticionamento_detalhe jsonb         -- { peca, mensagem_pendencia }.
+-- Mesmo cuidado de não ficar stale que candidato_pos_intimacao: quem foi verificado nesta rodada
+-- COMPLETA e não tem protocolo relevante recebe null explícito nos três campos.
+--
+-- CORTE DE DATA e FILTRA POR PRAZO: mesmas regras do sinal 1 (data_disponibilizacao da
+-- intimação de origem via legalmail_id, nunca prazos.data). Entre vários protocolos relevantes
+-- (enviados depois da intimação), fica o MAIS RECENTE — resposta mais provável a ESTE aviso.
+--
+-- =====================================================================================
+-- Verificação (13/09/2026, primeira rodada commitada)
+-- =====================================================================================
+-- Dry-run: 97/97 processos, 144 prazos, 0 erros, 0 429, PETICIONAMENTO_ENCONTRADO=5.
+-- Commit: 5 prazos com peticionamento_status='Protocolado' (todos), 139 com null explícito
+--   (verificados sem protocolo relevante nesta rodada) — 5+139=144, bate com o universo inteiro.
+-- select count(*) filter (where peticionamento_status is not null) com_status,
+--        count(*) filter (where peticionamento_status is null) sem_status
+-- from prazos where cumprido=false and legalmail_id is not null;
+-- -> com_status=5, sem_status=139 (medido logo após o commit)
+--
+-- Nenhum prazo teve cumprido/status alterado por esta função — só as 3 colunas novas.
+--
+-- =====================================================================================
+-- Riscos registrados (não resolvidos por este desenho, registrados para o futuro)
+-- =====================================================================================
+-- - "Protocolado" aqui é o status do Legal Mail, não confirmação de que o CONTEÚDO da peça
+--   respondeu ao que a intimação pedia — é prova de QUE algo foi protocolado e QUANDO, não do
+--   MÉRITO. Continua sendo o humano quem decide se cobre o prazo.
+-- - Cobertura parcial por desenho: só enxerga protocolos feitos pelo botão do Legal Mail. Um
+--   escritório que migrasse para protocolar mais direto no tribunal reduziria a cobertura deste
+--   sinal sem que isso seja um bug — é o limite documentado, não uma regressão.

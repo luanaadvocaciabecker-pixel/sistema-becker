@@ -380,3 +380,211 @@
 --   Todos os outros 894 candidatos do dry-run permanecem exatamente iguais (871 em N=5,
 --   18 em N=8 — os "Recurso Ordinário"/RORSum/Agravo de Petição continuam intocados).
 --   Nenhum prazo já gravado é alterado por esta migration — só atos futuros/não gravados.
+--
+-- ============================================================================
+-- 14) Conferência contra 3 prints "Meus Expedientes" (TRT-12 Joinville + TRT-15) — 14/09/2026
+-- ============================================================================
+-- Ela mandou 3 prints sem texto (mesmo padrão de sempre). 13 CNJs transcritos e cruzados.
+--
+-- BATEU (2): 0001742-10.2026.5.12.0028 (21/09) e 0011066-58.2022.5.15.0132 (22/09) — o
+-- primeiro só precisava passar de status='estimado' para 'confirmado' (feito).
+--
+-- 3 dias-a-menos que o print (0001337-59, 0001359-63, 0002658-17): refiz a conta
+-- (`becker_dias_uteis` aninhado, mesmos parâmetros) e ela bate EXATO com o valor gravado —
+-- ou seja, a fórmula está correta para a disponibilização que o sistema capturou; se há erro,
+-- é na captura da data (DJEN pode estar 1 dia adiantado do que a tela do tribunal mostra) ou
+-- na minha transcrição do print. Testei via Legal Mail `lawsuit/case-files` (grátis) se a
+-- movimentação interna confirma outra data — não dá pra confirmar por esse caminho: o campo
+-- "data_movimentacao" do case-files é a data do ATO PRATICADO, não da disponibilização no
+-- DJEN (que é o marco que conta prazo), então divergem por natureza, não por erro. Fica em
+-- aberto — pedido a ela pra reconferir os 3 prints antes de mexer em qualquer coisa.
+--
+-- ACHADO REAL (0001806-14.2026.5.12.0030, prazo id 5802): gravado 23/09 e já 'confirmado',
+-- mas a fórmula padrão (N=5) dá 18/09 pros mesmos parâmetros que a própria descrição do
+-- prazo declara. Motivo encontrado: o ato de 10/09 é ciência de SENTENÇA (confirmado via
+-- case-files: há "Sentença" datada 09/09 nos autos), que pede prazo de Recurso Ordinário
+-- (8 dias úteis, CLT art. 895) — e 23/09 bate exatamente com N=8 pros mesmos parâmetros.
+-- Ou seja, o valor gravado parece ter sido corrigido à mão por alguém em algum momento
+-- (reconhecendo que era recurso, não despacho comum) mas a `descricao` ficou desatualizada
+-- (ainda diz "+1+5"). Isso é sintoma de uma lacuna real da função: `trt_gera_prazos` só
+-- decide N=8 pela CLASSE do ato (Recurso|Agravo), nunca pelo CONTEÚDO ("ciência da
+-- Sentença") — uma sentença de 1º grau intimada com classe "Ação Trabalhista" (não
+-- "Recurso") cai em N=5 por padrão, do lado perigoso (antecipa, mas o texto já avisa "cita
+-- N dias" quando aplicável). Não mexida ainda — o print mostra 24/09, 1 dia além até do
+-- valor corrigido a mão (23/09); perguntado a ela se lembra de ter corrigido este prazo.
+--
+-- 0001794-06.2026.5.12.0028 (sem prazo nenhum, sem cliente): achado o ato de 19/08 ("emende
+-- a petição inicial... quinze dias", RECLAMANTE Beatriz Luiz da Silva x RECLAMADO Unicostura
+-- Ltda) que nunca virou prazo. Causa: o cron `trt_prazos_diario` roda com janela
+-- `current_date-15..current_date` (15 dias corridos) — o ato saiu da janela ~03/09 e nunca
+-- mais foi reprocessado. Verbo "emende" também não está na lista reconhecida pelo regex de
+-- N-dirigido (só encurtaria, nunca alongaria, mas mesmo dentro da janela teria gerado N=5 em
+-- vez de 15). Não criado ainda — falta saber de quem é o processo (autora ou ré) pra saber
+-- se o prazo é nosso.
+--
+-- 6 CNJs sem `processos` cadastrado, com histórico real de intimação (desde 09/2025 em um
+-- caso): 0001933-49, 0001732-38, 0011196-71, 0010138-11, 0011176-49, 0011220-44. Criados
+-- agora como processos "bare" (sem cliente, `observacoes` registrando a origem) — o trigger
+-- `trg_processos_relinca_orfaos` religou automaticamente as `publicacoes` E os `prazos`
+-- órfãos que o cron `trt_prazos_diario` já tinha gerado silenciosamente pra eles nos últimos
+-- dias (existiam como "(processo a vincular)", invisíveis em qualquer tela porque não tinham
+-- processo nem cliente). Rodado também `legalmail-autos` action=sync_ids (grátis, `lawsuit/all`)
+-- pra popular `lm_idprocessos` — 143 processos atualizados no total (efeito colateral bom,
+-- não só os 6). ACHADO MAIS SÉRIO DESTE GRUPO: prazo id 5777 (0011176-49.2023.5.15.0091,
+-- Recurso Ordinário em Órgão Especial) tinha data calculada 10/09/2026 — JÁ VENCIDO (hoje é
+-- 14/09) — e ficou 100% invisível até agora porque o processo nunca existiu no sistema. Não
+-- fechado nem tocado: falta entender se já foi respondido (há uma "Decisão" de 11/09 nos
+-- autos via Legal Mail, que pode já ser a resposta do tribunal a isso) antes de qualquer ação.
+-- Reportado a ela para triagem imediata.
+--
+-- Sondagem usada (`legalmail-varredura-probe`, case-files + lawsuit/all, tudo grátis) já
+-- neutralizada.
+--   Nenhum prazo já gravado é alterado por esta migration — só atos futuros/não gravados.
+--
+-- ============================================================================
+-- 15) CORRIGIDO: ciência leva DOIS dias úteis após a disponibilização, não um — 14/09/2026
+-- ============================================================================
+-- Ela mandou um caso novo com as datas oficiais escritas por ela (não estimadas):
+-- `0001706-96.2026.5.12.0050` (VALDINEIA FONSECA DE SOUZA x JAH AÇAI JOINVILLE LTDA, nosso
+-- cliente): Disponibilização 03/09 (qui), Publicação 04/09 (sex), início da contagem 07/09
+-- (seg), 8 dias úteis, termina 17/09. E confirmou por escrito a regra: "disponibilização, o
+-- dia da publicação (que é o primeiro dia útil seguinte ao da disponibilização) e o início
+-- efetivo do prazo, que ocorre no primeiro dia útil seguinte ao da publicação."
+--
+-- Base legal: Lei 11.419/2006 art. 4º §3º (publicação = 1º dia útil seguinte à
+-- disponibilização) + CPC art. 224 c/c 231, II (a contagem do prazo começa no 1º dia útil
+-- seguinte à PUBLICAÇÃO, não à disponibilização). Ou seja, são DOIS saltos de dia útil, não
+-- um só. A função sempre usou só um
+-- (`becker_dias_uteis(becker_dias_uteis(disp,1,abr),n,abr)`), fórmula "validada 6/6 contra o
+-- PJe" em 09/09 (seção 1) — o gabarito de 6 nunca cruzou uma disponibilização numa
+-- sexta-feira nem foi conferido contra a "Data de Publicação" separada, só contra o "Prazo
+-- Final" mostrado na tela, então o erro de 1 dia útil passou despercebido até agora.
+--
+-- CONFERIDO com dados reais antes de mexer (nunca só no exemplo dela):
+--   `0001337-59` (disp 09/09 qua): +2 → 11/09; +5 → 18/09. Print do tribunal: 18/09. BATEU.
+--   `0001359-63` (disp 08/09 ter): +2 → 10/09; +5 → 17/09. Print: 17/09. BATEU.
+--   `0001806-14` (disp 10/09 qui, é Sentença → Recurso Ordinário, N=8): +2 → 14/09; +8 →
+--     24/09. Print: 24/09. BATEU EXATO — resolve também o mistério do prazo 5802 (seção 14,
+--     grupo C): o valor gravado (23/09) provavelmente foi corrigido à mão por alguém usando
+--     N=8 mas ainda com a ciência errada de +1; com a ciência certa (+2) E N=8, dá 24/09.
+--   `0002658-17` (disp 03/09 qui): +2 → 07/09; +5 → 14/09. Print: 15/09. NÃO bateu — mas
+--     esse caso já tinha aviso "texto cita 5 dias — conferir" (pode ser problema à parte, no
+--     N, não na ciência). Não investigado a fundo, fica registrado.
+--   `0001742-10` (disp 11/09 sex): a rodada anterior tinha esse como "bateu exato" com a
+--     fórmula ANTIGA (21/09). Com +2 daria 22/09. Não dá pra reconferir o print original
+--     (não guardei a imagem) — hipótese mais provável é erro de transcrição minha (21 vs 22).
+--     Fica pendente de reconferência manual, não impediu a correção da regra geral.
+--
+-- BOA NOTÍCIA: o erro (usar +1) sempre calculava uma data 1 dia útil MAIS CEDO que a real —
+-- nunca fez perder prazo (o erro sempre foi pro lado seguro, "sobra tempo"), só gerava alarme
+-- de urgência falso e podia levar a confirmar/protocolar antes da hora achando que o prazo
+-- era mais curto do que é.
+--
+-- FEITO: `becker_dias_uteis(disp,1,abr)` → `becker_dias_uteis(disp,2,abr)` em
+-- `trt_gera_prazos` (CREATE OR REPLACE, mesma função, só essa linha + a descrição gerada
+-- passa a dizer "+2+N" em vez de "+1+N"). Reprocessados os 21 prazos que ainda estavam
+-- `status='estimado'` (nunca toquei `confirmado`/`cumprido` — mesma disciplina de sempre):
+-- deletados pelo id exato e regerados via `trt_gera_prazos('2026-08-25','2026-09-14',true)`,
+-- que também pegou 6 atos novos que a janela mais larga alcançou (27 gravados no total).
+-- Conferido: nenhuma duplicata de mesmo evento (processos com mais de um prazo aberto agora
+-- são sempre atos DIFERENTES, ato_chave com data/id distintos — checado um a um nos casos
+-- com 2+ prazos DJEN/calculado).
+--
+-- NÃO MEXIDO (de propósito): os prazos já `confirmado`/`cumprido` anteriores a hoje. A
+-- conferência mostrou que boa parte dos `confirmado` bate com a fórmula ANTIGA (+1) — o que
+-- é esperado, já que foi o valor que o sistema sugeriu e alguém clicou "Data confere" em
+-- cima dele; não é prova de que a data real do tribunal é essa, só que ninguém a contestou.
+-- Ou seja, é bem possível que existam prazos `confirmado` no passado que também estejam 1
+-- dia útil adiantados — mas corrigir isso é uma decisão à parte (reabrir prazo confirmado
+-- exige a mesma prova que fechar um, pela regra de `prazo_nao_fecha_por_data`), não entra
+-- nesta migration.
+--
+-- UI (`site/index.html`, `verPrazo`): a linha "Conta:" e o tooltip do selo "⚠ ESTIMADO"
+-- atualizados pra dizer "+2 dias úteis (publicação + ciência)" em vez de "+1 dia útil
+-- (ciência)". Também aproveitado o mesmo commit para reformatar a caixa cinza do texto da
+-- intimação (pedido dela, print à parte): nova `_corpoIntimacao(txt)` remove o cabeçalho de
+-- metadados repetido (Fonte/Disponibilização/Status do prazo/Destinatário/ID do evento — já
+-- aparecem na caixa "PRAZO E CONTA" acima) antes de exibir, só isso, não mexe no dado gravado.
+--
+-- ============================================================================
+-- 16) CORRIGIDO: "ciência da Sentença" é N=8 (Recurso Ordinário), mesmo sem classe "Recurso"
+-- ============================================================================
+-- Ela perguntou: "quantos dias não tem na intimação/despacho? mesmo sem data final não fala
+-- quantos dias são?" Medido no universo real que `trt_gera_prazos` processa (TRT/TST, sem
+-- "data final", sem pauta/ata — 1.014 atos em 14/09/2026):
+--   654 de 1.014 (65%) não citam NENHUM número de dias/horas no texto — confirma a intuição
+--   dela, a maioria dos despachos do TRT simplesmente não fala quantos dias são.
+--   338 (33%) citam algum número perto de "dias", mas quase sempre é norma citada (ex. art.
+--   895 CLT) ou prazo de outra parte — só 19 de 1.014 (1,9%) têm ORDEM DIRIGIDA de verdade.
+-- Por isso a função depende do `n_base` por classe, não tem como confiar em achar o número no
+-- texto na maioria dos casos.
+--
+-- Nessa mesma investigação achei um bug sistemático: 75 atos têm texto "ciência da Sentença"
+-- (que abre prazo de Recurso Ordinário, 8 dias úteis pela CLT) mas a `classe` do ato ainda é
+-- a da ação original de 1º grau ("Ação Trabalhista", ou sem classe) — não "Recurso" — então
+-- caíam em N=5 por engano. Mesmo problema, maior escala, do que resolveu o mistério do prazo
+-- 5802 em 0001806-14 (seção 14/15) — lá era 1 caso, aqui são pelo menos 75.
+--
+-- Ela confirmou com uma tabela de referência de prazos por tipo de manifestação trabalhista:
+-- Recurso Ordinário, Contrarrazões, Agravo de Instrumento, Agravo de Petição e Recurso de
+-- Revista são todos 8 dias; só Embargos de Declaração é 5 (tipo diferente de manifestação,
+-- não conflita com esta regra — se o texto também mencionar embargos com prazo dirigido, o
+-- `n_dirigido`/`dias_citados` já existente encurta sozinho, sem caso especial).
+--
+-- FEITO: `n_base` em `trt_gera_prazos` agora usa N=8 quando o texto casa
+-- `ci[êe]ncia d[ae] Senten[çc]a` E a classe NÃO é já Recurso/Agravo/Revista. Deixados de fora
+-- (mantém N=5, sem generalizar sem olhar) os 3 casos "Homologação de Transação Extrajudicial"
+-- (sentença homologatória, normalmente sem recurso cabível) e os 2 "Cumprimento Provisório de
+-- Sentença" (execução — agravo de petição também é 8 dias, mas contexto diferente).
+--
+-- IMPACTO IMEDIATO: zero — nenhum dos 27 prazos `status='estimado'` reprocessados na seção 15
+-- casa com "ciência da Sentença" (conferido). A correção vale só pra atos futuros a partir de
+-- agora (próxima rodada do cron `trt_prazos_diario`, ou qualquer novo ato do dia a dia). Os
+-- 75 atos históricos já identificados não foram tocados — a maioria já tem prazo gravado com
+-- algum status (confirmado/cumprido/vencido antigo), e a mesma disciplina de sempre (nunca
+-- reabrir prazo fechado sem prova) se aplica.
+--
+-- ============================================================================
+-- 17) BACKFILL retroativo: janela larga (desde 2023) pra pegar o que nunca foi processado
+-- ============================================================================
+-- Ela pediu direto: "arrumou no sistema já? todos que estão lá e são TRABALHISTA?" — depois
+-- de saber que 67 dos 75 atos de "ciência de Sentença" nunca tiveram prazo nenhum gerado
+-- (fora da janela de 15 dias do cron `trt_prazos_diario`), pediu pra rodar numa janela larga
+-- mesmo sabendo que ia trazer muita coisa histórica.
+--
+-- Rodado `trt_gera_prazos('2023-10-30','2026-09-14', false)` (dry-run primeiro): 936
+-- candidatos, TODOS já com `prazo_calculado` no passado (disponibilização entre jul/2025 e
+-- ago/2026) — não é só os 67 de Sentença, é qualquer ato TRT/TST de qualquer tipo que nunca
+-- caiu numa janela de 15 dias.
+--
+-- Antes de gravar, mostrei o número real (936, não os 67 que motivaram a pergunta) e perguntei
+-- de novo — ela respondeu "faz os em aberto ainda melhor só", ou seja: só os que ainda
+-- parecem realmente pendentes, não gravar tudo às cegas.
+--
+-- FEITO (commit + filtro na sequência, mesma transação de raciocínio):
+--   1. Rodado `trt_gera_prazos(..., true)` — gravou os 936 (ids 5879-6814).
+--   2. Deletados os que NÃO parecem mais "em aberto de verdade", usando só sinais que já
+--      temos no próprio banco (sem custo, sem chamada de API):
+--        - processo sem `cliente_id`... não, sem `processo_id` vinculado (167) — não dá pra
+--          julgar "ainda aberto" sem processo cadastrado, mesma disciplina dos 6 CNJs órfãos
+--          da seção 14 (cadastrar processo é decisão à parte, não bloqueia aqui).
+--        - processo com `situacao` diferente de "Ativo" (marcado arquivado/encerrado).
+--        - processo que já tem outro prazo MAIS NOVO gravado antes desta operação (o caso
+--          se moveu — o prazo antigo virou moot).
+--   Restaram **316 prazos** (de 936) — todos `status='estimado'`, `cumprido=false`,
+--   disponibilização entre 16/07/2025 e 02/09/2026. 23 deles já usam a regra nova N=8 (seção
+--   16, "ciência de Sentença"). 7 ainda sem cliente vinculado (processo existe, cliente não).
+--
+-- NÃO é garantia de 100% "ainda aberto" — é o melhor filtro dá pra fazer só com os dados que
+-- já temos, sem gastar em API por 936 consultas. Pode sobrar prazo falso-positivo (caso
+-- resolvido fora do sistema, sem deixar rastro de prazo mais novo aqui) — ela sabia disso e
+-- decidiu mesmo assim. Nenhum prazo pré-existente (`id<=5878`, qualquer status) foi tocado.
+--
+-- REVERTIDO na sequência (mesma conversa): ela viu que os 316 mantidos eram TODOS vencidos
+-- (nenhum de hoje pra frente — óbvio em retrospecto, já que a fonte é histórica) e pediu
+-- "deixa só os de hoje pra frente, os vencidos pode excluir". Como literalmente 0 dos 316
+-- tinham `data >= current_date`, isso equivale a desfazer o backfill inteiro — deletados os
+-- 316 (ids 5879-6814, conferido antes de apagar que TODOS tinham `data < current_date`).
+-- Banco voltou ao estado de antes da seção 17. A correção da fórmula (seções 15 e 16)
+-- continua valendo só pra atos futuros/dentro da janela normal do cron — não geramos mais
+-- retroativo de prazo já vencido.
