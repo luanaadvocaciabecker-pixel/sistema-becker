@@ -3702,8 +3702,310 @@ async function carregarAssessoriaCliente(clienteId){
     </div>
     <div class="card-body">${renderDemandasAssessoria(demandas||[],{comCliente:false})}</div>
   </div>
+  <div id="assessoria-contrato-docs-cl"></div>
+  <div id="assessoria-funcionarios-cl"></div>
+  <div id="assessoria-empresarial-cl"></div>
+  <div id="assessoria-elaborado-cl"></div>
+  <div id="assessoria-auditoria-cl"></div>
+  <div id="assessoria-processos-cl"></div>
   <div id="assessoria-docs-cl"></div>`;
+  carregarDocsCategoria(clienteId,'contrato_becker','assessoria-contrato-docs-cl');
+  carregarFuncionariosAssessoria(clienteId);
+  carregarDocsCategoria(clienteId,'empresarial','assessoria-empresarial-cl');
+  carregarDocsCategoria(clienteId,'elaborado','assessoria-elaborado-cl');
+  carregarAuditoriaAssessoria(clienteId);
+  carregarProcessosAssessoria(clienteId);
   carregarDocsCliente(clienteId,'assessoria-docs-cl');
+}
+
+// ---- Assessoria: pastas por cliente (Contrato Becker/Funcionários/Empresariais/Elaborados/
+// Auditoria/Processos) — ela mandou o desenho real do OneDrive: cada categoria abaixo é uma
+// pasta fixa dentro do cliente de assessoria, reaproveitando a MESMA tabela `documentos` e o
+// MESMO bucket já usados pelo resto do sistema (só ganhou as colunas categoria/subcategoria/
+// assessoria_funcionario_id, todas aditivas). Processos Judiciais/Administrativos NÃO viram
+// pasta de arquivo — puxam os processos que já existem no cadastro, filtrados por cliente
+// (ela foi explícita: só pode aparecer o que é realmente daquele acessorado).
+const SUBCATEGORIAS_ASSESSORIA={
+  contrato_becker:['Contrato de Prestação de Serviços','Aditivo Contratual'],
+  empresarial:['Contratos','Notificações','Termos','Outros'],
+  elaborado:['Pareceres','Notificações','Consultas','Outros'],
+  auditoria:['Auditoria Trabalhista','Auditoria Cível','Relatórios'],
+};
+const TITULOS_CATEGORIA_ASSESSORIA={
+  contrato_becker:'📄 Contrato Becker',
+  empresarial:'🏢 Documentos Empresariais',
+  elaborado:'✍️ Documentos Elaborados',
+  auditoria:'🔎 Auditoria — Arquivos',
+};
+async function carregarDocsCategoria(clienteId,categoria,elId){
+  const el=document.getElementById(elId);if(!el)return;
+  const res=await fetch(`${SUPA_URL}/rest/v1/documentos?cliente_id=eq.${clienteId}&categoria=eq.${categoria}&order=created_at.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+  const docs=res.ok?await res.json():[];
+  el.innerHTML=`
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <h3>${TITULOS_CATEGORIA_ASSESSORIA[categoria]||'Documentos'}</h3>
+      <button class="btn btn-primary btn-sm" onclick="uploadDocCategoria(${clienteId},'${categoria}','${elId}')">⬆️ Enviar Arquivo</button>
+    </div>
+    <div class="card-body">
+      ${!docs.length?'<div class="empty-state"><div class="icon">📁</div><p>Nenhum documento nesta pasta.</p></div>':`
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${docs.map(d=>`
+        <div class="doc-item">
+          <div style="font-size:24px;flex-shrink:0">${iconeDoc(d.nome||d.tipo||'')}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(d.nome||'Sem nome')}</div>
+            <div style="font-size:11px;color:#94a3b8">${d.subcategoria?escHtml(d.subcategoria)+' · ':''}${d.created_at?new Date(d.created_at).toLocaleDateString('pt-BR'):''}</div>
+          </div>
+          ${d.url?`<a href="${d.url}" target="_blank" class="btn btn-secondary btn-sm">⬇️ Baixar</a>`:''}
+          <button class="btn-icon" onclick="excluirDocCategoria(${d.id},${clienteId},'${categoria}','${elId}')" title="Excluir">🗑️</button>
+        </div>`).join('')}
+      </div>`}
+    </div>
+  </div>`;
+}
+function uploadDocCategoria(clienteId,categoria,elId){
+  const subs=SUBCATEGORIAS_ASSESSORIA[categoria]||[];
+  abrirModal('Enviar Documento',`<form id="form-doc-categoria">
+    ${subs.length?`<div class="form-field"><label>Subpasta</label>
+      <select name="subcategoria"><option value="">—</option>${subs.map(s=>`<option>${s}</option>`).join('')}</select>
+    </div>`:''}
+    <div class="form-field"><label>Arquivo *</label><input type="file" name="arquivo" required></div>
+  </form>`,async()=>{
+    const form=document.getElementById('form-doc-categoria');
+    const file=form.arquivo.files[0];
+    if(!file){toast('Selecione um arquivo.','erro');return false;}
+    const subcategoria=form.subcategoria?form.subcategoria.value:'';
+    toast('Enviando arquivo...','');
+    const path=`${clienteId}/${categoria}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+    const upRes=await fetch(`${SUPA_URL}/storage/v1/object/documentos-clientes/${path}`,{
+      method:'POST',
+      headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+      body:file
+    });
+    if(!upRes.ok){toast('Erro no upload.','erro');return false;}
+    const url=`${SUPA_URL}/storage/v1/object/public/documentos-clientes/${path}`;
+    const saveRes=await fetch(`${SUPA_URL}/rest/v1/documentos`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Prefer':'return=minimal'},
+      body:JSON.stringify({nome:file.name,tipo:file.type,url,cliente_id:clienteId,categoria,subcategoria:subcategoria||null})
+    });
+    if(!saveRes.ok){toast('Arquivo enviado mas erro ao salvar registro.','erro');return false;}
+    toast('✅ Arquivo enviado!','ok');
+    carregarDocsCategoria(clienteId,categoria,elId);
+  },'Enviar');
+}
+async function excluirDocCategoria(id,clienteId,categoria,elId){
+  if(!confirm('Excluir este documento?'))return;
+  await fetch(`${SUPA_URL}/rest/v1/documentos?id=eq.${id}`,{method:'DELETE',headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+  toast('Removido.','ok');carregarDocsCategoria(clienteId,categoria,elId);
+}
+
+// Funcionários: cadastro formal (nome/cargo/cpf), escopado por cliente — ela foi explícita que
+// tem que ficar "tudo dentro daquela acessória específica daquele comércio para não se perder".
+async function carregarFuncionariosAssessoria(clienteId){
+  const el=document.getElementById('assessoria-funcionarios-cl');if(!el)return;
+  const{data:funcs}=await supa.from('assessoria_funcionarios').select('*').eq('cliente_id',clienteId).order('nome');
+  el.innerHTML=`
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <h3>👥 Documentos de Funcionários</h3>
+      <button class="btn btn-primary btn-sm" onclick="novoFuncionarioAssessoria(${clienteId})">+ Novo Funcionário</button>
+    </div>
+    <div class="card-body">
+      ${!(funcs||[]).length?'<div class="empty-state"><div class="icon">👥</div><p>Nenhum funcionário cadastrado.</p></div>':
+      (funcs||[]).map(f=>`
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-header">
+          <div>
+            <h4 style="margin-bottom:2px">${escHtml(f.nome)}</h4>
+            <div style="font-size:12px;color:#94a3b8">${f.cargo?escHtml(f.cargo):''}${f.cpf?' · '+escHtml(f.cpf):''}</div>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="btn-icon" onclick="editarFuncionarioAssessoria(${f.id},${clienteId})" title="Editar">✏️</button>
+            <button class="btn-icon" onclick="excluirFuncionarioAssessoria(${f.id},${clienteId})" title="Excluir">🗑️</button>
+          </div>
+        </div>
+        <div class="card-body"><div id="assessoria-func-docs-${f.id}"></div></div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+  (funcs||[]).forEach(f=>carregarDocsFuncionario(clienteId,f.id,`assessoria-func-docs-${f.id}`));
+}
+function formFuncionarioAssessoria(d={}){
+  return`<div class="form-field"><label>Nome *</label><input name="nome" value="${escHtml(d.nome||'')}"></div>
+  <div class="form-field"><label>Cargo</label><input name="cargo" value="${escHtml(d.cargo||'')}"></div>
+  <div class="form-field"><label>CPF</label><input name="cpf" value="${escHtml(d.cpf||'')}"></div>`;
+}
+function novoFuncionarioAssessoria(clienteId){
+  abrirModal('Novo Funcionário',`<form id="form-func-assessoria">${formFuncionarioAssessoria()}</form>`,async()=>{
+    const d=coletarForm('form-func-assessoria');
+    if(!d.nome){toast('Informe o nome.','erro');return false;}
+    const{error}=await supa.from('assessoria_funcionarios').insert([{...d,cliente_id:clienteId}]);
+    if(error){toast('Erro ao salvar.','erro');return false;}
+    toast('Funcionário cadastrado!','ok');carregarFuncionariosAssessoria(clienteId);
+  },'Salvar');
+}
+async function editarFuncionarioAssessoria(id,clienteId){
+  const{data:f}=await supa.from('assessoria_funcionarios').select('*').eq('id',id).single();
+  if(!f)return;
+  abrirModal('Editar Funcionário',`<form id="form-func-assessoria">${formFuncionarioAssessoria(f)}</form>`,async()=>{
+    const d=coletarForm('form-func-assessoria');
+    if(!d.nome){toast('Informe o nome.','erro');return false;}
+    const{error}=await supa.from('assessoria_funcionarios').update(d).eq('id',id);
+    if(error){toast('Erro ao salvar.','erro');return false;}
+    toast('Atualizado!','ok');carregarFuncionariosAssessoria(clienteId);
+  },'Salvar');
+}
+function excluirFuncionarioAssessoria(id,clienteId){
+  abrirModal('Excluir Funcionário','Isso também remove os documentos vinculados a este funcionário. Confirma a exclusão?',async()=>{
+    await supa.from('assessoria_funcionarios').delete().eq('id',id);
+    toast('Removido.','ok');carregarFuncionariosAssessoria(clienteId);
+  },'Excluir',true);
+}
+async function carregarDocsFuncionario(clienteId,funcionarioId,elId){
+  const el=document.getElementById(elId);if(!el)return;
+  const res=await fetch(`${SUPA_URL}/rest/v1/documentos?assessoria_funcionario_id=eq.${funcionarioId}&order=created_at.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+  const docs=res.ok?await res.json():[];
+  el.innerHTML=`
+    <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+      <button class="btn btn-secondary btn-sm" onclick="uploadDocFuncionario(${clienteId},${funcionarioId},'${elId}')">⬆️ Enviar Arquivo</button>
+    </div>
+    ${!docs.length?'<div class="empty-state"><p style="font-size:12px">Nenhum documento.</p></div>':`
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${docs.map(d=>`
+      <div class="doc-item">
+        <div style="font-size:20px">${iconeDoc(d.nome||'')}</div>
+        <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(d.nome||'Sem nome')}</div></div>
+        ${d.url?`<a href="${d.url}" target="_blank" class="btn btn-secondary btn-sm">⬇️</a>`:''}
+        <button class="btn-icon" onclick="excluirDocFuncionario(${d.id},${clienteId},${funcionarioId},'${elId}')" title="Excluir">🗑️</button>
+      </div>`).join('')}
+    </div>`}`;
+}
+function uploadDocFuncionario(clienteId,funcionarioId,elId){
+  const inp=document.createElement('input');inp.type='file';
+  inp.onchange=async()=>{
+    const file=inp.files[0];if(!file)return;
+    toast('Enviando arquivo...','');
+    const path=`${clienteId}/funcionario_${funcionarioId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+    const upRes=await fetch(`${SUPA_URL}/storage/v1/object/documentos-clientes/${path}`,{
+      method:'POST',
+      headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+      body:file
+    });
+    if(!upRes.ok){toast('Erro no upload.','erro');return;}
+    const url=`${SUPA_URL}/storage/v1/object/public/documentos-clientes/${path}`;
+    const saveRes=await fetch(`${SUPA_URL}/rest/v1/documentos`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Prefer':'return=minimal'},
+      body:JSON.stringify({nome:file.name,tipo:file.type,url,cliente_id:clienteId,categoria:'funcionario',assessoria_funcionario_id:funcionarioId})
+    });
+    if(saveRes.ok){toast('✅ Arquivo enviado!','ok');carregarDocsFuncionario(clienteId,funcionarioId,elId);}
+    else toast('Arquivo enviado mas erro ao salvar registro.','erro');
+  };
+  inp.click();
+}
+async function excluirDocFuncionario(id,clienteId,funcionarioId,elId){
+  if(!confirm('Excluir este documento?'))return;
+  await fetch(`${SUPA_URL}/rest/v1/documentos?id=eq.${id}`,{method:'DELETE',headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+  toast('Removido.','ok');carregarDocsFuncionario(clienteId,funcionarioId,elId);
+}
+
+// Auditoria: arquivos (categoria='auditoria', reaproveita carregarDocsCategoria) + pendências
+// com status — ela pediu os dois ("Arquivos e criar pendência").
+async function carregarAuditoriaAssessoria(clienteId){
+  const el=document.getElementById('assessoria-auditoria-cl');if(!el)return;
+  const{data:pendencias}=await supa.from('assessoria_pendencias').select('*').eq('cliente_id',clienteId).order('created_at',{ascending:false});
+  el.innerHTML=`
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <h3>🔎 Auditoria — Pendências</h3>
+      <button class="btn btn-primary btn-sm" onclick="novaPendenciaAuditoria(${clienteId})">+ Nova Pendência</button>
+    </div>
+    <div class="card-body">${renderPendenciasAuditoria(pendencias||[],clienteId)}</div>
+  </div>
+  <div id="assessoria-auditoria-docs-cl"></div>`;
+  carregarDocsCategoria(clienteId,'auditoria','assessoria-auditoria-docs-cl');
+}
+function renderPendenciasAuditoria(lista,clienteId){
+  if(!lista.length)return'<div class="empty-state"><p>Nenhuma pendência registrada.</p></div>';
+  return`<div style="display:flex;flex-direction:column;gap:8px">${lista.map(p=>`
+    <div class="doc-item" style="align-items:flex-start">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:13px">${escHtml(p.titulo)}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:2px">${p.tipo?escHtml(p.tipo)+' · ':''}<span class="tag ${p.status==='Concluída'?'ativo':'aguardando'}">${escHtml(p.status)}</span></div>
+        ${p.descricao?`<div style="font-size:12px;color:#64748b;margin-top:4px">${escHtml(p.descricao)}</div>`:''}
+      </div>
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        ${p.status!=='Concluída'?`<button class="btn-icon" onclick="concluirPendenciaAuditoria(${p.id},${clienteId})" title="Marcar concluída">✔️</button>`:`<button class="btn-icon" onclick="reabrirPendenciaAuditoria(${p.id},${clienteId})" title="Reabrir">↩️</button>`}
+        <button class="btn-icon" onclick="excluirPendenciaAuditoria(${p.id},${clienteId})" title="Excluir">🗑️</button>
+      </div>
+    </div>`).join('')}</div>`;
+}
+function formPendenciaAuditoria(d={}){
+  return`<div class="form-field"><label>Título *</label><input name="titulo" value="${escHtml(d.titulo||'')}"></div>
+  <div class="form-field"><label>Tipo</label><input name="tipo" list="lista-tipo-auditoria" value="${escHtml(d.tipo||'')}">
+    <datalist id="lista-tipo-auditoria"><option>Trabalhista</option><option>Cível</option><option>Geral</option></datalist>
+  </div>
+  <div class="form-field"><label>Descrição</label><textarea name="descricao" rows="3">${escHtml(d.descricao||'')}</textarea></div>`;
+}
+function novaPendenciaAuditoria(clienteId){
+  abrirModal('Nova Pendência de Auditoria',`<form id="form-pendencia-auditoria">${formPendenciaAuditoria()}</form>`,async()=>{
+    const d=coletarForm('form-pendencia-auditoria');
+    if(!d.titulo){toast('Informe o título.','erro');return false;}
+    const{error}=await supa.from('assessoria_pendencias').insert([{...d,cliente_id:clienteId}]);
+    if(error){toast('Erro ao salvar.','erro');return false;}
+    toast('Pendência criada!','ok');carregarAuditoriaAssessoria(clienteId);
+  },'Salvar');
+}
+async function concluirPendenciaAuditoria(id,clienteId){
+  const{error}=await supa.from('assessoria_pendencias').update({status:'Concluída',concluido_em:new Date().toISOString(),concluido_por:carregarPerfilUsuario().nome}).eq('id',id);
+  if(error){toast('Erro ao atualizar.','erro');return;}
+  toast('Marcada como concluída.','ok');carregarAuditoriaAssessoria(clienteId);
+}
+async function reabrirPendenciaAuditoria(id,clienteId){
+  const{error}=await supa.from('assessoria_pendencias').update({status:'Pendente',concluido_em:null,concluido_por:null}).eq('id',id);
+  if(error){toast('Erro ao atualizar.','erro');return;}
+  toast('Reaberta.','ok');carregarAuditoriaAssessoria(clienteId);
+}
+async function excluirPendenciaAuditoria(id,clienteId){
+  if(!confirm('Excluir esta pendência?'))return;
+  await supa.from('assessoria_pendencias').delete().eq('id',id);
+  toast('Removida.','ok');carregarAuditoriaAssessoria(clienteId);
+}
+
+// Processos: NÃO é pasta de arquivo — puxa os processos já cadastrados no sistema, filtrados
+// por cliente_id. Ela foi explícita: "dentro de cada parte só vai aparecer o que é realmente
+// ou da panificadora ou do jhonis" (i.e. só os processos daquele acessorado específico).
+async function carregarProcessosAssessoria(clienteId){
+  const el=document.getElementById('assessoria-processos-cl');if(!el)return;
+  const[{data:judiciais},{data:administrativos}]=await Promise.all([
+    somenteProcessosPrincipais(supa.from('processos').select('id,numero,assunto,situacao')).eq('cliente_id',clienteId).order('created_at',{ascending:false}),
+    supa.from('processos_adm').select('id,numero_protocolo,orgao,assunto,situacao').eq('cliente_id',clienteId).order('created_at',{ascending:false})
+  ]);
+  el.innerHTML=`
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header"><h3>⚖️ Processos Judiciais</h3></div>
+    <div class="card-body">
+      ${!(judiciais||[]).length?'<div class="empty-state"><p>Nenhum processo judicial vinculado a este cliente.</p></div>':
+      (judiciais||[]).map(p=>`
+      <div class="doc-item" style="cursor:pointer" onclick="abrirProcesso(${p.id})">
+        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13px">${escHtml(p.numero||'')}</div><div style="font-size:12px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.assunto||'')}</div></div>
+        <span class="tag">${escHtml(p.situacao||'')}</span>
+      </div>`).join('')}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h3>🏛️ Processos Administrativos</h3></div>
+    <div class="card-body">
+      ${!(administrativos||[]).length?'<div class="empty-state"><p>Nenhum processo administrativo vinculado a este cliente.</p></div>':
+      (administrativos||[]).map(p=>`
+      <div class="doc-item" style="cursor:pointer" onclick="editarProcessoAdm(${p.id})">
+        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13px">${escHtml(p.numero_protocolo||p.orgao||'')}</div><div style="font-size:12px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.assunto||'')}</div></div>
+        <span class="tag">${escHtml(p.situacao||'')}</span>
+      </div>`).join('')}
+    </div>
+  </div>`;
 }
 
 // ---- Assessoria: tela cruzada "Demandas & Prazos" (isolada da tela de Prazos) ----
