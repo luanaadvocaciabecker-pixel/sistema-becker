@@ -6200,7 +6200,9 @@ async function pCibele(){
   const [rCl,rPr,rPz,rTk,rHon,rAlv,rAud]=await Promise.all([
     supa.from('clientes').select('id',{count:'exact'}),
     somenteProcessosPrincipais(supa.from('processos').select('id,situacao,advogado_responsavel,updated_at')),
-    supa.from('prazos').select('id',{count:'exact',head:true}).eq('cumprido',false).lte('data',hojStr),
+    // "decorrido" (perdemos o prazo) é data < hoje, nunca <=: vencer HOJE ainda dá tempo de
+    // agir, é a mesma semântica que _classPrazo() já usa pra separar 'hoje' de 'vencido'.
+    supa.from('prazos').select('id',{count:'exact',head:true}).eq('cumprido',false).lt('data',hojStr),
     supa.from('tarefas').select('id,status,responsavel,prazo,titulo').neq('status','Concluido').limit(300).catch(function(){return{data:[]};}),
     supa.from('honorarios').select('id,valor_total,status').limit(500),
     supa.from('alvaras').select('id,etapa,valor,processos(numero)').neq('etapa','Finalizado').limit(100).catch(function(){return{data:[]};}),
