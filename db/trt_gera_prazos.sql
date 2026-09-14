@@ -578,3 +578,12 @@
 -- já temos, sem gastar em API por 936 consultas. Pode sobrar prazo falso-positivo (caso
 -- resolvido fora do sistema, sem deixar rastro de prazo mais novo aqui) — ela sabia disso e
 -- decidiu mesmo assim. Nenhum prazo pré-existente (`id<=5878`, qualquer status) foi tocado.
+--
+-- REVERTIDO na sequência (mesma conversa): ela viu que os 316 mantidos eram TODOS vencidos
+-- (nenhum de hoje pra frente — óbvio em retrospecto, já que a fonte é histórica) e pediu
+-- "deixa só os de hoje pra frente, os vencidos pode excluir". Como literalmente 0 dos 316
+-- tinham `data >= current_date`, isso equivale a desfazer o backfill inteiro — deletados os
+-- 316 (ids 5879-6814, conferido antes de apagar que TODOS tinham `data < current_date`).
+-- Banco voltou ao estado de antes da seção 17. A correção da fórmula (seções 15 e 16)
+-- continua valendo só pra atos futuros/dentro da janela normal do cron — não geramos mais
+-- retroativo de prazo já vencido.
