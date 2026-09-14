@@ -5073,6 +5073,14 @@ function _corpoIntimacao(txt){
   const semCabecalho=s.replace(/^(?:\s*(?:Fonte|Termo monitorado|Link|Disponibiliza[çc][ãa]o|Data de disponibiliza[çc][ãa]o|Status do prazo|Destinat[áa]rio|ID do evento):[^\n]*\n*)+/i,'');
   return semCabecalho.replace(/\n{3,}/g,'\n\n').trim();
 }
+// Só para exibição no card de prazo: troca a notação interna "disp. dd/mm +H+N dias úteis"
+// (H = saltos de ciência, N = dias do prazo) por um texto legível. NUNCA usar no lugar de
+// p.descricao gravado — verPrazo() ainda depende do formato cru pra extrair o N (linha ~5119).
+function _descPrazoDisplay(desc){
+  const s=String(desc||'');
+  return s.replace(/ESTIMADO:\s*disp\.\s*(\d{2}\/\d{2})\s*\+[12]\+(\d+)\s*dias úteis/i,
+    'ESTIMADO: publicação em $1 · prazo de $2 dias úteis');
+}
 let _prazoAberto=null;   // guarda o prazo do modal, para o botão da IA não passar texto por atributo
 async function verPrazo(id){
   const{data:p}=await supa.from('prazos').select('*,processos(numero,advogado_responsavel,polo_cliente,polo_papeis,clientes(nome))').eq('id',id).single();
@@ -5353,7 +5361,7 @@ function renderPrazosLista(lista,comAcoes=false){
         <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
-        <h4>${p.descricao||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}${seloPetic}</h4>
+        <h4>${_descPrazoDisplay(p.descricao)||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}${seloPetic}</h4>
         <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${mostrarCli?`🧑 ${cliNome} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:' · <span style="color:#dc2626">⚠️ sem responsável</span>'}${p.classe?` · <span style="color:#64748b">${p.classe}</span>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${cls==='excedido'?' · <b style="color:#dc2626">PERDIDO — conferir se foi peticionado</b>':''}${naoConfirmado?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
         ${sug?`<p style="margin:4px 0 0"><span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:${sug==='custas'?'#d9770622':'#7c3aed22'};color:${sug==='custas'?'#b45309':'#6d28d9'}">🤖 IA sugere: ${sug==='custas'?'💰 Custas':'📎 Documentos'}${p.categoria_confianca?` · confiança ${p.categoria_confianca}`:''}</span>${p.categoria_motivo?` <span style="color:#94a3b8;font-size:11px">— ${p.categoria_motivo}</span>`:''}</p>`:''}
       </div>
