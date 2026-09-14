@@ -734,3 +734,49 @@
 -- contando 11/09 como suspenso quando o tribunal, na prática, não aplicou a suspensão a esse
 -- prazo específico (ela pode ter sido só de 1º grau, e esse processo já estar em 2º grau/TST
 -- — não confirmado). Fica registrado como discrepância aberta, não corrigido às cegas.
+
+-- ============================================================================================
+-- 14/09/2026 — CNJ 0010138-11.2026.5.15.0151 (Tania Aparecida da Silva x Banco J. Safra) NÃO
+-- é cliente da Becker Advocacia — é cliente do Dr. Umberto Becker (pai da Cibele), escritório/
+-- advogado diferente. Ela confirmou explicitamente: "os que são do Umberto não são nosso".
+--
+-- ORIGEM: esse CNJ era 1 dos 6 "processos órfãos" cadastrados em 13/09 (seção "conferência
+-- dos 3 prints... 13 CNJs") sem cliente identificável no texto — entrou com cliente_id=null e
+-- advogado_responsavel='Cibele Becker' só por padrão do formulário, nunca confirmado de
+-- verdade (processo id=6773).
+--
+-- NÃO bastava só deletar o processo: 20 publicações desde 02/02/2026 até 04/09/2026 (caso
+-- ativo, recorrente) — a próxima intimação desse CNJ ia gerar um prazo novo "(processo a
+-- vincular)" de novo, porque trt_gera_prazos processa qualquer ato trabalhista, sem filtrar
+-- por cliente.
+--
+-- FEITO:
+--   1. Nova tabela `processos_nao_nossos (cnj text primary key, motivo, criado_em,
+--      criado_por)` — mesmo padrão de `feriados`: uma tabela pequena que a função já lê
+--      sozinha, sem precisar mexer em código de novo a cada caso novo.
+--   2. `trt_gera_prazos` (CTE _cand) ganhou
+--      `and not exists (select 1 from processos_nao_nossos x where x.cnj = a.cnj)` no WHERE —
+--      a.cnj já vem em dígitos, bate exato com o cnj do ato_chave.
+--   3. INSERT em processos_nao_nossos pro CNJ 00101381120265150151.
+--   4. DELETE do processo id=6773 — cascata (prazos.processo_id e movimentacoes.processo_id
+--      são ON DELETE CASCADE, conferido via pg_constraint) apagou sozinha o único prazo aberto
+--      (id 5852, TRT-15, venceria 16/09) e as 33 movimentações; publicacoes.processo_id é ON
+--      DELETE SET NULL — as 20 publicações continuam gravadas, só voltaram a processo_id=null
+--      (mesmo estado de antes do cadastro errado de 13/09). Conferido antes: nenhum dado real
+--      do escritório ligado a esse processo (financeiro/documentos/atendimentos/audiências/
+--      tarefas/alvarás/petições/processo_clientes — todos zero).
+--
+-- CONFERIDO: dry-run trt_gera_prazos(current_date-1, current_date+1, false) não traz mais
+-- esse CNJ na lista de candidatos.
+--
+-- OS OUTROS 5 processos órfãos do mesmo lote de 13/09 (mesmo padrão: cliente_id=null,
+-- advogado_responsavel='Cibele Becker' só por padrão, nunca confirmado) foram listados pra ela
+-- com as partes de cada um, mas NENHUM foi tocado nesta rodada — só a Tania, que foi
+-- confirmada:
+--   0001933-49.2026.5.12.0030 (TRT-12) — GLAUCIA DOS SANTOS x CRISTIANE RAMOS
+--   0001732-38.2026.5.12.0004 (TRT-12) — JOSEFA ALINE BARBOZA x FERREIRA MÃO DE OBRA LTDA
+--   0011196-71.2026.5.15.0079 (TRT-15) — SILVIA BORGES DOS SANTOS x SAFRA CRÉDITO, FINANC. E
+--     INVESTIMENTO S.A. — mesmo padrão do caso da Tania (banco Safra como réu), vale conferir
+--   0011176-49.2023.5.15.0091 (TRT-15) — PAULO SERGIO ZAMPIERI E OUTROS (texto não deixa claro
+--     quem é recorrente/recorrido)
+--   0011220-44.2025.5.15.0044 (TRT-15) — EMERSON BONFIM FRANCISCO E OUTROS (3)
