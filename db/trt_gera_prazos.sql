@@ -1018,3 +1018,53 @@
 -- Não corrigido aqui, fica registrado: os ~124 atos "sem sinal claro" (10% do universo) ficam
 -- sem grau — comportamento seguro (não afirma nada errado), mas pode valer revisar o padrão de
 -- texto deles depois, se aparecer volume relevante.
+
+-- ============================================================================================
+-- 26) FIX: N=8 (não N=5) quando `classe` vem null mas o texto é claramente decisão de recurso —
+-- confirmado com a tela oficial do PJe (14/09/2026, mesma sessão)
+-- ============================================================================================
+-- Ela pediu exemplo de 3 pendências que eu tinha levantado (endereçamento errado, N=5×8 sem
+-- classe, keyword "apresent"). No exemplo do N=5×8 (mesmo prazo do Guilherme, id 6837, achado
+-- na seção 24), ela foi conferir a tela oficial "Expediente(s) do processo" do PJe antes de eu
+-- mexer em qualquer coisa — mesma disciplina de sempre.
+--
+-- Ela mandou 2 provas:
+--   1. Dados da decisão de 1º grau que RECEBE o Recurso Ordinário (disp. 10/04/2026): "DECISÃO
+--      - RECEBE RECURSO ORDINÁRIO" — confirma que TANTO o Guilherme (parte autora) QUANTO a
+--      Acredicoop (reclamada) recorreram, manda remeter os autos ao TRT. Não gera prazo de ação
+--      pra ninguém.
+--   2. Print da aba "2º grau" da mesma tela oficial: cada intimação de 2º grau sai em DUAS
+--      linhas espelhadas, uma por parte, sempre com o mesmo Prazo/Fim do Prazo. A linha mais
+--      recente: Data de Criação 01/09/2026, Data de Ciência 03/09/2026, **Prazo: 8, Fim do
+--      Prazo: 17/09/2026** — pra AMBAS as partes.
+--
+-- Isso resolveu 2 achados:
+--   - **Endereçamento não era engano.** O rodapé "Intimado(s)/Citado(s): ACREDICOOP" que o
+--     sistema capturou não significa que o prazo é só deles — a tela oficial mostra que o
+--     Guilherme tem a MESMA linha, mesmo Prazo. O Legal Mail (via OAB SC40082) só guardou 1 das
+--     2 cópias espelhadas; o prazo é nosso sim. Diferente do caso Sebastião/Rodalog (seção 22),
+--     que tinha 4 cópias reais e a errada gerou o prazo — aqui não existe segunda cópia nossa
+--     pra comparar, é só o TRT publicando pras duas partes como sempre faz em 2º grau.
+--   - **N=5×8 CONFIRMADO errado.** O sistema calculava 14/09 (disp. 02/09 +1+5, caiu no N=5
+--     padrão porque esse ato não tem `classe` coletada). A conta de datas está certa (disp. real
+--     01/09 + 1 dia útil = ciência 03/09, bate exato) — só o N que estava errado. Testado:
+--     `becker_dias_uteis(becker_dias_uteis('02/09',1,abr),8,abr)` = 17/09/2026, bate exato com o
+--     Fim do Prazo oficial.
+--
+-- MEDIDO antes de aplicar (mesma disciplina de sempre): dos 759 atos trabalhistas com
+-- `classe is null`, a regex `(?i)recebe recurso|admissibilidade do recurso|an[áa]lise de
+-- recurso|recurso (ordin[áa]rio|de revista|especial)\s+(interposto|tempestivo)` bate em 35.
+-- Amostra de 8 conferida no texto real: todos genuínos, em 2 formatos — decisão de
+-- admissibilidade ("OJC DE ANÁLISE DE RECURSO"/"ÓRGÃO ESPECIAL - ANÁLISE DE RECURSO", mesmo
+-- padrão do Guilherme) ou intimação pra CONTRARRAZÕES ("Fica V.Sa. intimado para contra-arrazoar
+-- o Recurso Ordinário interposto..." — prazo de contrarrazões também é 8 dias, mesma regra
+-- CLT). Nenhum falso positivo na amostra.
+--
+-- FEITO: `trt_gera_prazos` ganhou a condição `classe_null_recurso` (classe null + texto bate no
+-- padrão acima) em `n_base`, mesmo nível de prioridade do `classe ~* 'Recurso|Agravo'` já
+-- existente. Dos prazos ainda em aberto hoje, só o id 6837 tinha `classe is null` — corrigido
+-- direto (`data`/`data_prazo` → 17/09/2026, descricao atualizada de "+1+5" pra "+1+8"), sem
+-- mexer em status/cumprido (estava `estimado`, não `confirmado`/`cumprido`).
+--
+-- CONFERIDO: dry-run roda sem erro; nenhum outro prazo aberto com `classe is null` bate no
+-- padrão novo (só o 6837); valor calculado bate exato com a tela oficial do PJe.
