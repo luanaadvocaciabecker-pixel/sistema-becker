@@ -2802,6 +2802,64 @@ function novoClienteEVincular(processoId){
     toast('✅ Cliente cadastrado e vinculado!','ok');abrirProcesso(processoId);
   });
 }
+// ─── Vincular processo (e cliente) direto do prazo ─────────────────────────────────────
+// Pedido dela: prazos gerados pelo TRT sem processo correspondente ficam com processo_id
+// nulo — apareciam como "(processo a vincular)" sem nenhuma ação na tela. Mesmo padrão de
+// vincularClienteProcesso acima, só que pra processo: busca um já cadastrado ou cadastra um
+// novo (CNJ pré-preenchido, tirado de prazos.ato_chave via _cnjDoAtoChave). Cadastrar novo
+// processo aqui também aciona o trigger que já religa sozinho qualquer OUTRO prazo/publicação
+// órfã com o mesmo CNJ (ver seção "trigger reativo" em db/legalmail_webhook.sql) — não precisa
+// repetir essa lógica aqui.
+function vincularProcessoPrazo(prazoId,cnj){
+  abrirModal('🔗 Vincular processo',
+    `<label style="font-size:12px;color:#64748b">Buscar processo já cadastrado (número CNJ)</label>
+     <input id="vpp-busca" value="${escHtml(cnj||'')}" placeholder="Digite o número..." oninput="buscarProcessoPrazo(this.value,'${prazoId}')" style="width:100%;padding:9px;margin:4px 0 8px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto);font-family:monospace">
+     <div id="vpp-res" style="max-height:220px;overflow:auto;margin-bottom:10px"></div>
+     <div style="border-top:1px solid var(--border);padding-top:10px">
+       <button class="btn btn-secondary" style="width:100%" onclick="novoProcessoEVincularPrazo('${prazoId}','${cnj||''}')">+ Cadastrar novo processo</button>
+     </div>`,
+    null,'',false,true);
+  if(cnj)buscarProcessoPrazo(cnj,prazoId);
+}
+let _vppTimer=null;
+function buscarProcessoPrazo(q,prazoId){
+  clearTimeout(_vppTimer);
+  const el=document.getElementById('vpp-res');if(!el)return;
+  q=(q||'').trim();
+  if(q.length<3){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Digite ao menos 3 dígitos/letras.</p>';return;}
+  _vppTimer=setTimeout(async()=>{
+    const{data}=await supa.from('processos').select('id,numero,tribunal,clientes(nome)').ilike('numero','%'+q+'%').limit(20);
+    if(!data||!data.length){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Nenhum processo encontrado.</p>';return;}
+    el.innerHTML=data.map(pr=>`<div onclick="confirmarVinculoProcessoPrazo('${prazoId}',${pr.id})" style="padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer">
+      <div style="font-size:13px;color:var(--texto);font-family:monospace">${escHtml(pr.numero||'')}</div>
+      <div style="font-size:11px;color:#64748b">${pr.tribunal?escHtml(pr.tribunal)+' · ':''}${pr.clientes?.nome?escHtml(pr.clientes.nome):'sem cliente'}</div></div>`).join('');
+  },250);
+}
+async function confirmarVinculoProcessoPrazo(prazoId,processoId){
+  const{error}=await supa.from('prazos').update({processo_id:processoId}).eq('id',prazoId);
+  if(error){toast('Erro ao vincular: '+error.message,'erro');return;}
+  fecharModal();toast('✅ Processo vinculado.','ok');carregarPrazos();
+}
+// Mesma validação de novoProcesso() (numero/tribunal/cliente_id/advogado_responsavel
+// obrigatórios) — só acrescenta o UPDATE do prazo depois do INSERT do processo.
+function novoProcessoEVincularPrazo(prazoId,cnj){
+  carregarTodosClientes().then(()=>{
+    abrirModal('Cadastrar processo e vincular ao prazo',formProcesso({numero:cnj||''}),async()=>{
+      const d=coletarForm('form-processo');
+      if(!d.numero){toast('Número CNJ é obrigatório.','erro');return false;}
+      if(!d.tribunal){toast('Tribunal é obrigatório.','erro');return false;}
+      if(!d.cliente_id){toast('Selecione o cliente.','erro');return false;}
+      if(!d.advogado_responsavel){toast('Advogado responsável é obrigatório.','erro');return false;}
+      if(!d.advogado_auxiliar)delete d.advogado_auxiliar;
+      if(!d.secretaria_responsavel)delete d.secretaria_responsavel;
+      const{data,error}=await supa.from('processos').insert([d]).select().single();
+      if(error){toast('Erro: '+error.message,'erro');return false;}
+      const{error:e2}=await supa.from('prazos').update({processo_id:data.id}).eq('id',prazoId);
+      if(e2){toast('Processo cadastrado, mas erro ao vincular: '+e2.message,'erro');return false;}
+      toast('✅ Processo cadastrado e vinculado!','ok');carregarPrazos();
+    });
+  });
+}
 async function editarCliente(id){
   const{data}=await supa.from('clientes').select('*').eq('id',id).single();if(!data)return;
   abrirModal('Editar Cliente',formCliente(data),async()=>{
@@ -5081,6 +5139,12 @@ function _descPrazoDisplay(desc){
   return s.replace(/ESTIMADO:\s*disp\.\s*(\d{2}\/\d{2})\s*\+[12]\+(\d+)\s*dias úteis/i,
     'ESTIMADO: publicação em $1 · prazo de $2 dias úteis');
 }
+// prazos.ato_chave = 'cnj|data_disponibilizacao|ato_id' (ver verPrazo, mesmo split usado pra
+// tirar a data). Primeiro pedaço é o CNJ em dígitos — usado pra pré-preencher o cadastro de
+// processo quando o prazo ainda não tem processo_id.
+function _cnjDoAtoChave(ato_chave){
+  return String(ato_chave||'').split('|')[0]||'';
+}
 let _prazoAberto=null;   // guarda o prazo do modal, para o botão da IA não passar texto por atributo
 async function verPrazo(id){
   const{data:p}=await supa.from('prazos').select('*,processos(numero,advogado_responsavel,polo_cliente,polo_papeis,clientes(nome))').eq('id',id).single();
@@ -5129,7 +5193,7 @@ async function verPrazo(id){
 
   const bloco=`
   <div style="font-size:12px;color:#94a3b8;margin-bottom:10px">
-    ${p.processos?.clientes?.nome?escHtml(p.processos.clientes.nome):(p.processo_id?`<button class="btn btn-sm btn-secondary" onclick="fecharModal();vincularClienteProcesso('${p.processo_id}')">🔗 Vincular/Cadastrar cliente</button>`:'(cliente a vincular)')}
+    ${p.processos?.clientes?.nome?escHtml(p.processos.clientes.nome):(p.processo_id?`<button class="btn btn-sm btn-secondary" onclick="fecharModal();vincularClienteProcesso('${p.processo_id}')">🔗 Vincular/Cadastrar cliente</button>`:`<button class="btn btn-sm btn-secondary" onclick="fecharModal();vincularProcessoPrazo('${p.id}','${_cnjDoAtoChave(p.ato_chave)}')">🔗 Vincular processo</button>`)}
     ${p.processos?.numero?' · Proc. '+escHtml(p.processos.numero):''}
     ${pub?.tribunal?' · '+escHtml(pub.tribunal):''}
     ${p.processos?.advogado_responsavel?' · 👤 '+escHtml(_advCurto(p.processos.advogado_responsavel)):' · <span style="color:#dc2626">⚠️ sem responsável</span>'}
@@ -5367,6 +5431,7 @@ function renderPrazosLista(lista,comAcoes=false){
       </div>
       ${comAcoes?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
         <button class="btn-icon" title="Ver a intimação e o que é para fazer" onclick="verPrazo('${p.id}')">👁️</button>
+        ${!p.processo_id?`<button class="btn btn-sm" style="background:#fef3c7;color:#b45309;font-weight:700" title="Vincular ou cadastrar o processo (e o cliente) deste prazo" onclick="vincularProcessoPrazo('${p.id}','${_cnjDoAtoChave(p.ato_chave)}')">🔗 Vincular processo</button>`:''}
         ${sug?`<button class="btn btn-sm" style="background:${sug==='custas'?'#fef3c7':'#ede9fe'};color:${sug==='custas'?'#b45309':'#6d28d9'};font-weight:700" title="Confirmar a sugestão da IA" onclick="setCatPrazo('${p.id}','${sug}')">✓ Confirmar ${sug==='custas'?'💰':'📎'}</button>`:''}
         ${!p.cumprido?`<button class="btn-icon" title="Marcar: recolher custas" style="opacity:${p.categoria==='custas'?1:.4}" onclick="setCatPrazo('${p.id}','custas')">💰</button>
         <button class="btn-icon" title="Marcar: apresentar documento" style="opacity:${p.categoria==='documentos'?1:.4}" onclick="setCatPrazo('${p.id}','documentos')">📎</button>`:''}
