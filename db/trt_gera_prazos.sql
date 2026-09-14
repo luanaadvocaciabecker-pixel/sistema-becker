@@ -1068,3 +1068,45 @@
 --
 -- CONFERIDO: dry-run roda sem erro; nenhum outro prazo aberto com `classe is null` bate no
 -- padrão novo (só o 6837); valor calculado bate exato com a tela oficial do PJe.
+
+-- ============================================================================================
+-- 27) FIX: categoria "documentos" errada por causa da keyword "apresent" capturando forma
+-- passada — confirmado com o número do processo que ela pediu (14/09/2026, mesma sessão)
+-- ============================================================================================
+-- Terceira e última das 3 pendências levantadas nesta sessão (endereçamento errado e N=5×8 sem
+-- classe resolvidas na seção 26). Ela pediu o número do processo do exemplo (Bertole Doces
+-- Artesanais, 0000449-39.2025.5.12.0028, prazo id 6828) pra conferir na tela oficial do PJe
+-- antes de eu mexer em qualquer coisa. Confirmou: Bertole é mesmo nossa cliente (reclamada) no
+-- 1º grau, e a data que o sistema calcula (15/09) já bate com a ciência oficial (04/09) + 5
+-- dias úteis — só a categoria estava errada, não a data.
+--
+-- `lm_categoria_prazo(t)` categorizava 'documentos' com o keyword bruto `apresent` (substring,
+-- casa QUALQUER forma da palavra). O problema: várias formas descrevem algo que JÁ foi
+-- apresentado por alguém (narração de fato passado), não uma ordem pro nosso cliente apresentar
+-- algo agora:
+--   - id 6828 (Bertole, disp. 03/09): "a contraproposta **apresentada** dê-se ciência...
+--     eventual **apresentação** de acordo" — descreve proposta já feita e possibilidade de
+--     acordo/pagamento antes de bloqueio Sisbajud, não ordem de apresentar documento.
+--   - id 6829 (Bertole, disp. 14/09, mesmo processo): "a proposta ora **apresentada** pela ré
+--     dê-se ciência ao autor" — mesmo padrão.
+--   - id 5731: "Não foi **apresentada** contraminuta" — negação de fato passado, mesmo padrão,
+--     mas esse prazo já está `ENCERRADO EM BLOCO` (fora da fila) — não mexido, mesma regra de
+--     sempre.
+--
+-- Medido contra os 13 prazos abertos hoje com categoria='documentos' e alguma forma de
+-- "apresent" no texto: conferido o contexto de cada um manualmente (id 6836, 6847, 6861, 6863,
+-- 6866, 6872 usam formas de ordem/faculdade real — "apresentando planilha", "apresentar
+-- Recurso de Revista", "apresentação de contrarrazões" — continuam 'documentos' corretamente;
+-- id 6868 usa "apresentam" narrando o que as partes já fizeram, mesmo tipo de falso positivo
+-- mas em forma verbal diferente — registrado, não corrigido nesta rodada, generalizar mais
+-- exige mais exemplos).
+--
+-- FEITO: troca do keyword bruto `apresent` por uma checagem em 2 passos — remove do texto as
+-- formas `apresentad[oa]s?` (particípio passado) e `eventual\s+apresenta[çc][ãa]o` (substantivo
+-- em contexto hipotético) antes de checar se ainda sobra "apresent" no texto. Testado contra os
+-- 11 textos relevantes antes de aplicar: só 6828, 6829, 5731 e 6837 (Guilherme, já corrigido na
+-- mão antes) saem sem o sinal — os outros 6 continuam batendo por formas reais de ordem. Bate
+-- exato com a classificação manual por leitura de contexto.
+--
+-- Prazos abertos hoje corrigidos: 6828 e 6829 (Bertole), categoria → 'geral'. Nenhum outro
+-- prazo aberto muda (conferido antes de aplicar).
