@@ -680,3 +680,15 @@
 -- Os outros ~58 prazos recalculados são `encerrado`/`descartado` (já fechados sem
 -- conferência individual antes) ou `confirmado` com data ainda confortavelmente no futuro —
 -- só correção de registro histórico, sem ação pendente.
+--
+-- REVISADO na sequência (mesma conversa): ela achou normal os 3 confirmado ficarem vencidos
+-- ("não tem problema") e deu a regra final, igual à da seção 17: **excluir tudo que, depois
+-- da correção, ficou com data < hoje — não importa se era confirmado, encerrado ou
+-- descartado — e manter (pra conferência manual) só o que continua com data >= hoje.**
+-- Reafirma a regra de sempre ("vencido já não faz mais nada, não tem porque mostrar") — os 3
+-- confirmado-agora-vencidos entram na mesma lógica, não são exceção.
+--
+-- Deletados 43 dos 64 (os com `data < current_date` depois da seção 19, incluindo os 3
+-- confirmado): 3 confirmado + 40 encerrado. Mantidos 19 com `data >= current_date` — todos os
+-- `confirmado` que sobraram (incluindo o Recurso de Revista, id 5775, agora 18/09) e alguns
+-- `encerrado`/`descartado` cuja data recalculada bateu ser hoje/futuro por coincidência.
