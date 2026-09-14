@@ -959,3 +959,62 @@
 -- recurso que não foram admitidos. Lado seguro (avisa 3 dias antes, nunca depois), não
 -- corrigido nesta migration — decisão de generalizar por padrão de texto (não só classe) fica
 -- pra depois, se ela confirmar que quer.
+
+-- ============================================================================================
+-- 25) NOVO: marcação de 1º/2º grau (TRT) nos prazos — texto do despacho, não CNJ (14/09/2026,
+-- mesma sessão)
+-- ============================================================================================
+-- Ela apontou: "você também não está marcando o que é 1º ou 2º grau nos TRT". Existia só
+-- `_tribunalCNJ` (site/index.html), usada só na exportação CSV, que deriva grau pelos dígitos
+-- do CNJ (órgão julgador '0000' = 2º grau) — regra validada e correta pra TJ (confirmado contra
+-- a planilha dela: "...8.24.0000=TJSC 2G, ...8.24.0038=TJSC 1G"), mas ERRADA pra TRT/PJe: nessa
+-- Justiça o número do processo NÃO muda entre 1º e 2º grau (mesmo CNJ do início ao fim, inclusive
+-- quando sobe pro TST) — confirmado tanto pelas telas "Expediente(s) do processo" dela (abas
+-- "1º grau/2º grau/TST" pro MESMO número) quanto testando direto: o CNJ do Guilherme
+-- (0001024-22.2025.5.12.0004, órgão '0004'≠'0000') é 2º grau de verdade. Cheguei a implementar
+-- e quase publicar uma versão reaproveitando a regra do CNJ pro TRT — testei contra o CNJ do
+-- Guilherme ANTES de commitar, deu resposta errada ("1º grau"), revertido sem nada publicado.
+--
+-- Perguntei a ela se queria usar só `classe` (só ~37% de cobertura, mas 100% seguro) ou também
+-- investigar o texto do despacho (mais cobertura, precisa validar) — ela escolheu investigar o
+-- texto.
+--
+-- MEDIDO (`publicacoes_atos`, sem coluna própria de órgão julgador — só texto puro): não dá pra
+-- confiar em presença simples da palavra ("vara do trabalho" aparece em 952 atos, "turma" em
+-- 156, mas 35 têm as duas — ato de 2º grau que cita "Vara de origem" no corpo). Olhando esses 35
+-- casos: atos de 2º grau (classes ROT/RORSum/AP) trazem "Turma" no CABEÇALHO; atos de 1º grau
+-- (classe ATOrd) trazem "Xª Vara do Trabalho de [cidade]" direto no cabeçalho, sem "Turma".
+--
+-- HEURÍSTICA: dentro dos primeiros 400 caracteres do texto (cabeçalho), qual sinal aparece
+-- PRIMEIRO — `turma|desembargador|relator[a]?:|minist[ér]o` (2º grau/TST) vs `vara do trabalho|
+-- juiz(a) do trabalho` (1º grau). Testada contra o universo completo de atos TRT/TST (1212):
+-- 908 marcados "1º grau", 180 "2º grau/TST", 124 "sem sinal claro" (fica sem selo, não força
+-- resposta errada) — ~90% de cobertura. Validada contra 2 casos reais conhecidos: CNJ do
+-- Sebastião/Rodalog (100% "1º grau", processo nunca saiu da fase de conhecimento) e CNJ do
+-- Guilherme (transição exata: "1º grau" até 10/04/2026, "2º grau/TST" a partir de 16/04/2026,
+-- incluindo o despacho de 02/09/2026 que ela perguntou sobre — bate com o processo ter subido
+-- de verdade pro TST).
+--
+-- FEITO:
+--   1. `trt_gera_prazos` ganhou 2 colunas internas (`_pos2`, `_pos1`, posição do primeiro sinal
+--      de cada grau nos 400 primeiros caracteres) e uma 3ª (`grau`, texto '1º grau' / '2º grau/
+--      TST' / null) — grau é anexado na `descricao` do prazo (" · GRAU" antes do " — ESTIMADO"/
+--      " — AUDIÊNCIA MARCADA"), sem quebrar os regexes existentes que leem `descricao`
+--      (`_descPrazoDisplay`, o "Conta:" de `verPrazo`) — nenhum dos dois toca a parte antes do
+--      "—".
+--   2. Retroativo: os 31 prazos TRT ainda abertos (`cumprido=false`, `fonte` DJEN/calculado ou
+--      DJEN/audiencia) tiveram a `descricao` atualizada com o grau também — 28 ganharam grau
+--      (inclusive o id 6837, Guilherme, corretamente "2º grau/TST"), 3 ficaram sem sinal claro
+--      (descricao não mudou).
+--   3. `site/index.html`: selo "⬆ 2º grau/TST" no card (`renderPrazosLista`, só aparece quando
+--      detectado — "1º grau" é o padrão, não precisa chamar atenção) e a mesma informação na
+--      linha de cabeçalho do modal (`verPrazo`), extraída de `p.descricao` por regex (mesmo
+--      padrão já usado ali pra extrair o N de dias úteis).
+--
+-- CONFERIDO: reprodução exata da medição (908/180/124) e da validação Sebastião/Guilherme antes
+-- de tocar a função ao vivo; `node --check` no JS extraído; card e modal exibem o selo
+-- corretamente pro id 6837.
+--
+-- Não corrigido aqui, fica registrado: os ~124 atos "sem sinal claro" (10% do universo) ficam
+-- sem grau — comportamento seguro (não afirma nada errado), mas pode valer revisar o padrão de
+-- texto deles depois, se aparecer volume relevante.
