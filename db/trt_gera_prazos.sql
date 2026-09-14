@@ -815,3 +815,58 @@
 --
 -- CONFERIDO: dry-run trt_gera_prazos('2020-01-01', current_date+1, false) não traz mais
 -- nenhum desses 21 CNJs, em nenhuma janela.
+
+-- ============================================================================================
+-- 22) REVERTIDA a seção 15 — "+2 saltos" estava errada, direção perigosa (14/09/2026, mesmo
+-- dia da seção 15, mesma sessão)
+-- ============================================================================================
+-- A seção 15 (aplicada mais cedo hoje) trocou becker_dias_uteis(disp,1,abr) por
+-- becker_dias_uteis(disp,2,abr), validada contra 3 "prints do tribunal". Essa validação
+-- estava errada — mesmo padrão já visto no caso do Recurso de Revista (tribunal pode exibir
+-- prazo diferente do real em telas menos autoritativas, tipo "Meus Expedientes" em PDF).
+--
+-- PROVA (mais forte que print): ela mandou a tela oficial "Expediente(s) do processo" do
+-- PJe — a tabela que lista TODAS as intimações do processo com Data de Ciência, Prazo (dias)
+-- e Fim do Prazo, calculados pela coluna "Confirmado por: Sistema" (o próprio PJe, não uma
+-- interpretação de terceiro). 9 linhas reais do processo 0000840-51.2026.5.12.0030 (Sebastião
+-- Marcal de Freitas x Rodalog), destinatários variados (Rodalog e Sebastião), prazos de 5/8/
+-- 10/15 dias. Testei a fórmula do sistema contra as 9: **8 de 9 bateram exato usando só 1
+-- salto** (ciência = disp + 1 dia útil, +N dias úteis direto — SEM o salto extra pro "início
+-- da contagem" que a seção 15 introduziu). A única que não bateu foi uma "Notificação" (não
+-- "Intimação"), meio "Domicílio Eletrônico" — tipo de expedição diferente, regra própria, não
+-- invalida o padrão.
+--
+-- Isso também resolveu, de quebra, uma dúvida real: o card do Sebastião (id 5863/6833, disp
+-- 01/09) que ela mandou print achando estar "vencendo hoje" — a intimação em questão é dirigida
+-- à RÉ (Rodalog), não a nós (confirmado pelo rodapé "Intimado(s)/Citado(s): RODALOG..." em
+-- todas as 4 cópias do ato, e pela própria tabela do PJe, que lista essa linha com
+-- destinatário Rodalog). Não é prazo nosso, independente da fórmula de data.
+--
+-- FEITO:
+--   1. `becker_dias_uteis(disp,2,abr)` revertido para `becker_dias_uteis(disp,1,abr)` em
+--      `trt_gera_prazos` — descrição volta a dizer "+1+N dias úteis".
+--   2. 37 prazos com `fonte='DJEN/calculado'` e `+2+` na descrição (`status` estimado ou
+--      confirmado) foram deletados pelo id exato e regerados via
+--      `trt_gera_prazos('2026-08-25','2026-09-14',true)` — a janela larga também capturou
+--      atos que nunca tinham gerado prazo, então o total final ficou maior que 37 (esperado,
+--      mesmo padrão de janelas largas já usado nesta sessão).
+--   3. `trt_gera_prazos` sempre grava como `status='estimado'` — os 11 que estavam
+--      `confirmado` (confirmados em cima da data ERRADA) voltaram pra fila "a conferir" com a
+--      data corrigida. Isso é o comportamento certo: a confirmação anterior valeu pra uma data
+--      que não existe mais.
+--   4. Dos recalculados, 23 ficaram vencidos com a correção (incluindo o id do
+--      Sebastião/Rodalog, que sai por ser da parte contrária, e um dos "outros 5" pendentes —
+--      Paulo Sergio Zampieri — que fica registrado à parte, sem decidir se é nosso ou não) —
+--      excluídos, mesma regra já usada hoje pro N=8→15 e pro feriado TRT-12 ("vencido depois
+--      de correção de fórmula não fica, futuro fica pra conferência").
+--   5. **ATENÇÃO IMEDIATA**: 2 dos que eram `confirmado` (Adna Paola Batista Breitenbach e
+--      Guilherme Hoepers Meneghelli, ambos disp. 02/09, TRT-12) tinham sido confirmados com
+--      data 15/09 — a fórmula corrigida mostra que o prazo real é HOJE (14/09). Avisado a ela
+--      diretamente no chat, fora deste arquivo.
+--
+-- Achado separado, NÃO corrigido aqui (fica pra depois): `trt_gera_prazos` não confere se a
+-- intimação é dirigida ao nosso cliente (reclamante) ou à parte contrária (reclamado) antes de
+-- gerar prazo — só olha se o texto bate com padrões conhecidos. O caso do Sebastião/Rodalog
+-- mostra que isso pode gerar prazo nosso por engano quando a ordem é claramente pra outra
+-- parte. Precisa de investigação própria (quantos outros prazos abertos hoje têm esse mesmo
+-- problema) antes de decidir como resolver.
