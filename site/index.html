@@ -2158,6 +2158,15 @@ function renderSidebarMenu(){
       ['novo-extrajudicial','plus','Novo Extrajudicial',"ir('extrajudiciais');setTimeout(()=>novoProcessoAdm&&novoProcessoAdm(),250)"],
       ['documentos','folder','Documentos']
     ])}
+    ${/* 14/09/2026: grupo próprio, não subitem de Extrajudiciais nem só aba da ficha do
+         cliente — pedido dela: "igual tem independente a parte processos e a parte
+         extrajudicial e Becker IA, então assessoria é outro independente dos outros". Prazos
+         de demanda de assessoria (assessoria_demanda_prazos) são propositalmente isolados de
+         `prazos`/`renderPrazosLista` — nunca aparecem na tela de Prazos nem nos alertas. */ ''}
+    ${grupoMenu('assessoria','handshake','Assessoria','assessoria-clientes',[
+      ['assessoria-clientes','handshake','Clientes'],
+      ['assessoria-demandas','clock','Demandas & Prazos']
+    ])}
     ${/* DJEN oculto do menu (redundante com o Legal Mail; 10.905 publicações não lidas e 0 prazos gerados). Robô/tabela/páginas preservados — reativar: restaurar este grupoMenu. */ ''}
     ${grupoMenu('alvaras','alvara','Alvarás','alvaras',[
       ['novo-alvara','plus','Novos Alvarás',"ir('alvaras');setTimeout(()=>novoAlvara&&novoAlvara(),250)"],['alvaras','clock','Aguardando Saque'],['alvaras','bank','Sacados'],['alvaras','money','Repassados'],['alvaras','check','Finalizados']
@@ -2269,6 +2278,7 @@ const GRUPO_POR_PAGINA={
   processos:'judiciais',judiciais:'judiciais',movimentacoes:'judiciais',prazos:'judiciais',audiencias:'judiciais',datajud:'judiciais',documentos:'judiciais',
   administrativos:'administrativos',
   extrajudiciais:'extrajudiciais',
+  'assessoria-clientes':'assessoria','assessoria-demandas':'assessoria',
   djen:'djen',
   alvaras:'alvaras',
   financeiro:'financeiro',cartorio:'financeiro',cobrancas:'financeiro',nfe:'financeiro',relatorios:'financeiro',
@@ -2413,6 +2423,8 @@ function ir(pagina){
     movimentacoes:['Movimentações','Histórico processual'],
     documentos:['Documentos','Arquivos e documentos'],
     extrajudiciais:['Extrajudiciais','Casos sem processo judicial — notificações, acordos, negociações e órgãos'],
+    'assessoria-clientes':['Assessoria','Clientes com contrato de acompanhamento contínuo'],
+    'assessoria-demandas':['Assessoria — Demandas & Prazos','Demandas e prazos da assessoria, isolados da tela de Prazos'],
     djen:['DJEN','Publicações novas, pendentes, lidas e vinculadas'],
     atendimento:['Atendimento','Atendimentos, áudios e geração de documentos'],
     contratos:['Contratos','Módulo administrativo — contratos'],
@@ -2435,6 +2447,7 @@ function ir(pagina){
     administrativos:pAdministrativos,judiciais:pJudiciais,
     movimentacoes:pMovimentacoes,prazos:pPrazos,audiencias:pAudiencias,publicacoes:pPublicacoes,'novos-negocios':pNovosNegocios,
     financeiro:pFinanceiro,documentos:pDocumentos,datajud:pDatajud,
+    'assessoria-clientes':pAssessoriaClientes,'assessoria-demandas':pAssessoriaDemandas,
     config:pConfig,contratos:pModuloSimples,cartorio:pModuloSimples,
     nfe:pModuloSimples,documentacao:pModuloSimples,extrajudiciais:pAdministrativos,djen:pDjen,atendimento:pAtendimento,tarefas:pTarefas,alvaras:pAlvaras,
     estatisticas:pDesempenho,desempenho:pDesempenho,cibele:pCibele,usuarios:pUsuarios,
@@ -3056,17 +3069,23 @@ async function carregarTimelineCliente(clienteId){
 }
 
 // ---- DOCUMENTOS POR CLIENTE ----
-async function carregarDocsCliente(clienteId){
-  const el=document.getElementById('docs-cl');if(!el)return;
-  const res=await fetch(`${SUPA_URL}/rest/v1/documentos?cliente_id=eq.${clienteId}&select=*,processos(numero)&order=criado_em.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
+// `elId` deixa esta mesma função (e o upload/link/exclusão) renderizar em qualquer container —
+// hoje usada pela aba Documentos da ficha (padrão, 'docs-cl') e pela página de Assessoria
+// ('assessoria-docs-cl'), sem tabela nem upload novo.
+// 14/09/2026: corrigido `order=criado_em.desc` → `created_at.desc` — a coluna real da tabela
+// `documentos` é `created_at` (`criado_em` nunca existiu); a ordenação estava sendo ignorada
+// pelo PostgREST desde sempre.
+async function carregarDocsCliente(clienteId,elId='docs-cl'){
+  const el=document.getElementById(elId);if(!el)return;
+  const res=await fetch(`${SUPA_URL}/rest/v1/documentos?cliente_id=eq.${clienteId}&select=*,processos(numero)&order=created_at.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
   const docs=res.ok?await res.json():[];
   el.innerHTML=`
   <div class="card">
     <div class="card-header">
       <h3>📄 Documentos do Cliente</h3>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-primary btn-sm" onclick="uploadDocCliente(${clienteId})">⬆️ Enviar Arquivo</button>
-        <button class="btn btn-secondary btn-sm" onclick="novoDocLink(${clienteId})">🔗 Adicionar Link</button>
+        <button class="btn btn-primary btn-sm" onclick="uploadDocCliente(${clienteId},'${elId}')">⬆️ Enviar Arquivo</button>
+        <button class="btn btn-secondary btn-sm" onclick="novoDocLink(${clienteId},'${elId}')">🔗 Adicionar Link</button>
       </div>
     </div>
     <div class="card-body">
@@ -3077,11 +3096,11 @@ async function carregarDocsCliente(clienteId){
           <div style="font-size:24px;flex-shrink:0">${iconeDoc(d.nome||d.tipo||'')}</div>
           <div style="flex:1;min-width:0">
             <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.nome||'Sem nome'}</div>
-            <div style="font-size:11px;color:#94a3b8;margin-top:1px">${d.processos?.numero?'📋 '+d.processos.numero+' · ':''}${d.criado_em?new Date(d.criado_em).toLocaleDateString('pt-BR'):''}</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:1px">${d.processos?.numero?'📋 '+d.processos.numero+' · ':''}${d.created_at?new Date(d.created_at).toLocaleDateString('pt-BR'):''}</div>
             ${d.observacao?`<div style="font-size:11px;color:#64748b;margin-top:2px">${d.observacao}</div>`:''}
           </div>
           ${d.url?`<a href="${d.url}" target="_blank" class="btn btn-secondary btn-sm" style="white-space:nowrap">⬇️ Baixar</a>`:''}
-          <button class="btn-icon" onclick="excluirDocCliente(${d.id},${clienteId})" title="Excluir">🗑️</button>
+          <button class="btn-icon" onclick="excluirDocCliente(${d.id},${clienteId},'${elId}')" title="Excluir">🗑️</button>
         </div>`).join('')}
       </div>`}
     </div>
@@ -3096,7 +3115,7 @@ function iconeDoc(nome){
   return'📄';
 }
 
-function uploadDocCliente(clienteId){
+function uploadDocCliente(clienteId,elId='docs-cl'){
   const inp=document.createElement('input');
   inp.type='file';
   inp.accept='.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt,.zip';
@@ -3120,13 +3139,13 @@ function uploadDocCliente(clienteId){
       headers:{'Content-Type':'application/json',apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`,'Prefer':'return=minimal'},
       body:JSON.stringify({nome:file.name,tipo:file.type,url,cliente_id:clienteId})
     });
-    if(saveRes.ok){toast('✅ Arquivo enviado!','ok');carregarDocsCliente(clienteId);}
+    if(saveRes.ok){toast('✅ Arquivo enviado!','ok');carregarDocsCliente(clienteId,elId);}
     else toast('Arquivo enviado mas erro ao salvar registro.','erro');
   };
   inp.click();
 }
 
-function novoDocLink(clienteId){
+function novoDocLink(clienteId,elId='docs-cl'){
   abrirModal('Adicionar Link de Documento',`<form id="form-doc-link">
     <div class="form-field"><label>Nome do Documento *</label><input name="nome" placeholder="Ex: Contrato Social, RG, CNH..."></div>
     <div class="form-field"><label>URL / Link *</label><input name="url" type="url" placeholder="https://drive.google.com/... ou https://onedrive.live.com/..."></div>
@@ -3140,17 +3159,17 @@ function novoDocLink(clienteId){
       body:JSON.stringify({...d,cliente_id:clienteId})
     });
     if(!res.ok){toast('Erro ao salvar.','erro');return false;}
-    toast('Link adicionado!','ok');carregarDocsCliente(clienteId);
+    toast('Link adicionado!','ok');carregarDocsCliente(clienteId,elId);
   });
 }
 
-async function excluirDocCliente(id,clienteId){
+async function excluirDocCliente(id,clienteId,elId='docs-cl'){
   if(!confirm('Excluir este documento?'))return;
   await fetch(`${SUPA_URL}/rest/v1/documentos?id=eq.${id}`,{
     method:'DELETE',
     headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}
   });
-  toast('Removido.','ok');carregarDocsCliente(clienteId);
+  toast('Removido.','ok');carregarDocsCliente(clienteId,elId);
 }
 
 // ---- ATENDIMENTOS ----
@@ -3304,6 +3323,391 @@ function formCliente(d={}){return`<form id="form-cliente">
   </div>
   <div class="form-field"><label>Observações</label><textarea name="observacoes">${d.observacoes||''}</textarea></div>
 </form>`;}
+
+// ---- ASSESSORIA ----
+// Cliente com contrato de acompanhamento contínuo (assessoria continuada) — contratos, cartas,
+// políticas, certidões e demandas soltas que só às vezes viram processo de verdade. Pedido dela
+// depois de mostrar a estrutura real no OneDrive (dezenas de pastas por cliente, sem taxonomia
+// fixa: "Advertência Valdemira", "Aposentadoria Joni" etc.). O centro disso pra ela é cuidar do
+// PRAZO de cada demanda — não replicar pasta (isso fica pra depois, se ela pedir).
+//
+// Grupo de menu PRÓPRIO (não subitem de Extrajudiciais, não aba da ficha do cliente) — ela
+// pediu independência igual Processos/Extrajudicial/Becker IA têm.
+//
+// Prazo de demanda de assessoria é isolado por desenho: tabela própria
+// (assessoria_demanda_prazos), nunca lida por carregarPrazos/renderPrazosLista/
+// trt_gera_prazos/dashboard — NUNCA aparece na tela de Prazos nem nos alertas de lá. Ela foi
+// explícita: "não pode se misturar com o resto".
+
+let assessoriaClientesFiltro={busca:''};
+let assessoriaDemandasFiltro={busca:'',responsavel:'',status:''};
+
+// Detecta se a tela ativa é a lista cruzada (Demandas & Prazos) ou a página de um cliente, e
+// atualiza só essa — nenhuma das duas mexe na tela de Prazos.
+function _refreshAssessoria(clienteId){
+  if(document.getElementById('assessoria-demandas-lista'))buscarAssessoriaDemandas();
+  else if(document.getElementById('assessoria-cliente-page'))carregarAssessoriaCliente(clienteId);
+}
+function _classPrazoDemanda(p){
+  if(p.cumprido)return'cumprido';
+  const hoje=new Date().toISOString().slice(0,10);
+  if(p.data<hoje)return'vencido';
+  if(p.data===hoje)return'hoje';
+  return'aberto';
+}
+
+// ---- Assessoria: lista de clientes ----
+async function pAssessoriaClientes(){
+  const c=document.getElementById('conteudo');
+  assessoriaClientesFiltro={busca:''};
+  c.innerHTML=`
+  <div class="toolbar">
+    <div class="search-box"><input type="text" placeholder="Buscar cliente..." oninput="assessoriaClientesFiltro.busca=this.value;buscarAssessoriaClientes()"></div>
+    <button class="btn btn-primary" onclick="novaAssessoria()">+ Ativar Assessoria</button>
+  </div>
+  <div class="card"><div class="table-wrap"><table>
+    <thead><tr><th>Cliente</th><th>Status</th><th>Início</th><th>Valor mensal</th><th>Demandas em aberto</th><th></th></tr></thead>
+    <tbody id="assessoria-cl-tbody"><tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8">Carregando...</td></tr></tbody>
+  </table></div></div>`;
+  buscarAssessoriaClientes();
+}
+async function buscarAssessoriaClientes(){
+  const tb=document.getElementById('assessoria-cl-tbody');if(!tb)return;
+  // `assessoria_demandas` não tem FK direto pra `assessorias` (o vínculo é por cliente_id) —
+  // por isso a contagem de demandas em aberto é buscada à parte e cruzada aqui, em vez de um
+  // embed do PostgREST (que exigiria uma relação que não existe).
+  const{data,error}=await supa.from('assessorias').select('*,clientes(nome)').order('created_at',{ascending:false});
+  let rows=data||[];
+  const q=(assessoriaClientesFiltro.busca||'').toLowerCase().trim();
+  if(q)rows=rows.filter(a=>(a.clientes?.nome||'').toLowerCase().includes(q));
+  if(error||!rows.length){tb.innerHTML=`<tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8">${error?'Erro ao carregar.':'Nenhum cliente de assessoria ainda. Clique em "+ Ativar Assessoria" pra começar.'}</td></tr>`;return;}
+  const clienteIds=rows.map(a=>a.cliente_id);
+  const{data:demandas}=await supa.from('assessoria_demandas').select('cliente_id,status').in('cliente_id',clienteIds);
+  const abertasPorCliente={};
+  (demandas||[]).forEach(d=>{if(d.status!=='Concluída'&&d.status!=='Arquivada')abertasPorCliente[d.cliente_id]=(abertasPorCliente[d.cliente_id]||0)+1;});
+  tb.innerHTML=rows.map(a=>{
+    const abertas=abertasPorCliente[a.cliente_id]||0;
+    return`<tr style="cursor:pointer" onclick="abrirAssessoriaCliente(${a.cliente_id})">
+      <td><strong>${escHtml(a.clientes?.nome||'—')}</strong></td>
+      <td><span class="tag">${a.status||'—'}</span></td>
+      <td>${_dataBR(a.data_inicio)||'—'}</td>
+      <td>${a.valor_mensal?'R$ '+Number(a.valor_mensal).toLocaleString('pt-BR',{minimumFractionDigits:2}):'—'}</td>
+      <td>${abertas>0?`<strong style="color:#b45309">${abertas}</strong>`:'0'}</td>
+      <td onclick="event.stopPropagation()"><button class="btn-icon" title="Abrir" onclick="abrirAssessoriaCliente(${a.cliente_id})">👁️</button></td>
+    </tr>`;
+  }).join('');
+}
+function novaAssessoria(){
+  abrirModal('🧭 Ativar Assessoria para um cliente',
+    `<label style="font-size:12px;color:#64748b">Buscar cliente já cadastrado</label>
+     <input id="na-busca" placeholder="Digite o nome..." oninput="buscarClienteAssessoria(this.value)" style="width:100%;padding:9px;margin:4px 0 8px;border-radius:8px;border:1px solid var(--cinza3);background:var(--cinza1);color:var(--texto)">
+     <div id="na-res" style="max-height:260px;overflow:auto"></div>`,
+    null,'',false,true);
+}
+let _naTimer=null;
+function buscarClienteAssessoria(q){
+  clearTimeout(_naTimer);
+  const el=document.getElementById('na-res');if(!el)return;
+  q=(q||'').trim();
+  if(q.length<2){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Digite ao menos 2 letras.</p>';return;}
+  _naTimer=setTimeout(async()=>{
+    const{data}=await supa.from('clientes').select('id,nome').ilike('nome','%'+q+'%').limit(20);
+    if(!data||!data.length){el.innerHTML='<p style="color:#64748b;font-size:12px;padding:6px">Nenhum cliente encontrado.</p>';return;}
+    el.innerHTML=data.map(c=>`<div onclick="fecharModal();ativarAssessoria(${c.id})" style="padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer">${escHtml(c.nome)}</div>`).join('');
+  },300);
+}
+
+// ---- Assessoria: contrato ----
+function formAssessoria(d={}){
+  return`<form id="form-assessoria">
+  <div class="form-row">
+    <div class="form-field"><label>Status</label>
+      <select name="status">${['Ativa','Suspensa','Encerrada'].map(o=>`<option ${(d.status||'Ativa')===o?'selected':''}>${o}</option>`).join('')}</select>
+    </div>
+    <div class="form-field"><label>Início do contrato</label><input type="date" name="data_inicio" value="${d.data_inicio||''}"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-field"><label>Valor mensal (R$)</label><input type="number" step="0.01" name="valor_mensal" value="${d.valor_mensal||''}"></div>
+    <div class="form-field"><label>Link da pasta (OneDrive)</label><input name="link_pasta" value="${escHtml(d.link_pasta||'')}" placeholder="https://..."></div>
+  </div>
+  <div class="form-field"><label>Escopo</label><textarea name="escopo" rows="3">${d.escopo||''}</textarea></div>
+  <div class="form-field"><label>Observações</label><textarea name="observacoes" rows="2">${d.observacoes||''}</textarea></div>
+  </form>`;
+}
+function ativarAssessoria(clienteId){
+  abrirModal('Ativar Assessoria',formAssessoria({}),async()=>{
+    const d=coletarForm('form-assessoria');
+    d.cliente_id=clienteId;
+    const{error}=await supa.from('assessorias').insert([d]);
+    if(error){toast('Erro: '+error.message,'erro');return false;}
+    toast('Assessoria ativada!','ok');
+    if(document.getElementById('assessoria-cliente-page'))carregarAssessoriaCliente(clienteId);
+    else abrirAssessoriaCliente(clienteId);
+  });
+}
+async function editarAssessoria(clienteId,assessoriaId){
+  const{data}=await supa.from('assessorias').select('*').eq('id',assessoriaId).single();
+  if(!data)return;
+  abrirModal('Editar Assessoria',formAssessoria(data),async()=>{
+    const d=coletarForm('form-assessoria');
+    const{error}=await supa.from('assessorias').update(d).eq('id',assessoriaId);
+    if(error){toast('Erro: '+error.message,'erro');return false;}
+    toast('Assessoria atualizada!','ok');carregarAssessoriaCliente(clienteId);
+  });
+}
+async function marcarInformativoEnviado(assessoriaId,clienteId){
+  const{error}=await supa.from('assessoria_informativos').insert([{
+    assessoria_id:assessoriaId, data_envio:new Date().toISOString().slice(0,10),
+    enviado_por:(usuarioAtual?.email||'tela')
+  }]);
+  if(error){toast('Erro: '+error.message,'erro');return;}
+  toast('Informativo registrado!','ok');carregarAssessoriaCliente(clienteId);
+}
+
+// ---- Assessoria: página do cliente ----
+async function abrirAssessoriaCliente(clienteId){
+  const c=document.getElementById('conteudo');
+  c.innerHTML='<p style="text-align:center;padding:40px;color:#94a3b8">Carregando...</p>';
+  const{data:cl}=await supa.from('clientes').select('id,nome').eq('id',clienteId).single();
+  if(!cl){toast('Cliente não encontrado.','erro');return;}
+  const tt=document.getElementById('topbar-titulo'),ts=document.getElementById('topbar-sub');
+  if(tt)tt.textContent='Assessoria — '+cl.nome;
+  if(ts)ts.textContent='Contrato, informativos, demandas e documentos deste cliente';
+  c.innerHTML=`<div id="assessoria-cliente-page">
+    <div style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
+      <button class="btn btn-secondary" onclick="ir('assessoria-clientes')">← Voltar</button>
+      <button class="btn btn-secondary btn-sm" onclick="abrirCliente(${clienteId})">👤 Ver ficha do cliente</button>
+    </div>
+    <div id="assessoria-cl">Carregando...</div>
+  </div>`;
+  carregarAssessoriaCliente(clienteId);
+}
+async function carregarAssessoriaCliente(clienteId){
+  const el=document.getElementById('assessoria-cl');if(!el)return;
+  const{data:assessoria}=await supa.from('assessorias').select('*').eq('cliente_id',clienteId).maybeSingle();
+  if(!assessoria){
+    el.innerHTML=`<div class="card"><div class="card-body">
+      <div class="empty-state"><div class="icon">🧭</div><p>Este cliente ainda não tem assessoria ativa.</p></div>
+      <div style="text-align:center;margin-top:12px"><button class="btn btn-primary" onclick="ativarAssessoria(${clienteId})">+ Ativar Assessoria</button></div>
+    </div></div>`;
+    return;
+  }
+  const[{data:informativos},{data:demandas}]=await Promise.all([
+    supa.from('assessoria_informativos').select('*').eq('assessoria_id',assessoria.id).order('data_envio',{ascending:false}).limit(10),
+    supa.from('assessoria_demandas').select('*,assessoria_demanda_prazos(*)').eq('cliente_id',clienteId).order('created_at',{ascending:false})
+  ]);
+  const ultimo=(informativos||[])[0];
+  el.innerHTML=`
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <h3>📑 Contrato de Assessoria</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="tag">${assessoria.status}</span>
+        <button class="btn btn-secondary btn-sm" onclick="editarAssessoria(${clienteId},${assessoria.id})">✏️ Editar</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:13px">
+        <div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Início</span><div>${_dataBR(assessoria.data_inicio)||'—'}</div></div>
+        <div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Valor mensal</span><div>${assessoria.valor_mensal?'R$ '+Number(assessoria.valor_mensal).toLocaleString('pt-BR',{minimumFractionDigits:2}):'—'}</div></div>
+        ${assessoria.link_pasta?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Pasta</span><div><a href="${escHtml(assessoria.link_pasta)}" target="_blank" rel="noopener">Abrir no OneDrive ↗</a></div></div>`:''}
+      </div>
+      ${assessoria.escopo?`<div style="margin-top:10px;padding:10px;background:#f8fafc;border-radius:6px;font-size:13px;color:#475569">${escHtml(assessoria.escopo)}</div>`:''}
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <h3>📨 Informativo Semanal</h3>
+      <button class="btn btn-primary btn-sm" onclick="marcarInformativoEnviado(${assessoria.id},${clienteId})">✓ Marcar enviado hoje</button>
+    </div>
+    <div class="card-body">
+      ${ultimo?`<p style="font-size:13px">Último envio: <strong>${_dataBR(ultimo.data_envio)}</strong>${ultimo.enviado_por?' · '+escHtml(ultimo.enviado_por):''}</p>`:'<p style="font-size:13px;color:#94a3b8">Nenhum informativo registrado ainda.</p>'}
+      ${(informativos||[]).length>1?`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:#64748b">Histórico (${informativos.length})</summary>
+        <div style="margin-top:6px;font-size:12px;color:#64748b">${informativos.map(i=>`<div>${_dataBR(i.data_envio)}${i.enviado_por?' · '+escHtml(i.enviado_por):''}</div>`).join('')}</div>
+      </details>`:''}
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <h3>🧭 Demandas & Prazos</h3>
+      <button class="btn btn-primary btn-sm" onclick="novaDemanda(${clienteId})">+ Nova Demanda</button>
+    </div>
+    <div class="card-body">${renderDemandasAssessoria(demandas||[],{comCliente:false})}</div>
+  </div>
+  <div id="assessoria-docs-cl"></div>`;
+  carregarDocsCliente(clienteId,'assessoria-docs-cl');
+}
+
+// ---- Assessoria: tela cruzada "Demandas & Prazos" (isolada da tela de Prazos) ----
+async function pAssessoriaDemandas(){
+  const c=document.getElementById('conteudo');
+  assessoriaDemandasFiltro={busca:'',responsavel:'',status:''};
+  c.innerHTML=`
+  <div class="toolbar">
+    <div class="search-box"><input type="text" placeholder="Buscar cliente ou demanda..." oninput="assessoriaDemandasFiltro.busca=this.value;buscarAssessoriaDemandas()"></div>
+    <select class="filtro" onchange="assessoriaDemandasFiltro.responsavel=this.value;buscarAssessoriaDemandas()">
+      <option value="">Todos os responsáveis</option>${respNomes().map(o=>`<option>${o}</option>`).join('')}
+    </select>
+    <select class="filtro" onchange="assessoriaDemandasFiltro.status=this.value;buscarAssessoriaDemandas()">
+      <option value="">Todos os status</option>${['Aberta','Em andamento','Concluída','Arquivada','Convertida em processo'].map(o=>`<option>${o}</option>`).join('')}
+    </select>
+  </div>
+  <div id="assessoria-demandas-lista"><p style="text-align:center;padding:40px;color:#94a3b8">Carregando...</p></div>`;
+  buscarAssessoriaDemandas();
+}
+async function buscarAssessoriaDemandas(){
+  const el=document.getElementById('assessoria-demandas-lista');if(!el)return;
+  let q=supa.from('assessoria_demandas').select('*,clientes(nome),assessoria_demanda_prazos(*)').order('created_at',{ascending:false});
+  if(assessoriaDemandasFiltro.responsavel)q=q.eq('responsavel',assessoriaDemandasFiltro.responsavel);
+  if(assessoriaDemandasFiltro.status)q=q.eq('status',assessoriaDemandasFiltro.status);
+  const{data,error}=await q;
+  let rows=data||[];
+  const busca=(assessoriaDemandasFiltro.busca||'').toLowerCase().trim();
+  if(busca)rows=rows.filter(d=>(d.titulo||'').toLowerCase().includes(busca)||(d.clientes?.nome||'').toLowerCase().includes(busca));
+  const proximoPrazo=d=>{const abertos=(d.assessoria_demanda_prazos||[]).filter(p=>!p.cumprido).map(p=>p.data).sort();return abertos[0]||null;};
+  rows.sort((a,b)=>{const pa=proximoPrazo(a),pb=proximoPrazo(b);if(pa&&pb)return pa.localeCompare(pb);if(pa)return-1;if(pb)return 1;return 0;});
+  if(error||!rows.length){el.innerHTML=`<div class="empty-state"><div class="icon">🧭</div><p>${error?'Erro ao carregar.':'Nenhuma demanda encontrada.'}</p></div>`;return;}
+  el.innerHTML=renderDemandasAssessoria(rows,{comCliente:true});
+}
+
+// Renderer PRÓPRIO — nunca reaproveita renderPrazosLista, pra garantir que prazo de demanda
+// de assessoria não tem NENHUM caminho de código que cruza com a tela de Prazos.
+function renderDemandasAssessoria(lista,opts={}){
+  const comCliente=!!opts.comCliente;
+  if(!lista.length)return'<div class="empty-state"><div class="icon">🧭</div><p>Nenhuma demanda cadastrada.</p></div>';
+  return`<div style="display:flex;flex-direction:column;gap:12px">${lista.map(d=>{
+    const prazos=(d.assessoria_demanda_prazos||[]).slice().sort((a,b)=>a.data.localeCompare(b.data));
+    const abertos=prazos.filter(p=>!p.cumprido);
+    const corBorda=abertos.some(p=>_classPrazoDemanda(p)==='vencido')?'#dc2626':abertos.some(p=>_classPrazoDemanda(p)==='hoje')?'#f59e0b':'var(--border)';
+    return`<div class="card" style="border-left:3px solid ${corBorda}">
+      <div class="card-header">
+        <div>
+          <h4 style="margin-bottom:2px">${escHtml(d.titulo)}</h4>
+          <div style="font-size:12px;color:#94a3b8">
+            ${comCliente?`👤 ${escHtml(d.clientes?.nome||'—')} · `:''}${d.tipo?escHtml(d.tipo)+' · ':''}${d.responsavel?'👤 '+escHtml(d.responsavel)+' · ':''}<span class="tag">${d.status}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${d.processo_id?`<button class="btn btn-secondary btn-sm" onclick="abrirProcesso(${d.processo_id})">⚖️ Ver processo</button>`
+            :`<button class="btn btn-secondary btn-sm" onclick="transformarDemandaEmProcesso(${d.id},${d.cliente_id})">⚖️ Transformar em Processo</button>`}
+          <button class="btn-icon" title="Editar" onclick="editarDemanda(${d.id},${d.cliente_id})">✏️</button>
+          <button class="btn-icon" title="Excluir" onclick="excluirDemanda(${d.id},${d.cliente_id})">🗑️</button>
+        </div>
+      </div>
+      <div class="card-body">
+        ${d.descricao?`<p style="font-size:13px;color:#64748b;margin-bottom:10px">${escHtml(d.descricao)}</p>`:''}
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${prazos.map(p=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:${p.cumprido?'rgba(74,222,128,.08)':_classPrazoDemanda(p)==='vencido'?'rgba(220,38,38,.08)':_classPrazoDemanda(p)==='hoje'?'rgba(245,158,11,.08)':'rgba(148,163,184,.06)'}">
+            <span style="font-weight:700;min-width:82px">${_dataBR(p.data)}</span>
+            <span style="flex:1;font-size:13px">${escHtml(p.descricao)}${p.cumprido?` <span style="color:#94a3b8;font-size:11px">— cumprido por ${escHtml(p.cumprido_por||'')}</span>`:''}</span>
+            ${!p.cumprido?`<button class="btn btn-sm" style="background:#dcfce7;color:#15803d" onclick="cumprirPrazoDemanda(${p.id},${d.id},${d.cliente_id})">✓ Cumprir</button>`
+              :`<button class="btn btn-sm btn-secondary" onclick="reabrirPrazoDemanda(${p.id},${d.id},${d.cliente_id})">↺ Reabrir</button>`}
+            <button class="btn-icon" onclick="excluirPrazoDemanda(${p.id},${d.id},${d.cliente_id})">🗑️</button>
+          </div>`).join('')}
+        </div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="novoPrazoDemanda(${d.id},${d.cliente_id})">+ Prazo</button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// ---- Assessoria: demandas — CRUD ----
+function formDemanda(d={}){
+  return`<form id="form-demanda">
+  <datalist id="dl-tipo-demanda">${['Advertência','Carta de Demissão','Aditivo Contratual','Rescisão','Certidão','Aposentadoria','Contrato','Execução Fiscal','Auditoria'].map(o=>`<option value="${o}"></option>`).join('')}</datalist>
+  <div class="form-field"><label>Título *</label><input name="titulo" value="${escHtml(d.titulo||'')}" placeholder="Ex: Advertência João da Silva"></div>
+  <div class="form-row">
+    <div class="form-field"><label>Tipo</label><input name="tipo" list="dl-tipo-demanda" value="${escHtml(d.tipo||'')}"></div>
+    <div class="form-field"><label>Responsável</label>
+      <select name="responsavel"><option value="">Selecione...</option>${respNomes().map(o=>`<option ${d.responsavel===o?'selected':''}>${o}</option>`).join('')}</select>
+    </div>
+  </div>
+  <div class="form-field"><label>Status</label>
+    <select name="status">${['Aberta','Em andamento','Concluída','Arquivada'].map(o=>`<option ${(d.status||'Aberta')===o?'selected':''}>${o}</option>`).join('')}</select>
+  </div>
+  <div class="form-field"><label>Descrição</label><textarea name="descricao" rows="3">${d.descricao||''}</textarea></div>
+  </form>`;
+}
+function novaDemanda(clienteId){
+  abrirModal('Nova Demanda',formDemanda({}),async()=>{
+    const d=coletarForm('form-demanda');
+    if(!d.titulo){toast('Informe o título.','erro');return false;}
+    d.cliente_id=clienteId;
+    const{error}=await supa.from('assessoria_demandas').insert([d]);
+    if(error){toast('Erro: '+error.message,'erro');return false;}
+    toast('Demanda cadastrada!','ok');_refreshAssessoria(clienteId);
+  });
+}
+async function editarDemanda(id,clienteId){
+  const{data}=await supa.from('assessoria_demandas').select('*').eq('id',id).single();
+  if(!data)return;
+  abrirModal('Editar Demanda',formDemanda(data),async()=>{
+    const d=coletarForm('form-demanda');
+    if(!d.titulo){toast('Informe o título.','erro');return false;}
+    const{error}=await supa.from('assessoria_demandas').update(d).eq('id',id);
+    if(error){toast('Erro: '+error.message,'erro');return false;}
+    toast('Demanda atualizada!','ok');_refreshAssessoria(clienteId);
+  });
+}
+async function excluirDemanda(id,clienteId){
+  if(!confirm('Excluir esta demanda? Os prazos dela também serão excluídos.'))return;
+  const{error}=await supa.from('assessoria_demandas').delete().eq('id',id);
+  if(error){toast('Erro: '+error.message,'erro');return;}
+  toast('Demanda removida.','ok');_refreshAssessoria(clienteId);
+}
+
+// ---- Assessoria: prazos da demanda (tabela própria, isolada de `prazos`) ----
+function novoPrazoDemanda(demandaId,clienteId){
+  abrirModal('Novo Prazo da Demanda',`<form id="form-prazo-demanda">
+    <div class="form-field"><label>Data *</label><input type="date" name="data"></div>
+    <div class="form-field"><label>Descrição *</label><input name="descricao" placeholder="Ex: Responder notificação"></div>
+  </form>`,async()=>{
+    const d=coletarForm('form-prazo-demanda');
+    if(!d.data||!d.descricao){toast('Preencha data e descrição.','erro');return false;}
+    d.demanda_id=demandaId;
+    const{error}=await supa.from('assessoria_demanda_prazos').insert([d]);
+    if(error){toast('Erro: '+error.message,'erro');return false;}
+    toast('Prazo cadastrado!','ok');_refreshAssessoria(clienteId);
+  });
+}
+async function cumprirPrazoDemanda(id,demandaId,clienteId){
+  const{error}=await supa.from('assessoria_demanda_prazos').update({
+    cumprido:true,cumprido_em:new Date().toISOString(),cumprido_por:(usuarioAtual?.email||'tela')
+  }).eq('id',id);
+  if(error){toast('Erro: '+error.message,'erro');return;}
+  toast('Prazo cumprido!','ok');_refreshAssessoria(clienteId);
+}
+async function reabrirPrazoDemanda(id,demandaId,clienteId){
+  if(!confirm('Reabrir este prazo?'))return;
+  const{error}=await supa.from('assessoria_demanda_prazos').update({cumprido:false,cumprido_em:null,cumprido_por:null}).eq('id',id);
+  if(error){toast('Erro: '+error.message,'erro');return;}
+  toast('Prazo reaberto.','ok');_refreshAssessoria(clienteId);
+}
+async function excluirPrazoDemanda(id,demandaId,clienteId){
+  if(!confirm('Excluir este prazo?'))return;
+  await supa.from('assessoria_demanda_prazos').delete().eq('id',id);
+  toast('Removido.','ok');_refreshAssessoria(clienteId);
+}
+
+// ---- Assessoria: transformar demanda em processo de verdade (reaproveita novoProcesso) ----
+async function transformarDemandaEmProcesso(demandaId,clienteId){
+  const{data:demanda}=await supa.from('assessoria_demandas').select('*').eq('id',demandaId).single();
+  if(!demanda)return;
+  await carregarTodosClientes();
+  abrirModal('Novo Processo (a partir da demanda)',formProcesso({cliente_id:clienteId,assunto:demanda.titulo}),async()=>{
+    const d=coletarForm('form-processo');
+    if(!d.numero){toast('Número CNJ é obrigatório.','erro');return false;}
+    if(!d.tribunal){toast('Tribunal é obrigatório.','erro');return false;}
+    if(!d.cliente_id){toast('Selecione o cliente.','erro');return false;}
+    if(!d.advogado_responsavel){toast('Advogado responsável é obrigatório.','erro');return false;}
+    if(!d.advogado_auxiliar)delete d.advogado_auxiliar;
+    if(!d.secretaria_responsavel)delete d.secretaria_responsavel;
+    const{data:novo,error}=await supa.from('processos').insert([d]).select().single();
+    if(error){toast('Erro: '+error.message,'erro');return false;}
+    await supa.from('assessoria_demandas').update({processo_id:novo.id,status:'Convertida em processo'}).eq('id',demandaId);
+    toast('Processo criado e demanda vinculada!','ok');_refreshAssessoria(clienteId);
+  });
+}
 
 // ---- JUDICIAIS ----
 async function pJudiciais(){

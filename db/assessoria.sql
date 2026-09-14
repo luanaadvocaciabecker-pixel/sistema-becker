@@ -1,0 +1,127 @@
+-- Módulo Assessoria (14/09/2026) — cliente com contrato de acompanhamento contínuo.
+-- Aplicado via migration `assessoria_schema`.
+--
+-- POR QUE EXISTE: ela pediu inicialmente um item de menu "Assessoria" embaixo de
+-- Extrajudiciais. Investigando, achei que "Assessoria" já existia parcialmente como 1 valor
+-- solto no datalist `processos_adm.orgao` — um meio-artefato, não uma funcionalidade de
+-- verdade. Ela mandou 2 gravações de tela do OneDrive mostrando a estrutura real: cada
+-- cliente de assessoria (ex. "08 ITALIA PANIFICADORA", "12 JONNIS PREMIUM FOOD") tem uma
+-- pasta própria com dezenas de subpastas criadas à medida que surge situação nova (ex.
+-- "19 ADVERTÊNCIA VALDEMIRA", "APOSENTADORIA JONI"), sem taxonomia fixa — inclusive uma
+-- pasta "PROCESSOS" pra quando algo vira processo de verdade, e "INFORMATIVOS SEMANAIS"/
+-- "MODELO DE CONTRATO" na raiz.
+--
+-- Ela corrigiu o foco 2 vezes antes da versão final:
+--   1. "Isso é mais para poder cuidar dos prazos da assessoria e todas as demandas que
+--      precisam" — o centro da funcionalidade é rastrear prazo/demanda, não replicar pasta
+--      (pasta/subpasta livre tipo OneDrive fica pra depois, adiada por ela mesma).
+--   2. "Não, não na mesma tela precisa ser tudo na aba assessórias, não se misturar com o
+--      resto" — os prazos de demanda de assessoria NÃO podem aparecer na tela de Prazos
+--      existente nem nos alertas de lá.
+--   3. Sobre o atalho de menu: "igual tem independente a parte processos e a parte
+--      extrajudicial e Becker IA, então assessoria é outro independente dos outros" — grupo
+--      de menu PRÓPRIO, não subitem de Extrajudiciais, não aba escondida na ficha do cliente.
+--
+-- DESENHO: 4 tabelas novas, tudo aditivo, nenhuma coluna existente muda.
+--
+-- CREATE TABLE public.assessorias (
+--   id           bigint generated always as identity primary key,
+--   cliente_id   bigint not null unique references clientes(id) on delete cascade,
+--   status       text not null default 'Ativa',   -- Ativa | Suspensa | Encerrada (texto, não
+--                                                  -- boolean — mesmo idioma de
+--                                                  -- clientes.status/processos.situacao)
+--   data_inicio  date,
+--   valor_mensal numeric(12,2),
+--   escopo       text,
+--   link_pasta   text,      -- mesmo padrão de novos_negocios.link_pasta (link externo, não
+--                            -- estrutura de pasta em si)
+--   observacoes  text,
+--   created_at   timestamptz not null default now()
+-- );
+-- 1 linha = a própria marcação de "cliente tem assessoria". `on delete cascade` é deliberado
+-- e diferente do resto do sistema (que usa `SET NULL`) — é ficha-detalhe 1:1 do cliente, nada
+-- sobra sem ele.
+--
+-- CREATE TABLE public.assessoria_informativos (
+--   id            bigint generated always as identity primary key,
+--   assessoria_id bigint not null references assessorias(id) on delete cascade,
+--   data_envio    date not null,
+--   enviado_por   text,
+--   observacao    text,
+--   created_at    timestamptz not null default now()
+-- );
+-- Log do informativo semanal (ela tem uma pasta "INFORMATIVOS SEMANAIS" real no OneDrive) —
+-- histórico, não só um "última data", pra dar pra ver quando foi mandado da última vez.
+--
+-- CREATE TABLE public.assessoria_demandas (
+--   id           bigint generated always as identity primary key,
+--   cliente_id   bigint references clientes(id) on delete set null,   -- mesmo padrão de
+--                                                                     -- processos/documentos
+--   titulo       text not null,      -- ex. "Advertência Valdemira", "Aposentadoria Joni"
+--   tipo         text,               -- datalist livre de sugestão, NÃO enum fixo — mesmo
+--                                     -- espírito do pedido dela, sem taxonomia rígida
+--   descricao    text,
+--   responsavel  text,               -- via respNomes(), mesmo padrão de processos/atendimentos
+--   status       text not null default 'Aberta',   -- Aberta | Em andamento | Concluída |
+--                                                   -- Arquivada | Convertida em processo
+--   processo_id  bigint references processos(id) on delete set null,   -- só preenchido se a
+--                                                                       -- demanda virar
+--                                                                       -- processo de verdade
+--   created_at   timestamptz not null default now()
+-- );
+-- O CONCEITO CENTRAL: uma demanda solta, com ou sem CNJ. `cliente_id` não tem FK direto pra
+-- `assessorias` (é por cliente, não por contrato) — a lista cruzada "Demandas & Prazos" busca
+-- os dois separadamente e cruza no JS, porque o PostgREST não embeda relações sem FK.
+--
+-- CREATE TABLE public.assessoria_demanda_prazos (
+--   id           bigint generated always as identity primary key,
+--   demanda_id   bigint not null references assessoria_demandas(id) on delete cascade,
+--   data         date not null,
+--   descricao    text not null,
+--   cumprido     boolean not null default false,
+--   cumprido_em  timestamptz,
+--   cumprido_por text,
+--   created_at   timestamptz not null default now()
+-- );
+-- A PEÇA QUE ISOLA DE `prazos`: clone pequeno e deliberado só dos campos que a tela de
+-- Assessoria precisa — sem `ato_chave`, nunca lido por `carregarPrazos`/`renderPrazosLista`/
+-- `trt_gera_prazos`/dashboard. Prazo de demanda de assessoria JAMAIS aparece na tela de Prazos
+-- nem nos alertas de lá — é a garantia da correção que ela pediu.
+--
+-- RLS: policy becker_staff_all (for all to authenticated using (true) with check (true)) nas
+-- 4 tabelas — mesmo padrão de processos/clientes/processo_clientes/documentos (conferido via
+-- pg_policies antes de aplicar, não assumido).
+--
+-- UI (site/index.html): grupo de menu "🧭 Assessoria" próprio (renderSidebarMenu, perto dos
+-- outros grupoMenu), com 2 itens — "Clientes" (pAssessoriaClientes, lista clientes com
+-- assessoria ativa) e "Demandas & Prazos" (pAssessoriaDemandas, lista TODAS as demandas de
+-- todos os clientes de assessoria com seus prazos, ordenada por próximo prazo em aberto —
+-- equivalente da tela de Prazos, isolado, nunca cruza com `prazos`/`renderPrazosLista`).
+-- Clicar num cliente abre `abrirAssessoriaCliente(id)` — página própria (não uma 8ª aba de
+-- `abrirCliente`), com contrato/informativo/demandas + os documentos do cliente
+-- (reaproveitando `carregarDocsCliente`, sem tabela nem upload novo). Botão
+-- "⚖️ Transformar em Processo" numa demanda reaproveita `formProcesso()`/o mesmo fluxo de
+-- validação de `novoProcesso()`, sem reinventar.
+--
+-- ACHADO LATERAL, corrigido na mesma PR: `carregarDocsCliente` fazia `order=criado_em.desc`
+-- na query REST crua, mas a coluna real da tabela `documentos` é `created_at` — bug
+-- pré-existente (não relacionado a Assessoria), a ordenação vinha sendo ignorada pelo
+-- PostgREST desde sempre. Corrigido `criado_em`→`created_at`, e a função ganhou um 2º
+-- parâmetro opcional `elId` pra poder renderizar tanto na aba Documentos da ficha quanto na
+-- página de Assessoria.
+--
+-- ACHADO DURANTE TESTE (antes de publicar): a primeira versão de `buscarAssessoriaClientes`
+-- tentava um embed do PostgREST `assessorias→assessoria_demandas` pra contar demandas em
+-- aberto por cliente — mas não existe FK direto entre as duas tabelas (só via cliente_id),
+-- então o embed teria falhado em produção. Corrigido pra 2 queries separadas cruzadas em JS
+-- antes de considerar pronto; conferido depois via `pg_constraint` que todos os embeds
+-- usados no código batem com FK real (nenhuma ambiguidade).
+--
+-- ADIADO PRA DEPOIS (ela mesma despriorizou frente aos prazos/demandas): pasta/subpasta livre
+-- tipo OneDrive. Desenho já pensado, não implementado: tabela `pastas` (árvore
+-- auto-referenciada por `pasta_pai_id`, `on delete cascade` — diferente de
+-- `processos.processo_pai_id`, que é `no action`) + `documentos.pasta_id` nullable
+-- (NULL = arquivo solto na raiz do cliente, igual o comportamento real do OneDrive).
+--
+-- NÃO CONSTRUÍDO (fora de escopo, evitar over-building sem pedido): alerta/badge de prazo de
+-- demanda de assessoria; coluna `uploaded_by` em `documentos`.
