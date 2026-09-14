@@ -504,3 +504,41 @@
 -- intimação (pedido dela, print à parte): nova `_corpoIntimacao(txt)` remove o cabeçalho de
 -- metadados repetido (Fonte/Disponibilização/Status do prazo/Destinatário/ID do evento — já
 -- aparecem na caixa "PRAZO E CONTA" acima) antes de exibir, só isso, não mexe no dado gravado.
+--
+-- ============================================================================
+-- 16) CORRIGIDO: "ciência da Sentença" é N=8 (Recurso Ordinário), mesmo sem classe "Recurso"
+-- ============================================================================
+-- Ela perguntou: "quantos dias não tem na intimação/despacho? mesmo sem data final não fala
+-- quantos dias são?" Medido no universo real que `trt_gera_prazos` processa (TRT/TST, sem
+-- "data final", sem pauta/ata — 1.014 atos em 14/09/2026):
+--   654 de 1.014 (65%) não citam NENHUM número de dias/horas no texto — confirma a intuição
+--   dela, a maioria dos despachos do TRT simplesmente não fala quantos dias são.
+--   338 (33%) citam algum número perto de "dias", mas quase sempre é norma citada (ex. art.
+--   895 CLT) ou prazo de outra parte — só 19 de 1.014 (1,9%) têm ORDEM DIRIGIDA de verdade.
+-- Por isso a função depende do `n_base` por classe, não tem como confiar em achar o número no
+-- texto na maioria dos casos.
+--
+-- Nessa mesma investigação achei um bug sistemático: 75 atos têm texto "ciência da Sentença"
+-- (que abre prazo de Recurso Ordinário, 8 dias úteis pela CLT) mas a `classe` do ato ainda é
+-- a da ação original de 1º grau ("Ação Trabalhista", ou sem classe) — não "Recurso" — então
+-- caíam em N=5 por engano. Mesmo problema, maior escala, do que resolveu o mistério do prazo
+-- 5802 em 0001806-14 (seção 14/15) — lá era 1 caso, aqui são pelo menos 75.
+--
+-- Ela confirmou com uma tabela de referência de prazos por tipo de manifestação trabalhista:
+-- Recurso Ordinário, Contrarrazões, Agravo de Instrumento, Agravo de Petição e Recurso de
+-- Revista são todos 8 dias; só Embargos de Declaração é 5 (tipo diferente de manifestação,
+-- não conflita com esta regra — se o texto também mencionar embargos com prazo dirigido, o
+-- `n_dirigido`/`dias_citados` já existente encurta sozinho, sem caso especial).
+--
+-- FEITO: `n_base` em `trt_gera_prazos` agora usa N=8 quando o texto casa
+-- `ci[êe]ncia d[ae] Senten[çc]a` E a classe NÃO é já Recurso/Agravo/Revista. Deixados de fora
+-- (mantém N=5, sem generalizar sem olhar) os 3 casos "Homologação de Transação Extrajudicial"
+-- (sentença homologatória, normalmente sem recurso cabível) e os 2 "Cumprimento Provisório de
+-- Sentença" (execução — agravo de petição também é 8 dias, mas contexto diferente).
+--
+-- IMPACTO IMEDIATO: zero — nenhum dos 27 prazos `status='estimado'` reprocessados na seção 15
+-- casa com "ciência da Sentença" (conferido). A correção vale só pra atos futuros a partir de
+-- agora (próxima rodada do cron `trt_prazos_diario`, ou qualquer novo ato do dia a dia). Os
+-- 75 atos históricos já identificados não foram tocados — a maioria já tem prazo gravado com
+-- algum status (confirmado/cumprido/vencido antigo), e a mesma disciplina de sempre (nunca
+-- reabrir prazo fechado sem prova) se aplica.
