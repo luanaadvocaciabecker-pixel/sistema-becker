@@ -379,4 +379,63 @@
 --   3 já tinham prazo gravado (não tocados); 14 ainda não — esses passam de N=8 para N=15.
 --   Todos os outros 894 candidatos do dry-run permanecem exatamente iguais (871 em N=5,
 --   18 em N=8 — os "Recurso Ordinário"/RORSum/Agravo de Petição continuam intocados).
+--
+-- ============================================================================
+-- 14) Conferência contra 3 prints "Meus Expedientes" (TRT-12 Joinville + TRT-15) — 14/09/2026
+-- ============================================================================
+-- Ela mandou 3 prints sem texto (mesmo padrão de sempre). 13 CNJs transcritos e cruzados.
+--
+-- BATEU (2): 0001742-10.2026.5.12.0028 (21/09) e 0011066-58.2022.5.15.0132 (22/09) — o
+-- primeiro só precisava passar de status='estimado' para 'confirmado' (feito).
+--
+-- 3 dias-a-menos que o print (0001337-59, 0001359-63, 0002658-17): refiz a conta
+-- (`becker_dias_uteis` aninhado, mesmos parâmetros) e ela bate EXATO com o valor gravado —
+-- ou seja, a fórmula está correta para a disponibilização que o sistema capturou; se há erro,
+-- é na captura da data (DJEN pode estar 1 dia adiantado do que a tela do tribunal mostra) ou
+-- na minha transcrição do print. Testei via Legal Mail `lawsuit/case-files` (grátis) se a
+-- movimentação interna confirma outra data — não dá pra confirmar por esse caminho: o campo
+-- "data_movimentacao" do case-files é a data do ATO PRATICADO, não da disponibilização no
+-- DJEN (que é o marco que conta prazo), então divergem por natureza, não por erro. Fica em
+-- aberto — pedido a ela pra reconferir os 3 prints antes de mexer em qualquer coisa.
+--
+-- ACHADO REAL (0001806-14.2026.5.12.0030, prazo id 5802): gravado 23/09 e já 'confirmado',
+-- mas a fórmula padrão (N=5) dá 18/09 pros mesmos parâmetros que a própria descrição do
+-- prazo declara. Motivo encontrado: o ato de 10/09 é ciência de SENTENÇA (confirmado via
+-- case-files: há "Sentença" datada 09/09 nos autos), que pede prazo de Recurso Ordinário
+-- (8 dias úteis, CLT art. 895) — e 23/09 bate exatamente com N=8 pros mesmos parâmetros.
+-- Ou seja, o valor gravado parece ter sido corrigido à mão por alguém em algum momento
+-- (reconhecendo que era recurso, não despacho comum) mas a `descricao` ficou desatualizada
+-- (ainda diz "+1+5"). Isso é sintoma de uma lacuna real da função: `trt_gera_prazos` só
+-- decide N=8 pela CLASSE do ato (Recurso|Agravo), nunca pelo CONTEÚDO ("ciência da
+-- Sentença") — uma sentença de 1º grau intimada com classe "Ação Trabalhista" (não
+-- "Recurso") cai em N=5 por padrão, do lado perigoso (antecipa, mas o texto já avisa "cita
+-- N dias" quando aplicável). Não mexida ainda — o print mostra 24/09, 1 dia além até do
+-- valor corrigido a mão (23/09); perguntado a ela se lembra de ter corrigido este prazo.
+--
+-- 0001794-06.2026.5.12.0028 (sem prazo nenhum, sem cliente): achado o ato de 19/08 ("emende
+-- a petição inicial... quinze dias", RECLAMANTE Beatriz Luiz da Silva x RECLAMADO Unicostura
+-- Ltda) que nunca virou prazo. Causa: o cron `trt_prazos_diario` roda com janela
+-- `current_date-15..current_date` (15 dias corridos) — o ato saiu da janela ~03/09 e nunca
+-- mais foi reprocessado. Verbo "emende" também não está na lista reconhecida pelo regex de
+-- N-dirigido (só encurtaria, nunca alongaria, mas mesmo dentro da janela teria gerado N=5 em
+-- vez de 15). Não criado ainda — falta saber de quem é o processo (autora ou ré) pra saber
+-- se o prazo é nosso.
+--
+-- 6 CNJs sem `processos` cadastrado, com histórico real de intimação (desde 09/2025 em um
+-- caso): 0001933-49, 0001732-38, 0011196-71, 0010138-11, 0011176-49, 0011220-44. Criados
+-- agora como processos "bare" (sem cliente, `observacoes` registrando a origem) — o trigger
+-- `trg_processos_relinca_orfaos` religou automaticamente as `publicacoes` E os `prazos`
+-- órfãos que o cron `trt_prazos_diario` já tinha gerado silenciosamente pra eles nos últimos
+-- dias (existiam como "(processo a vincular)", invisíveis em qualquer tela porque não tinham
+-- processo nem cliente). Rodado também `legalmail-autos` action=sync_ids (grátis, `lawsuit/all`)
+-- pra popular `lm_idprocessos` — 143 processos atualizados no total (efeito colateral bom,
+-- não só os 6). ACHADO MAIS SÉRIO DESTE GRUPO: prazo id 5777 (0011176-49.2023.5.15.0091,
+-- Recurso Ordinário em Órgão Especial) tinha data calculada 10/09/2026 — JÁ VENCIDO (hoje é
+-- 14/09) — e ficou 100% invisível até agora porque o processo nunca existiu no sistema. Não
+-- fechado nem tocado: falta entender se já foi respondido (há uma "Decisão" de 11/09 nos
+-- autos via Legal Mail, que pode já ser a resposta do tribunal a isso) antes de qualquer ação.
+-- Reportado a ela para triagem imediata.
+--
+-- Sondagem usada (`legalmail-varredura-probe`, case-files + lawsuit/all, tudo grátis) já
+-- neutralizada.
 --   Nenhum prazo já gravado é alterado por esta migration — só atos futuros/não gravados.
