@@ -4640,21 +4640,21 @@ async function perguntarProcessoIA(id){
   }
 }
 // ─── AUTOS + IA (sob demanda, com custo controlado) ──────────────────────────
-async function carregarAutosIA(id){
-  const el=document.getElementById('proc-autosia');if(!el)return;
+async function carregarAutosIA(id,elId='proc-autosia'){
+  const el=document.getElementById(elId);if(!el)return;
   // Dois pedidos em paralelo: o estado dos autos (caminho pago) e a lista de íntegras anexadas
   // à mão (caminho grátis). Nenhum dos dois gasta nada — o gasto só acontece no 'request'.
   const [r,anx]=await Promise.all([
     chamarFuncao('autos-ia',{action:'get',processo_id:id}),
     chamarFuncao('autos-anexo-ia',{action:'listar',processo_id:id}),
   ]);
-  renderAutosIA(id,r,anx);
-  if(r&&(r.estado==='processando'||r.estado==='processando_ia'||r.estado==='baixando'))autosIApoll(id);
+  renderAutosIA(id,r,anx,elId);
+  if(r&&(r.estado==='processando'||r.estado==='processando_ia'||r.estado==='baixando'))autosIApoll(id,elId);
 }
-function renderAutosIA(id,r,anx){
+function renderAutosIA(id,r,anx,elId='proc-autosia'){
   const anexos=(anx&&Array.isArray(anx.anexos))?anx.anexos:[];
   const jaResumido=anx&&anx.ja_resumido?anx.ja_resumido:null;
-  const el=document.getElementById('proc-autosia');if(!el)return;
+  const el=document.getElementById(elId);if(!el)return;
   if(r&&r.erro){
     const semVinc=/vínculo|vinculo|Legal Mail/i.test(r.erro||'');
     el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;color:#94a3b8;margin:0">${semVinc?'Este processo não está vinculado ao Legal Mail — a íntegra não está disponível para puxar automaticamente.':('Não foi possível carregar os autos. '+(r.erro||''))}</p></div></div>`;
@@ -4664,13 +4664,13 @@ function renderAutosIA(id,r,anx){
   // O `get` do autos-ia devolve a linha mais recente de processo_autos, que agora pode ser a do
   // anexo. Sem `documentos` (n_autos) nem `pdf` (pdf_path), é resumo de íntegra anexada — e o
   // card tem de dizer isso, para ninguém achar que pagou download.
-  if(est==='pronto'){el.innerHTML=cardAutosPronto(id,r,!r.documentos&&!!jaResumido,anexos);return;}
+  if(est==='pronto'){el.innerHTML=cardAutosPronto(id,r,!r.documentos&&!!jaResumido,anexos,elId);return;}
   if(est==='processando'||est==='processando_ia'||est==='baixando'){
     el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;margin:0">⏳ Baixando a íntegra e lendo com a IA... pode levar alguns minutos. Pode continuar usando o sistema — o resumo aparece aqui quando ficar pronto.</p></div></div>`;
     return;
   }
   if(est==='erro'||est==='erro_ia'){
-    el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;color:#f87171;margin:0 0 10px">Falha ao processar os autos${r&&r.erro?': '+r.erro:''}.</p><button class="btn btn-secondary btn-sm" onclick="autosIApreview('${id}')">Tentar de novo</button></div></div>`;
+    el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;color:#f87171;margin:0 0 10px">Falha ao processar os autos${r&&r.erro?': '+r.erro:''}.</p><button class="btn btn-secondary btn-sm" onclick="autosIApreview('${id}','${elId}')">Tentar de novo</button></div></div>`;
     return;
   }
   // Quando já existe íntegra anexada à mão, o caminho grátis vem PRIMEIRO. Pagar o download
@@ -4679,26 +4679,26 @@ function renderAutosIA(id,r,anx){
     <div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.30);border-radius:8px;padding:11px 13px;margin-bottom:12px">
       <div style="font-size:13px;font-weight:700;color:#15803d;margin-bottom:4px">✅ Este processo já tem íntegra anexada</div>
       <div style="font-size:12px;color:#94a3b8;margin-bottom:9px">${escHtml(anexos[0].nome)} · ${anexos[0].mb} MB · anexada em ${_dataBR(anexos[0].em)}</div>
-      <button class="btn btn-primary btn-sm" onclick="resumirAnexoIA('${id}')">🤖 Resumir a íntegra — sem custo do Legal Mail</button>
+      <button class="btn btn-primary btn-sm" onclick="resumirAnexoIA('${id}','${elId}')">🤖 Resumir a íntegra — sem custo do Legal Mail</button>
     </div>`:'';
   el.innerHTML=`<div class="card"><div class="card-body">
     ${blocoAnexo}
     <p style="font-size:13px;color:var(--texto);margin:0 0 10px">Baixa a <strong>íntegra do processo</strong> (todas as peças) e a IA lê o <strong>último despacho</strong> pra te dizer o que precisa ser feito e se o prazo é de 💰 custas ou 📎 documentos.</p>
     <p style="font-size:12px;color:#94a3b8;margin:0 0 12px">💡 Custa R$ 0,02 por documento. Você vê a contagem e o valor <strong>antes</strong> de confirmar — nada é cobrado sem o seu OK.</p>
     ${anexos.length?`<p style="font-size:12px;color:#b45309;margin:0 0 10px">⚠️ Você já tem a íntegra de ${_dataBR(anexos[0].em)}. O download pago só vale se precisar de <strong>peça posterior</strong> a essa data.</p>`:''}
-    <button class="btn ${anexos.length?'btn-secondary':'btn-primary'} btn-sm" onclick="autosIApreview('${id}')">🤖 Puxar autos + resumo por IA${anexos.length?' (pago)':''}</button>
+    <button class="btn ${anexos.length?'btn-secondary':'btn-primary'} btn-sm" onclick="autosIApreview('${id}','${elId}')">🤖 Puxar autos + resumo por IA${anexos.length?' (pago)':''}</button>
   </div></div>`;
 }
 // Manda a IA ler a íntegra anexada. Não passa pelo Legal Mail: custo zero de download.
-async function resumirAnexoIA(id){
-  const el=document.getElementById('proc-autosia');
+async function resumirAnexoIA(id,elId='proc-autosia'){
+  const el=document.getElementById(elId);
   if(el)el.innerHTML='<div class="card"><div class="card-body"><p style="font-size:13px;margin:0">🤖 Lendo a íntegra anexada... um arquivo grande leva cerca de meio minuto.</p></div></div>';
   const r=await chamarFuncao('autos-anexo-ia',{action:'resumir',processo_id:id});
-  if(!r||r.erro){toast('Não deu para resumir: '+((r&&r.erro)||'falha'),'erro');carregarAutosIA(id);return;}
+  if(!r||r.erro){toast('Não deu para resumir: '+((r&&r.erro)||'falha'),'erro');carregarAutosIA(id,elId);return;}
   toast('✅ Resumo da íntegra pronto!','ok');
-  carregarAutosIA(id);
+  carregarAutosIA(id,elId);
 }
-function cardAutosPronto(id,r,doAnexo,anexos){
+function cardAutosPronto(id,r,doAnexo,anexos,elId='proc-autosia'){
   const ia=r.ia||{};
   const prov=ia.providencia;
   const selo=prov==='custas'?'<span class="tag" style="background:#7c2d12;color:#fed7aa">💰 Custas</span>':prov==='documentos'?'<span class="tag" style="background:#1e3a8a;color:#bfdbfe">📎 Documentos</span>':'<span class="tag">Geral</span>';
@@ -4719,51 +4719,52 @@ function cardAutosPronto(id,r,doAnexo,anexos){
     ${ia.ultimo_ato&&ia.ultimo_ato!=='null'?`<div style="font-size:11px;color:#64748b;margin-top:10px">Último ato: ${escHtml(ia.ultimo_ato)}</div>`:''}
     <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
       ${r.pdf?`<a class="btn btn-secondary btn-sm" href="${r.pdf}" target="_blank" rel="noopener">📄 Abrir íntegra (PDF)</a>`:''}
-      ${doAnexo?`<button class="btn btn-secondary btn-sm" onclick="resumirAnexoIA('${id}')">🔄 Reler a íntegra anexada</button>
-        <button class="btn btn-secondary btn-sm" onclick="autosIApreview('${id}')">💰 Baixar peças novas (pago)</button>`
-       :`<button class="btn btn-secondary btn-sm" onclick="autosIARegerar('${id}')">🔄 Atualizar resumo</button>`}
+      ${doAnexo?`<button class="btn btn-secondary btn-sm" onclick="resumirAnexoIA('${id}','${elId}')">🔄 Reler a íntegra anexada</button>
+        <button class="btn btn-secondary btn-sm" onclick="autosIApreview('${id}','${elId}')">💰 Baixar peças novas (pago)</button>`
+       :`<button class="btn btn-secondary btn-sm" onclick="autosIARegerar('${id}','${elId}')">🔄 Atualizar resumo</button>`}
     </div>
     <div style="font-size:11px;color:#64748b;margin-top:10px">⚠️ Resumo gerado por IA — confira sempre com os autos antes de agir.</div>
   </div></div>`;
 }
-async function autosIARegerar(id){
-  const el=document.getElementById('proc-autosia');
+async function autosIARegerar(id,elId='proc-autosia'){
+  const el=document.getElementById(elId);
   if(el)el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;margin:0">🔄 Atualizando o resumo com a IA... (grátis, alguns segundos)</p></div></div>`;
   const r=await chamarFuncao('autos-ia',{action:'regerar_resumo',processo_id:id});
-  if(!r||r.erro){toast('Erro: '+((r&&r.erro)||'falha'),'erro');carregarAutosIA(id);return;}
-  renderAutosIA(id,{estado:'pronto',...r});
+  if(!r||r.erro){toast('Erro: '+((r&&r.erro)||'falha'),'erro');carregarAutosIA(id,elId);return;}
+  renderAutosIA(id,{estado:'pronto',...r},null,elId);
   toast('✅ Resumo atualizado!','ok');
 }
-async function autosIApreview(id){
+async function autosIApreview(id,elId='proc-autosia'){
   toast('Consultando quantidade de documentos...','');
   const r=await chamarFuncao('autos-ia',{action:'preview',processo_id:id});
   if(!r||r.erro){toast('Erro: '+((r&&r.erro)||'falha'),'erro');return;}
-  if(r.ja_baixado){carregarAutosIA(id);return;}
+  if(r.ja_baixado){carregarAutosIA(id,elId);return;}
   const n=r.documentos||0;const custo=(r.custo||0).toFixed(2).replace('.',',');
   if(!n){toast('Nenhum documento disponível para este processo.','erro');return;}
   if(!confirm(`Este processo tem ${n} documento(s).\n\nBaixar a íntegra e gerar o resumo por IA vai custar aproximadamente R$ ${custo} (R$ 0,02 por documento).\n\nConfirmar?`))return;
-  autosIArequest(id);
+  autosIArequest(id,elId);
 }
-async function autosIArequest(id){
-  const el=document.getElementById('proc-autosia');
+async function autosIArequest(id,elId='proc-autosia'){
+  const el=document.getElementById(elId);
   if(el)el.innerHTML=`<div class="card"><div class="card-body"><p style="font-size:13px;margin:0">⏳ Solicitando os autos...</p></div></div>`;
   const r=await chamarFuncao('autos-ia',{action:'request',processo_id:id});
-  if(!r||r.erro){toast('Erro ao solicitar: '+((r&&r.erro)||''),'erro');carregarAutosIA(id);return;}
+  if(!r||r.erro){toast('Erro ao solicitar: '+((r&&r.erro)||''),'erro');carregarAutosIA(id,elId);return;}
   toast('Download iniciado. O resumo aparece aqui quando ficar pronto.','ok');
-  renderAutosIA(id,{estado:'processando',documentos:r.documentos});
-  autosIApoll(id);
+  renderAutosIA(id,{estado:'processando',documentos:r.documentos},null,elId);
+  autosIApoll(id,elId);
 }
-function autosIApoll(id){
+function autosIApoll(id,elId='proc-autosia'){
   window._autosPoll=window._autosPoll||{};
-  if(window._autosPoll[id])return;
-  window._autosPoll[id]=true;
+  const chave=id+':'+elId;
+  if(window._autosPoll[chave])return;
+  window._autosPoll[chave]=true;
   let n=0;
   const tick=async()=>{
     n++;
     const r=await chamarFuncao('autos-ia',{action:'status',processo_id:id});
-    if(r&&r.estado==='pronto'){window._autosPoll[id]=false;carregarAutosIA(id);toast('✅ Resumo dos autos pronto!','ok');return;}
-    if(r&&(r.estado==='erro'||r.estado==='erro_ia')){window._autosPoll[id]=false;carregarAutosIA(id);return;}
-    if(n>=40){window._autosPoll[id]=false;return;}
+    if(r&&r.estado==='pronto'){window._autosPoll[chave]=false;carregarAutosIA(id,elId);toast('✅ Resumo dos autos pronto!','ok');return;}
+    if(r&&(r.estado==='erro'||r.estado==='erro_ia')){window._autosPoll[chave]=false;carregarAutosIA(id,elId);return;}
+    if(n>=40){window._autosPoll[chave]=false;return;}
     setTimeout(tick,15000);
   };
   setTimeout(tick,15000);
@@ -4788,7 +4789,7 @@ async function carregarPeticoesProcesso(id){
 }
 async function carregarAudienciasProcesso(id){
   const el=document.getElementById('proc-audiencias');if(!el)return;
-  const{data}=await supa.from('audiencias').select('*,processos(numero,clientes(nome))').eq('processo_id',id).order('data').limit(30);
+  const{data}=await supa.from('audiencias').select('*,processos(numero,advogado_coatuacao_externa,vara,comarca,clientes(nome))').eq('processo_id',id).order('data').limit(30);
   if(!data?.length){el.innerHTML='<div class="empty-state" style="padding:16px"><p style="font-size:13px">Nenhuma audiência designada neste processo.</p></div>';return;}
   el.innerHTML=`<div class="card"><div class="card-body">${renderAudienciasLista(data)}</div></div>`;
 }
@@ -7564,14 +7565,6 @@ function _horaAudienciaTexto(hora){
   const h=String(hora||'').slice(0,5);
   return (h&&h!=='00:00')?h:'';
 }
-function _statusAudiencia(data){
-  const hojeIso=new Date().toISOString().split('T')[0];
-  if(!data)return{label:'',cor:'#94a3b8'};
-  if(data<hojeIso)return{label:'✓ REALIZADA',cor:'#94a3b8'};
-  if(data===hojeIso)return{label:'🔴 HOJE',cor:'#dc2626'};
-  const dias=Math.round((new Date(data+'T12:00:00')-new Date(hojeIso+'T12:00:00'))/86400000);
-  return{label:`EM ${dias} DIA${dias>1?'S':''}`,cor:'#b45309'};
-}
 // Cores/emoji por palavra-chave no texto livre real de `audiencias.tipo` (medido no banco —
 // não é lista inventada: valores reais incluem "Instrução por videoconferência", "Una por
 // videoconferência", "Conciliação em Execução..."). Sem match, marcador neutro.
@@ -7626,7 +7619,7 @@ function _audChips(){
 async function filtrarAudiencias(f){
   _audFiltro=f||'proximas';_audChips();
   const hoje=new Date().toISOString().split('T')[0];
-  let q=supa.from('audiencias').select('*,processos(numero,advogado_coatuacao_externa,clientes(nome))').order('data');
+  let q=supa.from('audiencias').select('*,processos(numero,advogado_coatuacao_externa,vara,comarca,clientes(nome))').order('data');
   if(_audFiltro==='proximas')q=q.gte('data',hoje);
   if(_audFiltro==='realizadas')q=q.lt('data',hoje);
   const{data,error}=await q.limit(200);
@@ -7635,17 +7628,9 @@ async function filtrarAudiencias(f){
   el.innerHTML=`<div class="card"><div class="card-body">${renderAudienciasLista(data)}</div></div>`;
 }
 function renderAudienciasLista(lista){
-  const hojeIso=new Date().toISOString().split('T')[0];
-  // Uma única "próxima" no sistema todo (não repete o selo em cada linha futura): a data+hora
-  // mais próxima entre as que ainda não aconteceram, dentro do que está sendo mostrado.
-  const futuras=lista.filter(a=>a.data>=hojeIso);
-  const proximaId=futuras.length?futuras.reduce((min,a)=>{
-    const chave=x=>(x.data||'')+'T'+(_horaAudienciaTexto(x.hora)||'23:59');
-    return chave(a)<chave(min)?a:min;
-  }).id:null;
   return lista.map(a=>{
     const dt=new Date((a.data||'')+'T12:00:00');
-    const status=_statusAudiencia(a.data);
+    const passou=a.data&&a.data<new Date().toISOString().split('T')[0];
     const hora=_horaAudienciaTexto(a.hora);
     const cli=a.processos?.clientes?.nome||'';
     const estilo=_tipoAudienciaEstilo(a.tipo);
@@ -7656,21 +7641,28 @@ function renderAudienciasLista(lista){
     const preparoBadge=!a.ia_preparacao
       ?'<span style="font-size:10px;color:#b45309;font-weight:600">⚠️ preparação pendente</span>'
       :(checklist&&checklist.length?`<span style="font-size:10px;color:#64748b">📋 ${feitos}/${checklist.length}</span>`:'');
+    // Linha "onde": prioriza o juízo (vara/comarca do processo) — mais informativo que o texto
+    // livre do local — mas nunca fabrica "Vara" quando o campo está vazio (mostra só o que tem).
+    const vara=a.processos?.vara, comarca=a.processos?.comarca;
+    const juizo=vara||comarca?`⚖️ ${vara?'Juízo da '+escHtml(vara):''}${vara&&comarca?' — ':''}${comarca?'Comarca de '+escHtml(comarca):''}`:'';
+    const resumo=`${tp.rotulo}${tp.complemento?' '+tp.complemento:''} · ${_dataBR(a.data)}${hora?' '+hora:''} · ${cli||'sem cliente'}${a.processos?.numero?' · Proc. '+a.processos.numero:''}`;
     return`<div class="prazo-item">
-      <div class="prazo-data-box ${status.label.includes('REALIZADA')?'ok':'proximo'}">
+      <div class="prazo-data-box ${passou?'ok':'proximo'}">
         <div class="dia">${isNaN(dt)?'--':dt.getDate().toString().padStart(2,'0')}</div>
         <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
         <h4>${estilo.emoji} <span style="font-weight:800">${tp.rotulo}</span>${tp.complemento?` <span style="font-weight:400;color:#94a3b8;font-size:11px">${escHtml(tp.complemento)}</span>`:''}${hora?` · ${hora}`:` · <span style="font-weight:400;color:#94a3b8;font-size:11px">horário a confirmar</span>`}
-          ${a.id===proximaId?'<span style="font-size:10px;color:#15803d;font-weight:700">🟢 PRÓXIMA</span>':`<span style="font-size:10px;color:${status.cor};font-weight:600">${status.label}</span>`}
           ${a.processos?.advogado_coatuacao_externa?`<span class="tag" style="background:rgba(124,58,237,.12);color:#7c3aed;font-size:10px" title="Advogado em co-atuação, fora do escritório">👥 ${escHtml(a.processos.advogado_coatuacao_externa)}</span>`:''}</h4>
         <p style="font-weight:600">${cli?escHtml(cli):'<span style="color:#94a3b8;font-weight:400">Cliente não vinculado</span>'}</p>
-        <p>${a.processos?.numero?`Proc. ${a.processos.numero} · `:''}${a.local?`📍 ${a.local} · `:''}${modBadge}</p>
-        <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:2px">${a.advogado_responsavel?`<span style="font-size:11px;color:#64748b">👤 ${_advCurto(a.advogado_responsavel)}</span>`:''}${preparoBadge}</p>
+        ${a.processos?.numero?`<p>📄 Proc. ${a.processos.numero}</p>`:''}
+        ${juizo?`<p>${juizo}</p>`:''}
+        ${a.local?`<p>📍 ${escHtml(a.local)}</p>`:''}
+        <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:2px">${a.advogado_responsavel?`<span style="font-size:11px;color:#64748b">👤 ${_advCurto(a.advogado_responsavel)}</span>`:''}${modBadge}${preparoBadge}</p>
         ${a.observacoes?`<p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${a.observacoes}</p>`:''}
       </div>
       <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn-icon" title="Copiar resumo" onclick="copiarDoStore(${_clip(resumo)})">📋</button>
         <button class="btn-icon" title="Ver preparação para a audiência" onclick="verAudiencia('${a.id}')">👁️</button>
         <button class="btn-icon" title="Excluir audiência" style="opacity:.55" onclick="excluirAudiencia('${a.id}')">🗑️</button>
       </div>
@@ -7716,26 +7708,44 @@ async function excluirAudiencia(id){
 let _audAberta=null;   // {id, checklist:{itens:[...]}, r} — guarda o estado do modal aberto,
                         // pro toggle de checklist não precisar recarregar a IA.
 async function verAudiencia(id){
-  const{data:a}=await supa.from('audiencias').select('*,processos(numero,assunto,advogado_responsavel,advogado_coatuacao_externa,clientes(nome))').eq('id',id).single();
+  const{data:a}=await supa.from('audiencias').select('*,processos(numero,assunto,classe_processual,vara,comarca,parte_contraria,polo_papeis,advogado_responsavel,advogado_coatuacao_externa,clientes(nome))').eq('id',id).single();
   if(!a){toast('Audiência não encontrada.','erro');return;}
   _audAberta={id:a.id,checklist:a.checklist_preparacao||null,r:null};
-  const cli=a.processos?.clientes?.nome||'';
-  const status=_statusAudiencia(a.data);
+  const p=a.processos||{};
+  const cli=p.clientes?.nome||'';
   const hora=_horaAudienciaTexto(a.hora);
   const tp=_tipoAudienciaPartes(a.tipo);
+  // Mostra só o que tem dado real — nunca fabrica Vara/Assunto/Classe vazios como se fossem
+  // "não informado", a seção some inteira quando não há nenhum campo preenchido.
+  const campo=(lbl,val)=>val?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${lbl}</span><div style="margin-top:2px;font-size:13px">${val}</div></div>`:'';
+  const secao=(titulo,...campos)=>{
+    const conteudo=campos.filter(Boolean).join('');
+    return conteudo?`<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">${titulo}</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">${conteudo}</div></div>`:'';
+  };
   const bloco=`
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-    <span style="font-size:11px;font-weight:700;color:${status.cor}">${status.label}</span>
-    <span style="font-size:12px;color:#94a3b8">
-      <span style="font-weight:700;color:var(--texto)">${tp.rotulo}</span>${tp.complemento?' '+escHtml(tp.complemento):''}${hora?' · '+hora:' · horário a confirmar'}
-      ${a.processos?.numero?' · Proc. '+escHtml(a.processos.numero):''}
-      ${cli?' · 🧑 '+escHtml(cli):''}
-      ${a.local?' · 📍 '+escHtml(a.local):''}
-      ${a.modalidade?' · '+(a.modalidade==='Videoconferência'?'💻':'📍')+' '+escHtml(a.modalidade):''}
-      ${a.processos?.advogado_coatuacao_externa?' · <span style="color:#7c3aed">👥 '+escHtml(a.processos.advogado_coatuacao_externa)+'</span>':''}
-    </span>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <span style="font-weight:800;font-size:15px">${tp.rotulo}</span>
+    ${tp.complemento?`<span style="font-weight:400;color:#94a3b8;font-size:12px">${escHtml(tp.complemento)}</span>`:''}
+    <span style="font-size:13px;color:#94a3b8">${hora?'· '+hora:'· horário a confirmar'}</span>
+    ${a.modalidade?`<span style="font-size:11px;color:#64748b">${a.modalidade==='Videoconferência'?'💻':'📍'} ${escHtml(a.modalidade)}</span>`:''}
+    ${p.advogado_coatuacao_externa?`<span class="tag" style="background:rgba(124,58,237,.12);color:#7c3aed;font-size:11px">👥 ${escHtml(p.advogado_coatuacao_externa)}</span>`:''}
   </div>
+  ${secao('Partes',
+    campo(p.polo_papeis||'Cliente',cli?escHtml(cli):''),
+    campo('Parte contrária',p.parte_contraria?escHtml(p.parte_contraria):''))}
+  ${secao('Processo',
+    campo('Nº',p.numero?escHtml(p.numero):''),
+    campo('Classe',p.classe_processual?escHtml(p.classe_processual):''),
+    campo('Assunto',p.assunto?escHtml(p.assunto):''))}
+  ${secao('Juízo',
+    campo('Vara',p.vara?escHtml(p.vara):''),
+    campo('Comarca',p.comarca?escHtml(p.comarca):''))}
+  ${a.local?`<div style="font-size:13px;color:#64748b;margin-bottom:12px">📍 ${escHtml(a.local)}</div>`:''}
   <div id="audiencia-briefing" style="margin-bottom:12px"></div>
+  <div style="margin-bottom:12px">
+    <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Autos</div>
+    <div id="audiencia-autosia">${a.processo_id?'':'<div style="font-size:12px;color:#94a3b8">Sem processo vinculado — não dá pra puxar os autos.</div>'}</div>
+  </div>
   ${a.observacoes?`<div style="font-size:12px;color:#94a3b8;margin-bottom:6px">OBSERVAÇÕES</div><div style="white-space:pre-wrap;font-size:13px;background:rgba(7,18,32,.6);padding:10px 12px;border-radius:8px">${escHtml(a.observacoes)}</div>`:''}
   <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:space-between;align-items:center;margin-top:13px;padding-top:11px;border-top:1px solid var(--border)">
     ${a.advogado_responsavel?`<span style="font-size:12px;color:#64748b">👤 Responsável: <strong style="color:var(--texto)">${escHtml(_advCurto(a.advogado_responsavel))}</strong></span>`:'<span></span>'}
@@ -7743,6 +7753,7 @@ async function verAudiencia(id){
   </div>`;
   abrirModal('🏛️ '+tp.rotulo+' — '+_dataBR(a.data), bloco, null, 'Fechar', false, true);
   carregarPreparoAudiencia(a.id);
+  if(a.processo_id)carregarAutosIA(a.processo_id,'audiencia-autosia');
 }
 async function carregarPreparoAudiencia(id,refazer){
   const el=document.getElementById('audiencia-briefing'); if(!el)return;
@@ -7825,6 +7836,11 @@ function htmlPreparoAudiencia(id,r){
 
     <div style="font-weight:700;color:#0f766e;margin:11px 0 5px">PREPARAÇÃO${itens.length?` — ${feitos}/${itens.length} itens`:''}</div>
     ${_checklistPreparoHtml(id,itens)}
+
+    <div style="font-weight:700;color:#7c3aed;margin:11px 0 5px">PONTOS CONTROVERTIDOS</div>
+    ${(o.pontos_controvertidos||[]).filter(x=>String(x||'').trim()).length
+      ?_listaPreparo(o.pontos_controvertidos,'#7c3aed','▸')
+      :'<div style="color:#64748b;font-size:12px;padding:2px 0">Puxe os autos abaixo pra ver pontos controvertidos baseados no processo real.</div>'}
 
     <div style="font-weight:700;color:#b91c1c;margin:11px 0 5px">PONTOS CRÍTICOS</div>
     ${_listaPreparo(o.pontos_atencao,'#b91c1c','⚠')}

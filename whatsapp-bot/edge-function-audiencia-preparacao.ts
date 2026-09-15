@@ -6,12 +6,17 @@
 // no prazo-orientacao — confirmado com ela antes de escrever isto.
 //
 // *** GRÁTIS POR CONSTRUÇÃO: nenhuma chamada ao Legal Mail. Só lê audiencias+processos já
-//     guardados no banco. ***
+//     guardados no banco (e, se existir, o resumo dos autos JÁ PAGO em processo_autos —
+//     nunca dispara um download novo). ***
 // Custo: só o Gemini, em cima de texto curto, fração de centavo por audiência.
 //
 // *** A TRAVA: SEM PROCESSO COM ASSUNTO, NÃO GERA PREPARO ESPECÍFICO. ***
 // Sem o assunto/contexto do caso, "preparar" viraria genérico ou inventado — devolve
 // sem_processo:true e NÃO chama o Gemini, mesmo espírito do sem_teor do prazo-orientacao.
+//
+// *** PONTOS CONTROVERTIDOS só existe quando há resumo de autos (processo_autos.status='pronto')
+//     — sem autos, a lista vem vazia. Puxar os autos é ação separada (botão AUTOS na tela,
+//     R$0,02/doc), esta função nunca aciona isso. ***
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const SB   = Deno.env.get("SUPABASE_URL")!;
@@ -51,23 +56,27 @@ function blocoPolo(cliente: string | null, polo: string | null, papeis: string |
   ].join(" ");
 }
 
-const PROMPT = [
-  "Você é advogado(a) do escritório Becker Advogados ajudando o colega a se PREPARAR para uma audiência.",
-  "Você recebe o tipo de audiência e os dados já cadastrados do processo (assunto, classe, partes). Você NÃO recebe os autos completos nem o histórico de movimentações — não finja conhecer nenhum dos dois.",
-  "Responda SOMENTE em JSON, com estas chaves:",
-  '{',
-  '"o_que_e":"2 a 3 frases explicando o que é este tipo de audiência e o que costuma acontecer nela",',
-  '"objetivo":"1 a 2 frases sobre o que esta audiência busca provar ou decidir processualmente, com base no assunto/classe do processo — string vazia se não houver base pra isso",',
-  '"o_que_levar":["documentos ou materiais concretos a levar, específicos deste caso quando possível"],',
-  '"o_que_preparar":["ações de preparo antes da audiência: o que revisar, o que alinhar com o cliente, testemunhas a preparar"],',
-  '"pontos_atencao":["cuidados ou riscos específicos deste caso a observar na condução da audiência"]',
-  '}',
-  "REGRAS DURAS:",
-  "1) Não invente fatos do processo que não foram passados a você. Se não houver base pra um item, devolva a lista VAZIA — lista vazia é resposta legítima e melhor que palpite genérico.",
-  "2) Nada de pontos a favor/contra nem de prognóstico de resultado — isso não foi pedido aqui, é só preparação prática.",
-  "3) No máximo 4 itens por lista, cada um com no máximo 20 palavras.",
-  "4) Português direto, sem juridiquês desnecessário.",
-].join(" ");
+function montaPrompt(temAutos: boolean): string {
+  return [
+    "Você é advogado(a) do escritório Becker Advogados ajudando o colega a se PREPARAR para uma audiência.",
+    "Você recebe o tipo de audiência e os dados já cadastrados do processo (assunto, classe, partes)" + (temAutos ? ", MAIS um resumo dos autos já analisado por IA (histórico e situação atual)." : ". Você NÃO recebe os autos completos nem o histórico de movimentações — não finja conhecer nenhum dos dois."),
+    "Responda SOMENTE em JSON, com estas chaves:",
+    '{',
+    '"o_que_e":"2 a 3 frases explicando o que é este tipo de audiência e o que costuma acontecer nela",',
+    '"objetivo":"1 a 2 frases sobre o que esta audiência busca provar ou decidir processualmente, com base no assunto/classe do processo — string vazia se não houver base pra isso",',
+    '"o_que_levar":["documentos ou materiais concretos a levar, específicos deste caso quando possível"],',
+    '"o_que_preparar":["ações de preparo antes da audiência: o que revisar, o que alinhar com o cliente, testemunhas a preparar"],',
+    '"pontos_controvertidos":["pontos de fato ou de direito em disputa neste processo, com base no RESUMO DOS AUTOS informado abaixo"],',
+    '"pontos_atencao":["cuidados ou riscos específicos deste caso a observar na condução da audiência"]',
+    '}',
+    "REGRAS DURAS:",
+    "1) Não invente fatos do processo que não foram passados a você. Se não houver base pra um item, devolva a lista VAZIA — lista vazia é resposta legítima e melhor que palpite genérico.",
+    "2) pontos_controvertidos: SÓ preencha se o bloco RESUMO DOS AUTOS foi fornecido nos dados abaixo. " + (temAutos ? "Ele foi fornecido — baseie-se nele." : "Ele NÃO foi fornecido — devolva lista VAZIA, mesmo que o assunto pareça sugerir algo."),
+    "3) Nada de pontos a favor/contra nem de prognóstico de resultado — isso não foi pedido aqui, é só preparação prática.",
+    "4) No máximo 4 itens por lista, cada um com no máximo 20 palavras.",
+    "5) Português direto, sem juridiquês desnecessário.",
+  ].join(" ");
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -100,6 +109,12 @@ Deno.serve(async (req) => {
 
     if (!GKEY) return json({ erro: "sem GEMINI_API_KEY" }, 500);
 
+    // Resumo dos autos, SE já foi pago/puxado em algum momento (ficha do processo ou aqui mesmo,
+    // botão AUTOS) — leitura grátis do que já está em cache, nunca dispara download novo.
+    const autosRows = await sb(`processo_autos?processo_id=eq.${p.id}&status=eq.pronto&select=ia_resumo,ia_json&order=atualizado_em.desc&limit=1`);
+    const autos = Array.isArray(autosRows) && autosRows[0] ? autosRows[0] : null;
+    const iaAutos = autos?.ia_json || {};
+
     const polo = blocoPolo(p?.clientes?.nome || null, p?.polo_cliente || null, p?.polo_papeis || null);
     const ctx = [
       `TIPO DE AUDIÊNCIA: ${a.tipo || "—"}`,
@@ -113,13 +128,20 @@ Deno.serve(async (req) => {
       `VARA/COMARCA: ${[p?.vara, p?.comarca].filter(Boolean).join(" · ") || "—"}`,
       `PARTE CONTRÁRIA: ${p?.parte_contraria || "—"}`,
       `SITUAÇÃO DO PROCESSO: ${p?.situacao || "—"}`,
+      autos ? [
+        ``,
+        `RESUMO DOS AUTOS (já analisado por IA em consulta paga anterior):`,
+        autos.ia_resumo ? String(autos.ia_resumo).slice(0, 3000) : "",
+        iaAutos.situacao_atual ? `SITUAÇÃO ATUAL: ${iaAutos.situacao_atual}` : "",
+        Array.isArray(iaAutos.historico) && iaAutos.historico.length ? `HISTÓRICO: ${iaAutos.historico.join("; ")}` : "",
+      ].filter(Boolean).join("\n") : "",
     ].filter(Boolean).join("\n");
 
     const g = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GMODEL}:generateContent?key=${encodeURIComponent(GKEY)}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `${PROMPT}\n\n${polo}\n\n===== DADOS =====\n${ctx}\n===== FIM =====` }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 1200, responseMimeType: "application/json" },
+        contents: [{ role: "user", parts: [{ text: `${montaPrompt(!!autos)}\n\n${polo}\n\n===== DADOS =====\n${ctx}\n===== FIM =====` }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 1400, responseMimeType: "application/json" },
       }),
     });
     if (!g.ok) return json({ erro: `gemini http ${g.status}` }, 502);
@@ -130,6 +152,8 @@ Deno.serve(async (req) => {
     let obj: any = null; try { obj = JSON.parse(txt); } catch { /* */ }
     if (!obj) return json({ erro: "json invalido da IA" }, 502);
 
+    // trava do lado do servidor também — não confia só na instrução do prompt.
+    if (!autos) obj.pontos_controvertidos = [];
     obj.limite = "Preparação com base nos dados cadastrados do processo. Confira nos autos antes da audiência.";
 
     await sb(`audiencias?id=eq.${audienciaId}`, {
