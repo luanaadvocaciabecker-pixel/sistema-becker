@@ -3561,13 +3561,13 @@ function _classPrazoDemanda(p){
 // "a tela de Assessoria deveria funcionar como a entrada da carteira de clientes... cada
 // cliente, quando aberto, vira praticamente um dossiê operacional completo". Ou seja: número de
 // funcionário/processo/auditoria por cliente não é detalhe, é o indicador de tamanho da
-// operação — por isso viram KPI no topo e estatística em cada card, não só uma tabela.
+// operação — por isso vira estatística em cada card, não só uma tabela. (Teve uma linha de KPIs
+// agregados da carteira no topo também, mas ela pediu pra tirar — ficou poluído; a estatística
+// por card já responde a mesma pergunta, cliente a cliente.)
 async function pAssessoriaClientes(){
   const c=document.getElementById('conteudo');
   assessoriaClientesFiltro={busca:''};
   c.innerHTML=`
-  <div class="stat-cards-row" id="assessoria-kpis">${['Clientes Ativos','Funcionários','Processos','Demandas em Aberto','Faturamento Mensal'].map(l=>`
-    <div class="stat-card"><div class="stat-val">—</div><div class="stat-label">${l}</div></div>`).join('')}</div>
   <div class="toolbar">
     <div class="search-box"><input type="text" placeholder="Buscar cliente..." oninput="assessoriaClientesFiltro.busca=this.value;buscarAssessoriaClientes()"></div>
     <button class="btn btn-primary" onclick="novaAssessoria()">+ Ativar Assessoria</button>
@@ -3576,7 +3576,7 @@ async function pAssessoriaClientes(){
   buscarAssessoriaClientes();
 }
 async function buscarAssessoriaClientes(){
-  const kp=document.getElementById('assessoria-kpis'),lista=document.getElementById('assessoria-cl-lista');
+  const lista=document.getElementById('assessoria-cl-lista');
   if(!lista)return;
   // `assessoria_demandas`/`assessoria_funcionarios`/`assessoria_pendencias`/`processos`/
   // `processos_adm` não têm FK direto pra `assessorias` (o vínculo é por cliente_id) — por isso
@@ -3589,7 +3589,6 @@ async function buscarAssessoriaClientes(){
   if(q)rows=rows.filter(a=>(a.clientes?.nome||'').toLowerCase().includes(q));
   if(error||!rows.length){
     lista.innerHTML=`<div class="card"><div class="card-body"><div class="empty-state compacto"><p>${error?'Erro ao carregar.':'Nenhum cliente de assessoria ainda. Clique em "+ Ativar Assessoria" pra começar.'}</p></div></div></div>`;
-    if(kp)kp.querySelectorAll('.stat-val').forEach(v=>v.textContent='0');
     return;
   }
   const clienteIds=rows.map(a=>a.cliente_id);
@@ -3608,18 +3607,6 @@ async function buscarAssessoriaClientes(){
   const procAdmPor=contarPor(procAdm);
   const procTotalPor={};
   clienteIds.forEach(id=>procTotalPor[id]=(procJudPor[id]||0)+(procAdmPor[id]||0));
-
-  if(kp){
-    const ativas=rows.filter(a=>a.status==='Ativa');
-    const idsAtivos=ativas.map(a=>a.cliente_id);
-    const soma=(mapa)=>idsAtivos.reduce((s,id)=>s+(mapa[id]||0),0);
-    const faturamento=ativas.reduce((s,a)=>s+(Number(a.valor_mensal)||0),0);
-    const vals=[ativas.length,soma(funcsPor),soma(procTotalPor),soma(demandasAbertasPor),
-      'R$ '+faturamento.toLocaleString('pt-BR',{minimumFractionDigits:2})];
-    kp.querySelectorAll('.stat-card').forEach((card,i)=>{
-      const v=card.querySelector('.stat-val');if(v)v.textContent=vals[i];
-    });
-  }
 
   lista.innerHTML=`<div style="display:flex;flex-direction:column;gap:12px">${rows.map(a=>{
     const nome=a.clientes?.nome||'—';
