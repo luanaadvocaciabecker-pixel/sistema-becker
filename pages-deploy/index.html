@@ -4393,6 +4393,7 @@ async function buscarProcessos(keepPage){
     <td style="font-size:12px">
       <div style="font-weight:600;color:var(--texto)">${p.advogado_responsavel||'<span style="color:#ef4444">⚠️ Sem resp.</span>'}</div>
       ${p.advogado_auxiliar?`<div style="font-size:10px;color:#52525B">Aux: ${p.advogado_auxiliar}</div>`:''}
+      ${p.advogado_coatuacao_externa?`<div style="font-size:10px;color:#7c3aed">👥 ${escHtml(p.advogado_coatuacao_externa)}</div>`:''}
     </td>
     <td><span class="tag ${tagSituacaoProcesso(p.situacao)}">${rotuloSituacaoProcesso(p.situacao)}</span></td>
     <td style="white-space:nowrap">
@@ -4487,6 +4488,7 @@ async function abrirProcesso(id){
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <span class="tag ${tagSituacaoProcesso(p.situacao)}">${rotuloSituacaoProcesso(p.situacao)}</span>
         ${_etiquetaPolo(p.polo_cliente,p.polo_papeis)}
+        ${p.advogado_coatuacao_externa?`<span class="tag" style="background:rgba(124,58,237,.12);color:#7c3aed" title="Advogado em co-atuação, fora do escritório">👥 ${escHtml(p.advogado_coatuacao_externa)}</span>`:''}
         <button class="btn btn-secondary btn-sm" onclick="editarProcesso('${p.id}')">✏️ Editar</button>
         <button class="btn btn-secondary btn-sm" onclick="abrirMovs('${p.id}')">🔄 Movimentações</button>
         <button class="btn btn-primary btn-sm" onclick="uploadDocProcesso('${p.id}')">📎 Anexar íntegra/documento</button>
@@ -4498,6 +4500,7 @@ async function abrirProcesso(id){
         ${campo('Advogado responsável',p.advogado_responsavel,'var(--azul3)')}
         ${campo('Advogado auxiliar',p.advogado_auxiliar)}
         ${campo('Secretária responsável',p.secretaria_responsavel)}
+        ${campo('Advogado em co-atuação (externo)',p.advogado_coatuacao_externa?escHtml(p.advogado_coatuacao_externa):'','#7c3aed')}
         ${campo('Tribunal',p.tribunal)}
         ${campo('Comarca',p.comarca)}
         ${campo('Vara',p.vara)}
@@ -4963,6 +4966,8 @@ function formProcesso(d={}){
       <select name="situacao">${['Ativo','Em andamento','Suspenso','Arquivado'].map(o=>`<option ${rotuloSituacaoProcesso(d.situacao)===o?'selected':''}>${o}</option>`).join('')}</select>
     </div>
   </div>
+  <div class="form-field"><label>Advogado(a) em co-atuação <span style="color:#52525B;font-weight:400">(externo, fora do escritório — opcional)</span></label>
+    <input name="advogado_coatuacao_externa" value="${escHtml(d.advogado_coatuacao_externa||'')}" placeholder="Ex: Umberto Carlos Becker (OAB/PR 15743)"></div>
   <div class="form-field"><label>Observações Internas</label><textarea name="observacoes">${d.observacoes||''}</textarea></div>
 </form>`;}
 
@@ -7516,7 +7521,7 @@ function _audChips(){
 async function filtrarAudiencias(f){
   _audFiltro=f||'proximas';_audChips();
   const hoje=new Date().toISOString().split('T')[0];
-  let q=supa.from('audiencias').select('*,processos(numero,clientes(nome))').order('data');
+  let q=supa.from('audiencias').select('*,processos(numero,advogado_coatuacao_externa,clientes(nome))').order('data');
   if(_audFiltro==='proximas')q=q.gte('data',hoje);
   if(_audFiltro==='realizadas')q=q.lt('data',hoje);
   const{data,error}=await q.limit(200);
@@ -7536,11 +7541,12 @@ function renderAudienciasLista(lista){
         <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
-        <h4>${a.tipo||'Audiência'}${hora?` · ${hora}`:''} ${passou?'<span style="font-size:10px;color:#94a3b8">realizada</span>':'<span style="font-size:10px;color:#60a5fa;font-weight:700">próxima</span>'}</h4>
+        <h4>${a.tipo||'Audiência'}${hora?` · ${hora}`:''} ${passou?'<span style="font-size:10px;color:#94a3b8">realizada</span>':'<span style="font-size:10px;color:#60a5fa;font-weight:700">próxima</span>'} ${a.processos?.advogado_coatuacao_externa?`<span class="tag" style="background:rgba(124,58,237,.12);color:#7c3aed;font-size:10px" title="Advogado em co-atuação, fora do escritório">👥 ${escHtml(a.processos.advogado_coatuacao_externa)}</span>`:''}</h4>
         <p>${a.processos?.numero?`Proc. ${a.processos.numero} · `:''}${cli?`🧑 ${cli} · `:''}${a.local?`📍 ${a.local} · `:''}${a.advogado_responsavel?`👤 ${_advCurto(a.advogado_responsavel)}`:''}</p>
         ${a.observacoes?`<p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${a.observacoes}</p>`:''}
       </div>
       <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn-icon" title="Ver preparação para a audiência" onclick="verAudiencia('${a.id}')">👁️</button>
         <button class="btn-icon" onclick="excluirAudiencia('${a.id}')">🗑️</button>
       </div>
     </div>`;
@@ -7572,6 +7578,80 @@ async function excluirAudiencia(id){
   if(!confirm('Excluir audiência?'))return;
   await supa.from('audiencias').delete().eq('id',id);
   toast('Removida.','ok');filtrarAudiencias(_audFiltro);
+}
+
+// ─── OLHINHO DA AUDIÊNCIA (preparação, não pontos favoráveis/desfavoráveis — pedido dela) ──────
+// Mesmo mecanismo do olhinho de Prazos (verPrazo/carregarBriefingPrazo/htmlBriefingPrazo), só
+// que o conteúdo é focado em preparar a audiência (o que levar, como se preparar), não em
+// pontos a favor/contra — ela escolheu esse foco quando perguntada. Cache em
+// audiencias.ia_preparacao/ia_preparacao_em, edge function audiencia-preparacao.
+async function verAudiencia(id){
+  const{data:a}=await supa.from('audiencias').select('*,processos(numero,assunto,advogado_responsavel,advogado_coatuacao_externa,clientes(nome))').eq('id',id).single();
+  if(!a){toast('Audiência não encontrada.','erro');return;}
+  const cli=a.processos?.clientes?.nome||'';
+  const bloco=`
+  <div style="font-size:12px;color:#94a3b8;margin-bottom:10px">
+    ${a.tipo||'Audiência'}${a.hora?' · '+a.hora.slice(0,5):''}
+    ${a.processos?.numero?' · Proc. '+escHtml(a.processos.numero):''}
+    ${cli?' · 🧑 '+escHtml(cli):''}
+    ${a.local?' · 📍 '+escHtml(a.local):''}
+    ${a.processos?.advogado_coatuacao_externa?' · <span style="color:#7c3aed">👥 '+escHtml(a.processos.advogado_coatuacao_externa)+'</span>':''}
+  </div>
+  <div id="audiencia-briefing" style="margin-bottom:12px"></div>
+  ${a.observacoes?`<div style="font-size:12px;color:#94a3b8;margin-bottom:6px">OBSERVAÇÕES</div><div style="white-space:pre-wrap;font-size:13px;background:rgba(7,18,32,.6);padding:10px 12px;border-radius:8px">${escHtml(a.observacoes)}</div>`:''}
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:13px;padding-top:11px;border-top:1px solid var(--border)">
+    ${a.processo_id?`<button class="btn btn-sm btn-secondary" onclick="fecharModal();abrirProcesso('${a.processo_id}')">⚖️ Abrir processo</button>`:''}
+  </div>`;
+  abrirModal('🏛️ '+(a.tipo||'Audiência')+' — '+_dataBR(a.data), bloco, null, 'Fechar', false, true);
+  carregarPreparoAudiencia(a.id);
+}
+async function carregarPreparoAudiencia(id,refazer){
+  const el=document.getElementById('audiencia-briefing'); if(!el)return;
+  el.innerHTML='<div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:8px;padding:11px 13px;font-size:13px;color:#94a3b8">🤖 montando a preparação…</div>';
+  let r=null;
+  try{ r=await chamarFuncao('audiencia-preparacao',{audiencia_id:id,refazer:refazer===true}); }
+  catch(e){ r={erro:e.message||'falha'}; }
+  el.innerHTML=htmlPreparoAudiencia(id,r);
+}
+function refazerPreparoAudiencia(id){ carregarPreparoAudiencia(id,true); }
+function _listaPreparo(itens,cor,sinal){
+  const a=(itens||[]).filter(x=>String(x||'').trim());
+  if(!a.length)return '<div style="color:#64748b;font-size:12px;padding:2px 0">nada a apontar</div>';
+  return a.map(x=>`<div style="display:flex;gap:6px;padding:2px 0"><span style="color:${cor};font-weight:700;flex-shrink:0">${sinal}</span><span>${escHtml(x)}</span></div>`).join('');
+}
+function htmlPreparoAudiencia(id,r){
+  const cx=(t,c,b)=>`<div style="background:${b};border:1px solid ${c};border-radius:8px;padding:11px 13px;font-size:13px;margin-bottom:8px">${t}</div>`;
+  if(!r||r.erro)
+    return cx(`<span style="color:#b91c1c">Não consegui montar a preparação: ${escHtml(r?.erro||'erro')}</span>
+      <div style="margin-top:7px"><button class="btn btn-sm btn-secondary" onclick="carregarPreparoAudiencia('${id}')">↻ tentar de novo</button></div>`,
+      'rgba(239,68,68,.30)','rgba(239,68,68,.08)');
+
+  if(r.sem_processo)
+    return cx(`<div style="font-weight:700;color:#b45309;margin-bottom:6px">SEM DADOS SUFICIENTES DO CASO</div>
+      <div style="line-height:1.6">${escHtml(r.motivo||'')}</div>
+      <div style="color:#64748b;font-size:11px;margin-top:6px">Sem o processo/assunto vinculado eu não escrevo preparo específico — seria genérico ou inventado.</div>`,
+      'rgba(245,158,11,.30)','rgba(245,158,11,.08)');
+
+  const o=r.preparacao||{};
+  return cx(`
+    <div style="font-weight:700;color:#3730a3;margin-bottom:6px">O QUE É ESSA AUDIÊNCIA</div>
+    <div style="line-height:1.6">${escHtml(o.o_que_e||'—')}</div>
+
+    <div style="font-weight:700;color:#0f766e;margin:11px 0 5px">O QUE LEVAR</div>
+    ${_listaPreparo(o.o_que_levar,'#0f766e','▸')}
+
+    <div style="font-weight:700;color:#b45309;margin:11px 0 5px">COMO SE PREPARAR</div>
+    ${_listaPreparo(o.o_que_preparar,'#b45309','▸')}
+
+    <div style="font-weight:700;color:#b91c1c;margin:11px 0 5px">PONTOS DE ATENÇÃO</div>
+    ${_listaPreparo(o.pontos_atencao,'#b91c1c','⚠')}
+
+    <div style="margin-top:11px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span style="color:#64748b;font-size:11px">${r.cache?' · guardado'+(r.em?' em '+_dataBR(String(r.em).slice(0,10)):''):' · gerado agora'}</span>
+      <button class="btn btn-sm btn-secondary" style="padding:2px 8px;font-size:11px" onclick="refazerPreparoAudiencia('${id}')">↻ refazer</button>
+    </div>
+    <div style="color:#64748b;font-size:11px;margin-top:6px;font-style:italic">⚠️ ${escHtml(o.limite||'Preparação com base nos dados cadastrados. Confira nos autos antes da audiência.')}</div>`,
+    'rgba(99,102,241,.25)','rgba(99,102,241,.06)');
 }
 
 // ---- RELATÓRIOS ----
