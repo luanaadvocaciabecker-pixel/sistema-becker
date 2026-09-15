@@ -2009,6 +2009,7 @@ const supa=(()=>{
       in(c,vals){q.filters.push(`${c}=in.(${(vals||[]).map(v=>encodeURIComponent(String(v))).join(',')})`);return b},
       is(c,v){q.filters.push(`${c}=is.${v===null?'null':(v===true?'true':(v===false?'false':v))}`);return b},
       single(){q.single=true;return b},
+      maybeSingle(){q.single=true;return b},
       insert(d){q.op='insert';q.insData=d;return b},
       update(d){q.op='update';q.updData=d;return b},
       delete(){q.op='delete';return b},
