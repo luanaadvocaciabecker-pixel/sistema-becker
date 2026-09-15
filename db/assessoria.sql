@@ -221,3 +221,20 @@
 -- vinculado, documento de categoria solta, pendência criada e concluída, cascade de
 -- `assessoria_funcionario_id` (ON DELETE SET NULL) confirmado ao excluir o funcionário — o
 -- documento continua existindo, só perde o vínculo. Tudo limpo depois (0 linhas de teste).
+--
+-- BUG REAL achado só depois de publicar (15/09/2026), migration `fix_assessoria_grants_authenticated`:
+-- o teste acima (e todo teste anterior desta sessão) foi feito via SQL direto, com a role
+-- `postgres`/service role — que ignora GRANT e RLS igual. Na tela de verdade, logada como
+-- usuária normal (role `authenticated`), a lista "Assessoria → Clientes" dava 403 e "Erro ao
+-- carregar": a policy RLS `becker_staff_all` estava certa nas 4 tabelas (`assessorias`,
+-- `assessoria_demandas`, `assessoria_demanda_prazos`, `assessoria_informativos`, criadas na
+-- migration `assessoria_schema`) e nas 2 novas desta sessão (`assessoria_funcionarios`,
+-- `assessoria_pendencias`) — mas faltava o GRANT básico (SELECT/INSERT/UPDATE/DELETE) pra role
+-- `authenticated` em TODAS as 6, só tinham REFERENCES/TRIGGER/TRUNCATE (herdados do owner). RLS
+-- só decide DENTRO de uma operação já autorizada por GRANT — sem o GRANT, o Postgres nem chega
+-- a avaliar a policy. Ou seja: a Assessoria inteira nunca tinha funcionado de verdade pela tela,
+-- desde a PR #59 original, e ninguém tinha notado porque todo teste até aqui usou service role.
+-- Corrigido com `grant select, insert, update, delete on <tabela> to authenticated;` nas 6.
+-- Lição registrada: testar direto no banco prova que o SCHEMA está certo, não que a TELA
+-- consegue acessar — falta sempre conferir os grants (comparar com `clientes`/`processos`, que
+-- já tinham) antes de considerar uma tabela nova pronta pra produção.
