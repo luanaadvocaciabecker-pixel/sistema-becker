@@ -2034,7 +2034,7 @@ async function init(){
   document.getElementById('tela-setup').style.display='none';
   let sess=_sessao();
   if(sess&&(!sess.expires_at||sess.expires_at<=Date.now()/1000)&&sess.refresh_token){sess=await refrescarSessao();}
-  if(sess&&sess.access_token&&sess.expires_at&&sess.expires_at>Date.now()/1000){usuarioAtual=sess.user;mostrarApp();ir('dashboard');setTimeout(atualizarBadgeNotificacoes,1500);_agendarRefresh();}
+  if(sess&&sess.access_token&&sess.expires_at&&sess.expires_at>Date.now()/1000){usuarioAtual=sess.user;mostrarApp();_restaurarRota();setTimeout(atualizarBadgeNotificacoes,1500);_agendarRefresh();}
   else mostrarLogin();
 }
 function iniciarSupa(){}
@@ -2572,7 +2572,28 @@ async function salvarAtendimento(e) {
 
 function toggleMenu(){document.getElementById('app')?.classList.toggle('menu-aberto');}
 function fecharMenu(){document.getElementById('app')?.classList.remove('menu-aberto');}
+// Guarda a tela atual na URL (hash), só pra sobreviver a um F5/atualizar — ela reclamou que
+// recarregar a página sempre voltava pro Dashboard, em vez de manter onde estava. replaceState
+// (não pushState) de propósito: não mexe no botão "voltar" do navegador, só no que aparece de
+// novo depois de um reload.
+function _setRota(caminho){
+  try{
+    if(location.hash.slice(1)===caminho)return;
+    history.replaceState(null,'',location.pathname+location.search+'#'+caminho);
+  }catch(_){}
+}
+function _restaurarRota(){
+  const h=(location.hash||'').replace(/^#\/?/,'');
+  if(!h){ir('dashboard');return;}
+  const partes=h.split('/');
+  const tipo=partes[0],id=partes[1];
+  const detalhes={cliente:abrirCliente,processo:abrirProcesso,'assessoria-cliente':abrirAssessoriaCliente,'novo-negocio':abrirNovoNegocio};
+  if(id&&detalhes[tipo]&&/^\d+$/.test(id))detalhes[tipo](Number(id));
+  else if(/^[a-z0-9-]+$/.test(tipo))ir(tipo);
+  else ir('dashboard');
+}
 function ir(pagina){
+  _setRota(pagina);
   fecharMenu();
   document.querySelectorAll('.nav-item,.nav-subitem').forEach(n=>n.classList.remove('ativo'));
   document.querySelectorAll(`.nav-item[data-page="${pagina}"],.nav-subitem[data-page="${pagina}"]`).forEach(n=>n.classList.add('ativo'));
@@ -3070,6 +3091,7 @@ function filtrarProcessosCliente(id){ir('processos');setTimeout(()=>{processosFi
 
 // ---- PERFIL DO CLIENTE ----
 async function abrirCliente(id){
+  _setRota('cliente/'+id);
   const c=document.getElementById('conteudo');
   c.innerHTML='<p style="text-align:center;padding:40px;color:#94a3b8">Carregando...</p>';
   const res=await fetch(`${SUPA_URL}/rest/v1/clientes?id=eq.${id}&select=*`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
@@ -3635,6 +3657,7 @@ async function marcarInformativoEnviado(assessoriaId,clienteId){
 
 // ---- Assessoria: página do cliente ----
 async function abrirAssessoriaCliente(clienteId){
+  _setRota('assessoria-cliente/'+clienteId);
   const c=document.getElementById('conteudo');
   c.innerHTML='<p style="text-align:center;padding:40px;color:#94a3b8">Carregando...</p>';
   const{data:cl}=await supa.from('clientes').select('id,nome').eq('id',clienteId).single();
@@ -4330,6 +4353,7 @@ function _etiquetaPolo(polo,papeis){
     Nosso cliente: ${escHtml(txt)}</span>`;
 }
 async function abrirProcesso(id){
+  _setRota('processo/'+id);
   const c=document.getElementById('conteudo');
   c.innerHTML='<p style="text-align:center;padding:40px;color:#94a3b8">Carregando processo...</p>';
   const res=await fetch(`${SUPA_URL}/rest/v1/processos?id=eq.${id}&select=*,clientes(id,nome,telefone,whatsapp)`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
@@ -4962,6 +4986,7 @@ function renderNovosNegociosLista(){
 let _nnConclCount=0;
 function filtrarNN(f){_nnFiltro=(_nnFiltro===f?'todos':f);renderNovosNegocios();}
 async function abrirNovoNegocio(id,aba){
+  _setRota('novo-negocio/'+id);
   aba=aba||'dados';
   const c=document.getElementById('conteudo');
   c.innerHTML='<p style="text-align:center;padding:40px;color:#64748b">Carregando...</p>';
