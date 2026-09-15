@@ -226,10 +226,12 @@ tbody tr:hover td{background:rgba(201,165,92,.04)}
 td strong{color:var(--texto)}
 
 /* ── TABS ─────────────────────────────────────── */
-.tab-strip{display:flex;gap:4px;padding:0;border-bottom:1px solid rgba(255,255,255,.06);margin-bottom:16px}
+.tab-strip{display:flex;gap:4px;padding:0;border-bottom:1px solid rgba(255,255,255,.06);margin-bottom:16px;
+  overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
 .btn-tab{background:none;border:none;border-bottom:2.5px solid transparent;
   padding:10px 16px;font-size:12px;font-weight:600;color:rgba(255,255,255,.3);
-  cursor:pointer;margin-bottom:-1px;transition:.15s;font-family:inherit;border-radius:0}
+  cursor:pointer;margin-bottom:-1px;transition:.15s;font-family:inherit;border-radius:0;
+  white-space:nowrap;flex-shrink:0}
 .btn-tab.ativo{color:var(--gold);border-bottom-color:var(--gold)}
 .btn-tab:hover{color:rgba(255,255,255,.7)}
 .tab-count{display:inline-block;background:rgba(255,255,255,.08);
@@ -360,6 +362,11 @@ select.filtro option{background:#0D1B2A}
 .empty-state{text-align:center;padding:60px 20px;color:var(--cinza5)}
 .empty-state .icon{font-size:40px;margin-bottom:12px;opacity:.3}
 .empty-state p{font-size:14px;color:rgba(255,255,255,.3)}
+/* Variante compacta — pra estado vazio dentro de um card pequeno (ex. pastas da Assessoria),
+   onde o ícone grande de tela-cheia fica desproporcional. Aditiva, não mexe no .empty-state
+   genérico usado nas listas inteiras (Prazos, Processos etc.). */
+.empty-state.compacto{padding:18px 12px;text-align:left}
+.empty-state.compacto p{font-size:13px}
 
 /* ── TOAST ────────────────────────────────────── */
 #toast{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px}
@@ -3664,23 +3671,46 @@ async function abrirAssessoriaCliente(clienteId){
   if(!cl){toast('Cliente não encontrado.','erro');return;}
   const tt=document.getElementById('topbar-titulo'),ts=document.getElementById('topbar-sub');
   if(tt)tt.textContent='Assessoria — '+cl.nome;
-  if(ts)ts.textContent='Contrato, informativos, demandas e documentos deste cliente';
+  if(ts)ts.textContent='Contrato, documentos e processos deste cliente';
   c.innerHTML=`<div id="assessoria-cliente-page">
-    <div style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
-      <button class="btn btn-secondary" onclick="ir('assessoria-clientes')">← Voltar</button>
-      <button class="btn btn-secondary btn-sm" onclick="abrirCliente(${clienteId})">👤 Ver ficha do cliente</button>
-    </div>
-    <div id="assessoria-cl">Carregando...</div>
+    <div id="assessoria-cl-header">Carregando...</div>
+    <div id="assessoria-cl"></div>
   </div>`;
-  carregarAssessoriaCliente(clienteId);
+  carregarAssessoriaCliente(clienteId,cl.nome);
 }
-async function carregarAssessoriaCliente(clienteId){
-  const el=document.getElementById('assessoria-cl');if(!el)return;
+// Cabeçalho de identidade (avatar+nome+status+valor) no lugar da barra solta "Voltar/Ver
+// ficha" — ela reparou que a ficha "tá chinfrim", sem nada que dissesse de quem era a tela.
+function _headerAssessoriaCliente(clienteId,nome,assessoria){
+  const iniciais=iniciaisPerfil(nome);
+  const stats=assessoria?`
+    <span class="tag">${escHtml(assessoria.status)}</span>
+    <span style="font-size:13px;color:var(--cinza5)">Início <strong style="color:var(--texto)">${_dataBR(assessoria.data_inicio)||'—'}</strong></span>
+    <span style="font-size:13px;color:var(--cinza5)">Mensal <strong style="color:var(--texto)">${assessoria.valor_mensal?'R$ '+Number(assessoria.valor_mensal).toLocaleString('pt-BR',{minimumFractionDigits:2}):'—'}</strong></span>
+  `:'';
+  return`
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-body" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--gold2,var(--gold)),var(--gold));color:var(--card,#050D1E);display:grid;place-items:center;font-size:18px;font-weight:800;flex-shrink:0">${iniciais}</div>
+      <div style="flex:1;min-width:180px">
+        <h2 style="font-size:18px;margin-bottom:4px">${escHtml(nome)}</h2>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">${stats}</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="btn-icon" onclick="ir('assessoria-clientes')" title="Voltar para a lista">←</button>
+        <button class="btn-icon" onclick="abrirCliente(${clienteId})" title="Ver ficha do cliente">👤</button>
+      </div>
+    </div>
+  </div>`;
+}
+async function carregarAssessoriaCliente(clienteId,nomeCliente){
+  const elH=document.getElementById('assessoria-cl-header'),el=document.getElementById('assessoria-cl');
+  if(!el)return;
   const{data:assessoria}=await supa.from('assessorias').select('*').eq('cliente_id',clienteId).maybeSingle();
+  if(elH)elH.innerHTML=_headerAssessoriaCliente(clienteId,nomeCliente,assessoria);
   if(!assessoria){
     el.innerHTML=`<div class="card"><div class="card-body">
-      <div class="empty-state"><div class="icon">🧭</div><p>Este cliente ainda não tem assessoria ativa.</p></div>
-      <div style="text-align:center;margin-top:12px"><button class="btn btn-primary" onclick="ativarAssessoria(${clienteId})">+ Ativar Assessoria</button></div>
+      <div class="empty-state compacto"><p>Este cliente ainda não tem assessoria ativa.</p></div>
+      <button class="btn btn-primary" onclick="ativarAssessoria(${clienteId})">+ Ativar Assessoria</button>
     </div></div>`;
     return;
   }
@@ -3689,50 +3719,51 @@ async function carregarAssessoriaCliente(clienteId){
     supa.from('assessoria_demandas').select('*,assessoria_demanda_prazos(*)').eq('cliente_id',clienteId).order('created_at',{ascending:false})
   ]);
   const ultimo=(informativos||[])[0];
+  const abas=[
+    ['visao','📑','Visão Geral'],['contrato','📄','Contrato Becker'],['func','👥','Funcionários'],
+    ['empresarial','🏢','Empresariais'],['elaborado','✍️','Elaborados'],['auditoria','🔎','Auditoria'],
+    ['processos','⚖️','Processos'],['docs','📎','Outros Documentos']
+  ];
   el.innerHTML=`
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-header">
-      <h3>📑 Contrato de Assessoria</h3>
-      <div style="display:flex;gap:8px;align-items:center">
-        <span class="tag">${assessoria.status}</span>
+  <div class="tab-strip">${abas.map((a,i)=>`<button id="tab-assess-${a[0]}" class="btn-tab ${i===0?'ativo':''}" onclick="mostrarTabAssessoria('${a[0]}',${clienteId})">${a[1]} ${a[2]}</button>`).join('')}</div>
+  <div id="painel-assess-visao">
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header">
+        <h3>Contrato de Assessoria</h3>
         <button class="btn btn-secondary btn-sm" onclick="editarAssessoria(${clienteId},${assessoria.id})">✏️ Editar</button>
       </div>
-    </div>
-    <div class="card-body">
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:13px">
-        <div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Início</span><div>${_dataBR(assessoria.data_inicio)||'—'}</div></div>
-        <div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Valor mensal</span><div>${assessoria.valor_mensal?'R$ '+Number(assessoria.valor_mensal).toLocaleString('pt-BR',{minimumFractionDigits:2}):'—'}</div></div>
-        ${assessoria.link_pasta?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Pasta</span><div><a href="${escHtml(assessoria.link_pasta)}" target="_blank" rel="noopener">Abrir no OneDrive ↗</a></div></div>`:''}
+      <div class="card-body">
+        ${assessoria.link_pasta?`<div style="margin-bottom:8px;font-size:13px"><a href="${escHtml(assessoria.link_pasta)}" target="_blank" rel="noopener">🔗 Abrir pasta no OneDrive ↗</a></div>`:''}
+        ${assessoria.escopo?`<div style="padding:10px;background:rgba(201,165,92,.08);border-radius:6px;font-size:13px;color:var(--cinza5)">${escHtml(assessoria.escopo)}</div>`:'<p style="font-size:13px;color:var(--cinza5)">Sem escopo detalhado.</p>'}
       </div>
-      ${assessoria.escopo?`<div style="margin-top:10px;padding:10px;background:#f8fafc;border-radius:6px;font-size:13px;color:#475569">${escHtml(assessoria.escopo)}</div>`:''}
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header">
+        <h3>📨 Informativo Semanal</h3>
+        <button class="btn btn-primary btn-sm" onclick="marcarInformativoEnviado(${assessoria.id},${clienteId})">✓ Marcar enviado hoje</button>
+      </div>
+      <div class="card-body">
+        ${ultimo?`<p style="font-size:13px">Último envio: <strong>${_dataBR(ultimo.data_envio)}</strong>${ultimo.enviado_por?' · '+escHtml(ultimo.enviado_por):''}</p>`:'<p style="font-size:13px;color:var(--cinza5)">Nenhum informativo registrado ainda.</p>'}
+        ${(informativos||[]).length>1?`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--cinza5)">Histórico (${informativos.length})</summary>
+          <div style="margin-top:6px;font-size:12px;color:var(--cinza5)">${informativos.map(i=>`<div>${_dataBR(i.data_envio)}${i.enviado_por?' · '+escHtml(i.enviado_por):''}</div>`).join('')}</div>
+        </details>`:''}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <h3>🧭 Demandas & Prazos</h3>
+        <button class="btn btn-primary btn-sm" onclick="novaDemanda(${clienteId})">+ Nova Demanda</button>
+      </div>
+      <div class="card-body">${renderDemandasAssessoria(demandas||[],{comCliente:false})}</div>
     </div>
   </div>
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-header">
-      <h3>📨 Informativo Semanal</h3>
-      <button class="btn btn-primary btn-sm" onclick="marcarInformativoEnviado(${assessoria.id},${clienteId})">✓ Marcar enviado hoje</button>
-    </div>
-    <div class="card-body">
-      ${ultimo?`<p style="font-size:13px">Último envio: <strong>${_dataBR(ultimo.data_envio)}</strong>${ultimo.enviado_por?' · '+escHtml(ultimo.enviado_por):''}</p>`:'<p style="font-size:13px;color:#94a3b8">Nenhum informativo registrado ainda.</p>'}
-      ${(informativos||[]).length>1?`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:#64748b">Histórico (${informativos.length})</summary>
-        <div style="margin-top:6px;font-size:12px;color:#64748b">${informativos.map(i=>`<div>${_dataBR(i.data_envio)}${i.enviado_por?' · '+escHtml(i.enviado_por):''}</div>`).join('')}</div>
-      </details>`:''}
-    </div>
-  </div>
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-header">
-      <h3>🧭 Demandas & Prazos</h3>
-      <button class="btn btn-primary btn-sm" onclick="novaDemanda(${clienteId})">+ Nova Demanda</button>
-    </div>
-    <div class="card-body">${renderDemandasAssessoria(demandas||[],{comCliente:false})}</div>
-  </div>
-  <div id="assessoria-contrato-docs-cl"></div>
-  <div id="assessoria-funcionarios-cl"></div>
-  <div id="assessoria-empresarial-cl"></div>
-  <div id="assessoria-elaborado-cl"></div>
-  <div id="assessoria-auditoria-cl"></div>
-  <div id="assessoria-processos-cl"></div>
-  <div id="assessoria-docs-cl"></div>`;
+  <div id="painel-assess-contrato" style="display:none"><div id="assessoria-contrato-docs-cl"></div></div>
+  <div id="painel-assess-func" style="display:none"><div id="assessoria-funcionarios-cl"></div></div>
+  <div id="painel-assess-empresarial" style="display:none"><div id="assessoria-empresarial-cl"></div></div>
+  <div id="painel-assess-elaborado" style="display:none"><div id="assessoria-elaborado-cl"></div></div>
+  <div id="painel-assess-auditoria" style="display:none"><div id="assessoria-auditoria-cl"></div></div>
+  <div id="painel-assess-processos" style="display:none"><div id="assessoria-processos-cl"></div></div>
+  <div id="painel-assess-docs" style="display:none"><div id="assessoria-docs-cl"></div></div>`;
   carregarDocsCategoria(clienteId,'contrato_becker','assessoria-contrato-docs-cl');
   carregarFuncionariosAssessoria(clienteId);
   carregarDocsCategoria(clienteId,'empresarial','assessoria-empresarial-cl');
@@ -3740,6 +3771,15 @@ async function carregarAssessoriaCliente(clienteId){
   carregarAuditoriaAssessoria(clienteId);
   carregarProcessosAssessoria(clienteId);
   carregarDocsCliente(clienteId,'assessoria-docs-cl');
+}
+function mostrarTabAssessoria(tab,clienteId){
+  const abas=['visao','contrato','func','empresarial','elaborado','auditoria','processos','docs'];
+  abas.forEach(a=>{
+    const p=document.getElementById('painel-assess-'+a);
+    const b=document.getElementById('tab-assess-'+a);
+    if(p)p.style.display=a===tab?'block':'none';
+    if(b)b.classList.toggle('ativo',a===tab);
+  });
 }
 
 // ---- Assessoria: pastas por cliente (Contrato Becker/Funcionários/Empresariais/Elaborados/
@@ -3766,13 +3806,13 @@ async function carregarDocsCategoria(clienteId,categoria,elId){
   const res=await fetch(`${SUPA_URL}/rest/v1/documentos?cliente_id=eq.${clienteId}&categoria=eq.${categoria}&order=created_at.desc`,{headers:{apikey:SUPA_KEY,'Authorization':`Bearer ${_tokenDados()}`}});
   const docs=res.ok?await res.json():[];
   el.innerHTML=`
-  <div class="card" style="margin-bottom:16px">
+  <div class="card">
     <div class="card-header">
       <h3>${TITULOS_CATEGORIA_ASSESSORIA[categoria]||'Documentos'}</h3>
       <button class="btn btn-primary btn-sm" onclick="uploadDocCategoria(${clienteId},'${categoria}','${elId}')">⬆️ Enviar Arquivo</button>
     </div>
     <div class="card-body">
-      ${!docs.length?'<div class="empty-state"><div class="icon">📁</div><p>Nenhum documento nesta pasta.</p></div>':`
+      ${!docs.length?'<div class="empty-state compacto"><p>Nenhum documento nesta pasta ainda.</p></div>':`
       <div style="display:flex;flex-direction:column;gap:8px">
         ${docs.map(d=>`
         <div class="doc-item">
@@ -3831,27 +3871,26 @@ async function carregarFuncionariosAssessoria(clienteId){
   const el=document.getElementById('assessoria-funcionarios-cl');if(!el)return;
   const{data:funcs}=await supa.from('assessoria_funcionarios').select('*').eq('cliente_id',clienteId).order('nome');
   el.innerHTML=`
-  <div class="card" style="margin-bottom:16px">
+  <div class="card">
     <div class="card-header">
       <h3>👥 Documentos de Funcionários</h3>
       <button class="btn btn-primary btn-sm" onclick="novoFuncionarioAssessoria(${clienteId})">+ Novo Funcionário</button>
     </div>
     <div class="card-body">
-      ${!(funcs||[]).length?'<div class="empty-state"><div class="icon">👥</div><p>Nenhum funcionário cadastrado.</p></div>':
-      (funcs||[]).map(f=>`
-      <div class="card" style="margin-bottom:10px">
-        <div class="card-header">
-          <div>
-            <h4 style="margin-bottom:2px">${escHtml(f.nome)}</h4>
-            <div style="font-size:12px;color:#94a3b8">${f.cargo?escHtml(f.cargo):''}${f.cpf?' · '+escHtml(f.cpf):''}</div>
+      ${!(funcs||[]).length?'<div class="empty-state compacto"><p>Nenhum funcionário cadastrado ainda.</p></div>':
+      `<div style="display:flex;flex-direction:column;gap:4px">${(funcs||[]).map(f=>`
+      <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(201,165,92,.05)">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--border);color:var(--texto);display:grid;place-items:center;font-size:12px;font-weight:700;flex-shrink:0">${iniciaisPerfil(f.nome)}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13px">${escHtml(f.nome)}</div>
+            <div style="font-size:11px;color:var(--cinza5)">${f.cargo?escHtml(f.cargo):''}${f.cpf?' · '+escHtml(f.cpf):''}</div>
           </div>
-          <div style="display:flex;gap:4px">
-            <button class="btn-icon" onclick="editarFuncionarioAssessoria(${f.id},${clienteId})" title="Editar">✏️</button>
-            <button class="btn-icon" onclick="excluirFuncionarioAssessoria(${f.id},${clienteId})" title="Excluir">🗑️</button>
-          </div>
+          <button class="btn-icon" onclick="editarFuncionarioAssessoria(${f.id},${clienteId})" title="Editar">✏️</button>
+          <button class="btn-icon" onclick="excluirFuncionarioAssessoria(${f.id},${clienteId})" title="Excluir">🗑️</button>
         </div>
-        <div class="card-body"><div id="assessoria-func-docs-${f.id}"></div></div>
-      </div>`).join('')}
+        <div style="padding:10px 12px"><div id="assessoria-func-docs-${f.id}"></div></div>
+      </div>`).join('')}</div>`}
     </div>
   </div>`;
   (funcs||[]).forEach(f=>carregarDocsFuncionario(clienteId,f.id,`assessoria-func-docs-${f.id}`));
@@ -3895,7 +3934,7 @@ async function carregarDocsFuncionario(clienteId,funcionarioId,elId){
     <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
       <button class="btn btn-secondary btn-sm" onclick="uploadDocFuncionario(${clienteId},${funcionarioId},'${elId}')">⬆️ Enviar Arquivo</button>
     </div>
-    ${!docs.length?'<div class="empty-state"><p style="font-size:12px">Nenhum documento.</p></div>':`
+    ${!docs.length?'<div class="empty-state compacto"><p style="font-size:12px">Nenhum documento.</p></div>':`
     <div style="display:flex;flex-direction:column;gap:6px">
       ${docs.map(d=>`
       <div class="doc-item">
@@ -3948,11 +3987,11 @@ async function carregarAuditoriaAssessoria(clienteId){
     </div>
     <div class="card-body">${renderPendenciasAuditoria(pendencias||[],clienteId)}</div>
   </div>
-  <div id="assessoria-auditoria-docs-cl"></div>`;
+  <div id="assessoria-auditoria-docs-cl" style="margin-top:16px"></div>`;
   carregarDocsCategoria(clienteId,'auditoria','assessoria-auditoria-docs-cl');
 }
 function renderPendenciasAuditoria(lista,clienteId){
-  if(!lista.length)return'<div class="empty-state"><p>Nenhuma pendência registrada.</p></div>';
+  if(!lista.length)return'<div class="empty-state compacto"><p>Nenhuma pendência registrada.</p></div>';
   return`<div style="display:flex;flex-direction:column;gap:8px">${lista.map(p=>`
     <div class="doc-item" style="align-items:flex-start">
       <div style="flex:1;min-width:0">
@@ -4011,7 +4050,7 @@ async function carregarProcessosAssessoria(clienteId){
   <div class="card" style="margin-bottom:16px">
     <div class="card-header"><h3>⚖️ Processos Judiciais</h3></div>
     <div class="card-body">
-      ${!(judiciais||[]).length?'<div class="empty-state"><p>Nenhum processo judicial vinculado a este cliente.</p></div>':
+      ${!(judiciais||[]).length?'<div class="empty-state compacto"><p>Nenhum processo judicial vinculado a este cliente.</p></div>':
       (judiciais||[]).map(p=>`
       <div class="doc-item" style="cursor:pointer" onclick="abrirProcesso(${p.id})">
         <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13px">${escHtml(p.numero||'')}</div><div style="font-size:12px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.assunto||'')}</div></div>
@@ -4022,7 +4061,7 @@ async function carregarProcessosAssessoria(clienteId){
   <div class="card">
     <div class="card-header"><h3>🏛️ Processos Administrativos</h3></div>
     <div class="card-body">
-      ${!(administrativos||[]).length?'<div class="empty-state"><p>Nenhum processo administrativo vinculado a este cliente.</p></div>':
+      ${!(administrativos||[]).length?'<div class="empty-state compacto"><p>Nenhum processo administrativo vinculado a este cliente.</p></div>':
       (administrativos||[]).map(p=>`
       <div class="doc-item" style="cursor:pointer" onclick="editarProcessoAdm(${p.id})">
         <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13px">${escHtml(p.numero_protocolo||p.orgao||'')}</div><div style="font-size:12px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.assunto||'')}</div></div>
@@ -4068,7 +4107,7 @@ async function buscarAssessoriaDemandas(){
 // de assessoria não tem NENHUM caminho de código que cruza com a tela de Prazos.
 function renderDemandasAssessoria(lista,opts={}){
   const comCliente=!!opts.comCliente;
-  if(!lista.length)return'<div class="empty-state"><div class="icon">🧭</div><p>Nenhuma demanda cadastrada.</p></div>';
+  if(!lista.length)return comCliente?'<div class="empty-state"><div class="icon">🧭</div><p>Nenhuma demanda cadastrada.</p></div>':'<div class="empty-state compacto"><p>Nenhuma demanda cadastrada.</p></div>';
   return`<div style="display:flex;flex-direction:column;gap:12px">${lista.map(d=>{
     const prazos=(d.assessoria_demanda_prazos||[]).slice().sort((a,b)=>a.data.localeCompare(b.data));
     const abertos=prazos.filter(p=>!p.cumprido);
