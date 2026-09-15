@@ -4513,6 +4513,7 @@ async function abrirProcesso(id){
         ${campo('Atualizado em',atualizado)}
       </div>
       ${p.observacoes?(function(){const at=/distrato|⚠️|aten[cç][aã]o/i.test(p.observacoes||'');return `<div style="margin-top:14px;padding:12px;background:${at?'rgba(239,68,68,0.10)':'var(--card)'};border-radius:8px;font-size:13px;color:${at?'#b91c1c':'var(--texto)'};font-weight:${at?'600':'400'};line-height:1.6;border-left:3px solid ${at?'#ef4444':'var(--azul3)'};white-space:pre-wrap">${p.observacoes}</div>`;})():''}
+      <div id="advogados-publicacoes"></div>
     </div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start" id="proc-cols">
@@ -4533,6 +4534,59 @@ async function abrirProcesso(id){
   montarChatProcesso(id);
   carregarDocsProcesso(id);
   carregarProducaoProcesso(id);
+  carregarAdvogadosPublicacoes(p.numero);
+}
+// ─── ADVOGADOS ENCONTRADOS NAS PUBLICAÇÕES ────────────────────────────────────────────────────
+// Ela pediu: "os advogados sempre da pra ver" — mesmo em processo com pouco cadastrado, o texto
+// das publicações já sincronizadas (DJEN/Legal Mail) sempre traz quem são os advogados. Isso
+// extrai esses nomes pra ela conferir, com o Umberto Carlos Becker destacado se aparecer — é um
+// SINAL (extração por regex, não é lista oficial), nunca decide nada sozinho, mesmo espírito do
+// candidato_pos_intimacao já usado em Prazos.
+// Testado direto no banco antes de escrever isto: 2 formatos reais batem —
+// "ADVOGADO(A) : NOME (OAB ...)" (DJEN/PJe) e "Advogados do AUTOR: NOME1, NOME2, ..." (TRT).
+function _advogadosDoTexto(txt){
+  // strip de tag HTML primeiro: o texto salvo vem ora cru (com <table><tr><td>...</td></tr>),
+  // ora já em texto plano — testado contra os dois formatos reais antes de escrever isto.
+  const s=String(txt||'').replace(/<[^>]+>/g,' ');
+  const nomes=new Set();
+  const reTab=/ADVOGADO\(A\)\s*:?\s*([A-ZÀ-Ú][A-ZÀ-Úa-zà-ú\s.'-]{4,80}?)\s*\(OAB/gi;
+  let m;
+  while((m=reTab.exec(s))!==null)nomes.add(m[1].trim().replace(/\s{2,}/g,' '));
+  const reLista=/Advogados? d[oa]s?\s+[A-ZÀ-Ú]+\s*:\s*([^\n]{5,300})/gi;
+  while((m=reLista.exec(s))!==null){
+    for(const parte of m[1].split(',')){
+      const nome=parte.trim().replace(/\s{2,}/g,' ');
+      // para no primeiro pedaço que não parece mais nome de advogado (achou o fim da lista)
+      if(!nome||nome.split(/\s+/).length>5||nome.length>45||/\d/.test(nome))break;
+      nomes.add(nome);
+    }
+  }
+  return[...nomes];
+}
+async function _buscarAdvogadosProcesso(numero){
+  if(!numero)return[];
+  const digitos=numero.replace(/\D/g,'');
+  const buscas=[supa.from('publicacoes').select('texto').eq('numero_processo',numero).order('id',{ascending:false}).limit(30)];
+  if(digitos&&digitos!==numero)buscas.push(supa.from('publicacoes').select('texto').eq('numero_processo',digitos).order('id',{ascending:false}).limit(30));
+  const resultados=await Promise.all(buscas);
+  const nomes=new Set();
+  resultados.forEach(r=>(r.data||[]).forEach(row=>_advogadosDoTexto(row.texto).forEach(n=>nomes.add(n))));
+  return[...nomes];
+}
+function _chipAdvogado(nome){
+  const ehUmberto=/UMBERTO\s+CARLOS\s+BECKER/i.test(nome);
+  return`<span class="tag" style="background:${ehUmberto?'rgba(124,58,237,.15)':'rgba(100,116,139,.10)'};color:${ehUmberto?'#7c3aed':'#475569'};font-weight:${ehUmberto?'700':'500'}">${ehUmberto?'👥 ':''}${escHtml(nome)}</span>`;
+}
+async function carregarAdvogadosPublicacoes(numero){
+  const el=document.getElementById('advogados-publicacoes');
+  if(!el||!numero)return;
+  const nomes=await _buscarAdvogadosProcesso(numero);
+  if(!nomes.length){el.innerHTML='';return;}
+  el.innerHTML=`<div style="margin-top:14px">
+    <span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Advogados encontrados nas publicações</span>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${nomes.map(_chipAdvogado).join('')}</div>
+    <div style="color:#94a3b8;font-size:11px;margin-top:4px">Extraído do texto das publicações sincronizadas — não é lista oficial, confira nos autos.</div>
+  </div>`;
 }
 // ─── CHAT do processo (pergunta → IA responde com o contexto do processo) ─────
 let procChatHist=[];
@@ -7521,14 +7575,38 @@ function _statusAudiencia(data){
 // Cores/emoji por palavra-chave no texto livre real de `audiencias.tipo` (medido no banco —
 // não é lista inventada: valores reais incluem "Instrução por videoconferência", "Una por
 // videoconferência", "Conciliação em Execução..."). Sem match, marcador neutro.
+// Uma lista só de palavras-chave alimenta cor/emoji (_tipoAudienciaEstilo) e a separação
+// rótulo/complemento (_tipoAudienciaPartes) — evita duas listas divergindo com o tempo.
+const _TIPOS_AUDIENCIA=[
+  [/instru[çc][ãa]o/i,'INSTRUÇÃO','🟣','#7c3aed'],
+  [/concilia[çc][ãa]o/i,'CONCILIAÇÃO','🟢','#15803d'],
+  [/\buna\b/i,'UNA','🔵','#2563eb'],
+  [/inicial/i,'INICIAL','🔵','#2563eb'],
+  [/sustenta[çc][ãa]o/i,'SUSTENTAÇÃO ORAL','🔴','#b91c1c'],
+  [/julgamento/i,'SESSÃO DE JULGAMENTO','🔴','#b91c1c'],
+  [/per[íi]cia/i,'PERÍCIA','🟠','#c2410c'],
+];
 function _tipoAudienciaEstilo(tipo){
-  const t=String(tipo||'').toLowerCase();
-  if(/inst(ru|urç)/.test(t))return{emoji:'🟣',cor:'#7c3aed'};
-  if(/concilia/.test(t))return{emoji:'🟢',cor:'#15803d'};
-  if(/\buna\b|inicial/.test(t))return{emoji:'🔵',cor:'#2563eb'};
-  if(/sustenta[çc][ãa]o|julgamento/.test(t))return{emoji:'🔴',cor:'#b91c1c'};
-  if(/per[íi]cia/.test(t))return{emoji:'🟠',cor:'#c2410c'};
+  const t=String(tipo||'');
+  for(const[re,,emoji,cor] of _TIPOS_AUDIENCIA)if(re.test(t))return{emoji,cor};
   return{emoji:'⚪',cor:'#64748b'};
+}
+// "Instrução por videoconferência" → {rotulo:'INSTRUÇÃO',complemento:'por videoconferência'} —
+// ela pediu a palavra-chave em caixa alta e o resto do texto (fonte, tribunal, modalidade
+// embutida no próprio tipo) menor, junto. Testado contra os valores reais medidos no banco.
+function _tipoAudienciaPartes(tipo){
+  const t=String(tipo||'').trim();
+  for(const[re,rotulo] of _TIPOS_AUDIENCIA){
+    const m=t.match(re);
+    if(m){
+      const resto=(t.slice(0,m.index)+t.slice(m.index+m[0].length))
+        .replace(/^\s*audi[êe]ncia\s*-?\s*/i,'')
+        .replace(/^[\s\-–]+|[\s\-–]+$/g,'')
+        .trim();
+      return{rotulo,complemento:resto};
+    }
+  }
+  return{rotulo:t?t.toUpperCase():'AUDIÊNCIA',complemento:''};
 }
 function pAudiencias(){
   document.getElementById('conteudo').innerHTML=`
@@ -7571,6 +7649,7 @@ function renderAudienciasLista(lista){
     const hora=_horaAudienciaTexto(a.hora);
     const cli=a.processos?.clientes?.nome||'';
     const estilo=_tipoAudienciaEstilo(a.tipo);
+    const tp=_tipoAudienciaPartes(a.tipo);
     const modBadge=a.modalidade?`<span style="font-size:11px;color:#64748b">${a.modalidade==='Videoconferência'?'💻':'📍'} ${escHtml(a.modalidade)}</span>`:'';
     const checklist=(a.checklist_preparacao?.itens)||null;
     const feitos=checklist?checklist.filter(i=>i.feito).length:0;
@@ -7583,7 +7662,7 @@ function renderAudienciasLista(lista){
         <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
-        <h4>${estilo.emoji} ${a.tipo||'Audiência'}${hora?` · ${hora}`:` · <span style="font-weight:400;color:#94a3b8;font-size:11px">horário a confirmar</span>`}
+        <h4>${estilo.emoji} <span style="font-weight:800">${tp.rotulo}</span>${tp.complemento?` <span style="font-weight:400;color:#94a3b8;font-size:11px">${escHtml(tp.complemento)}</span>`:''}${hora?` · ${hora}`:` · <span style="font-weight:400;color:#94a3b8;font-size:11px">horário a confirmar</span>`}
           ${a.id===proximaId?'<span style="font-size:10px;color:#15803d;font-weight:700">🟢 PRÓXIMA</span>':`<span style="font-size:10px;color:${status.cor};font-weight:600">${status.label}</span>`}
           ${a.processos?.advogado_coatuacao_externa?`<span class="tag" style="background:rgba(124,58,237,.12);color:#7c3aed;font-size:10px" title="Advogado em co-atuação, fora do escritório">👥 ${escHtml(a.processos.advogado_coatuacao_externa)}</span>`:''}</h4>
         <p style="font-weight:600">${cli?escHtml(cli):'<span style="color:#94a3b8;font-weight:400">Cliente não vinculado</span>'}</p>
@@ -7643,11 +7722,12 @@ async function verAudiencia(id){
   const cli=a.processos?.clientes?.nome||'';
   const status=_statusAudiencia(a.data);
   const hora=_horaAudienciaTexto(a.hora);
+  const tp=_tipoAudienciaPartes(a.tipo);
   const bloco=`
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
     <span style="font-size:11px;font-weight:700;color:${status.cor}">${status.label}</span>
     <span style="font-size:12px;color:#94a3b8">
-      ${a.tipo||'Audiência'}${hora?' · '+hora:' · horário a confirmar'}
+      <span style="font-weight:700;color:var(--texto)">${tp.rotulo}</span>${tp.complemento?' '+escHtml(tp.complemento):''}${hora?' · '+hora:' · horário a confirmar'}
       ${a.processos?.numero?' · Proc. '+escHtml(a.processos.numero):''}
       ${cli?' · 🧑 '+escHtml(cli):''}
       ${a.local?' · 📍 '+escHtml(a.local):''}
@@ -7661,7 +7741,7 @@ async function verAudiencia(id){
     ${a.advogado_responsavel?`<span style="font-size:12px;color:#64748b">👤 Responsável: <strong style="color:var(--texto)">${escHtml(_advCurto(a.advogado_responsavel))}</strong></span>`:'<span></span>'}
     ${a.processo_id?`<button class="btn btn-sm btn-secondary" onclick="fecharModal();abrirProcesso('${a.processo_id}')">⚖️ Abrir processo</button>`:''}
   </div>`;
-  abrirModal('🏛️ '+(a.tipo||'Audiência')+' — '+_dataBR(a.data), bloco, null, 'Fechar', false, true);
+  abrirModal('🏛️ '+tp.rotulo+' — '+_dataBR(a.data), bloco, null, 'Fechar', false, true);
   carregarPreparoAudiencia(a.id);
 }
 async function carregarPreparoAudiencia(id,refazer){
