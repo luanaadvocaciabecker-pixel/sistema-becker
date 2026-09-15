@@ -57,6 +57,7 @@ const PROMPT = [
   "Responda SOMENTE em JSON, com estas chaves:",
   '{',
   '"o_que_e":"2 a 3 frases explicando o que é este tipo de audiência e o que costuma acontecer nela",',
+  '"objetivo":"1 a 2 frases sobre o que esta audiência busca provar ou decidir processualmente, com base no assunto/classe do processo — string vazia se não houver base pra isso",',
   '"o_que_levar":["documentos ou materiais concretos a levar, específicos deste caso quando possível"],',
   '"o_que_preparar":["ações de preparo antes da audiência: o que revisar, o que alinhar com o cliente, testemunhas a preparar"],',
   '"pontos_atencao":["cuidados ou riscos específicos deste caso a observar na condução da audiência"]',

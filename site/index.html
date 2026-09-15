@@ -2746,7 +2746,7 @@ async function pDashboard(){
     <td>${escHtml(p.processos?.advogado_responsavel||'—')}</td>
   </tr>`).join('');
   const audRows=(audProx.data||[]).map(a=>`<tr>
-    <td>${dataCurta(a.data)}${a.hora?' '+String(a.hora).slice(0,5):''}</td>
+    <td>${dataCurta(a.data)}${_horaAudienciaTexto(a.hora)?' '+_horaAudienciaTexto(a.hora):''}</td>
     <td>${escHtml(procNumero(a))}</td>
     <td>${escHtml(nomeCliente(a))}</td>
     <td>${escHtml(truncar(a.tipo||a.local||'—',18))}</td>
@@ -7503,6 +7503,33 @@ function pModuloSimples(pagina){
 
 // ---- AUDIÊNCIAS (tabela `audiencias` — alimentada pelo Legal Mail + manual) ----
 let _audFiltro='proximas';
+// Nenhuma audiência tem hora is null — o sync (Legal Mail/Projudi) grava '00:00:00' quando não
+// sabe a hora real (medido: 18 das 67). Todo `a.hora?...` tratava isso como "tem hora" porque a
+// string não é vazia, e por isso a tela mostrava "00:00" como se fosse meia-noite de verdade.
+function _horaAudienciaTexto(hora){
+  const h=String(hora||'').slice(0,5);
+  return (h&&h!=='00:00')?h:'';
+}
+function _statusAudiencia(data){
+  const hojeIso=new Date().toISOString().split('T')[0];
+  if(!data)return{label:'',cor:'#94a3b8'};
+  if(data<hojeIso)return{label:'✓ REALIZADA',cor:'#94a3b8'};
+  if(data===hojeIso)return{label:'🔴 HOJE',cor:'#dc2626'};
+  const dias=Math.round((new Date(data+'T12:00:00')-new Date(hojeIso+'T12:00:00'))/86400000);
+  return{label:`EM ${dias} DIA${dias>1?'S':''}`,cor:'#b45309'};
+}
+// Cores/emoji por palavra-chave no texto livre real de `audiencias.tipo` (medido no banco —
+// não é lista inventada: valores reais incluem "Instrução por videoconferência", "Una por
+// videoconferência", "Conciliação em Execução..."). Sem match, marcador neutro.
+function _tipoAudienciaEstilo(tipo){
+  const t=String(tipo||'').toLowerCase();
+  if(/inst(ru|urç)/.test(t))return{emoji:'🟣',cor:'#7c3aed'};
+  if(/concilia/.test(t))return{emoji:'🟢',cor:'#15803d'};
+  if(/\buna\b|inicial/.test(t))return{emoji:'🔵',cor:'#2563eb'};
+  if(/sustenta[çc][ãa]o|julgamento/.test(t))return{emoji:'🔴',cor:'#b91c1c'};
+  if(/per[íi]cia/.test(t))return{emoji:'🟠',cor:'#c2410c'};
+  return{emoji:'⚪',cor:'#64748b'};
+}
 function pAudiencias(){
   document.getElementById('conteudo').innerHTML=`
   <button onclick="ir('dashboard')" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:13px;padding:0 0 12px 0">← Voltar</button>
@@ -7530,24 +7557,43 @@ async function filtrarAudiencias(f){
   el.innerHTML=`<div class="card"><div class="card-body">${renderAudienciasLista(data)}</div></div>`;
 }
 function renderAudienciasLista(lista){
+  const hojeIso=new Date().toISOString().split('T')[0];
+  // Uma única "próxima" no sistema todo (não repete o selo em cada linha futura): a data+hora
+  // mais próxima entre as que ainda não aconteceram, dentro do que está sendo mostrado.
+  const futuras=lista.filter(a=>a.data>=hojeIso);
+  const proximaId=futuras.length?futuras.reduce((min,a)=>{
+    const chave=x=>(x.data||'')+'T'+(_horaAudienciaTexto(x.hora)||'23:59');
+    return chave(a)<chave(min)?a:min;
+  }).id:null;
   return lista.map(a=>{
     const dt=new Date((a.data||'')+'T12:00:00');
-    const passou=a.data&&a.data<new Date().toISOString().split('T')[0];
-    const hora=(a.hora||'').slice(0,5);
+    const status=_statusAudiencia(a.data);
+    const hora=_horaAudienciaTexto(a.hora);
     const cli=a.processos?.clientes?.nome||'';
+    const estilo=_tipoAudienciaEstilo(a.tipo);
+    const modBadge=a.modalidade?`<span style="font-size:11px;color:#64748b">${a.modalidade==='Videoconferência'?'💻':'📍'} ${escHtml(a.modalidade)}</span>`:'';
+    const checklist=(a.checklist_preparacao?.itens)||null;
+    const feitos=checklist?checklist.filter(i=>i.feito).length:0;
+    const preparoBadge=!a.ia_preparacao
+      ?'<span style="font-size:10px;color:#b45309;font-weight:600">⚠️ preparação pendente</span>'
+      :(checklist&&checklist.length?`<span style="font-size:10px;color:#64748b">📋 ${feitos}/${checklist.length}</span>`:'');
     return`<div class="prazo-item">
-      <div class="prazo-data-box ${passou?'ok':'proximo'}">
+      <div class="prazo-data-box ${status.label.includes('REALIZADA')?'ok':'proximo'}">
         <div class="dia">${isNaN(dt)?'--':dt.getDate().toString().padStart(2,'0')}</div>
         <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
-        <h4>${a.tipo||'Audiência'}${hora?` · ${hora}`:''} ${passou?'<span style="font-size:10px;color:#94a3b8">realizada</span>':'<span style="font-size:10px;color:#60a5fa;font-weight:700">próxima</span>'} ${a.processos?.advogado_coatuacao_externa?`<span class="tag" style="background:rgba(124,58,237,.12);color:#7c3aed;font-size:10px" title="Advogado em co-atuação, fora do escritório">👥 ${escHtml(a.processos.advogado_coatuacao_externa)}</span>`:''}</h4>
-        <p>${a.processos?.numero?`Proc. ${a.processos.numero} · `:''}${cli?`🧑 ${cli} · `:''}${a.local?`📍 ${a.local} · `:''}${a.advogado_responsavel?`👤 ${_advCurto(a.advogado_responsavel)}`:''}</p>
+        <h4>${estilo.emoji} ${a.tipo||'Audiência'}${hora?` · ${hora}`:` · <span style="font-weight:400;color:#94a3b8;font-size:11px">horário a confirmar</span>`}
+          ${a.id===proximaId?'<span style="font-size:10px;color:#15803d;font-weight:700">🟢 PRÓXIMA</span>':`<span style="font-size:10px;color:${status.cor};font-weight:600">${status.label}</span>`}
+          ${a.processos?.advogado_coatuacao_externa?`<span class="tag" style="background:rgba(124,58,237,.12);color:#7c3aed;font-size:10px" title="Advogado em co-atuação, fora do escritório">👥 ${escHtml(a.processos.advogado_coatuacao_externa)}</span>`:''}</h4>
+        <p style="font-weight:600">${cli?escHtml(cli):'<span style="color:#94a3b8;font-weight:400">Cliente não vinculado</span>'}</p>
+        <p>${a.processos?.numero?`Proc. ${a.processos.numero} · `:''}${a.local?`📍 ${a.local} · `:''}${modBadge}</p>
+        <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:2px">${a.advogado_responsavel?`<span style="font-size:11px;color:#64748b">👤 ${_advCurto(a.advogado_responsavel)}</span>`:''}${preparoBadge}</p>
         ${a.observacoes?`<p style="color:#94a3b8;font-size:12px;margin:4px 0 0">${a.observacoes}</p>`:''}
       </div>
       <div style="display:flex;gap:6px;align-items:center">
         <button class="btn-icon" title="Ver preparação para a audiência" onclick="verAudiencia('${a.id}')">👁️</button>
-        <button class="btn-icon" onclick="excluirAudiencia('${a.id}')">🗑️</button>
+        <button class="btn-icon" title="Excluir audiência" style="opacity:.55" onclick="excluirAudiencia('${a.id}')">🗑️</button>
       </div>
     </div>`;
   }).join('');
@@ -7560,6 +7606,9 @@ async function novaAudiencia(){
     <div class="form-field"><label>Tipo</label>
       <select name="tipo"><option>Audiência de Instrução</option><option>Audiência de Conciliação</option><option>Audiência Una</option><option>Sessão de Julgamento</option><option>Outra</option></select>
     </div>
+    <div class="form-field"><label>Modalidade</label>
+      <select name="modalidade"><option value="">—</option><option>Presencial</option><option>Videoconferência</option></select>
+    </div>
     <div class="form-field"><label>Local</label><input name="local" placeholder="Ex: Fórum de Blumenau, sala 3 / videoconferência"></div>
     <div class="form-field"><label>Processo</label>
       <select name="processo_id"><option value="">—</option>${(procs||[]).map(p=>`<option value="${p.id}">${p.numero||'Sem nº'}</option>`).join('')}</select>
@@ -7568,7 +7617,7 @@ async function novaAudiencia(){
   </form>`,async()=>{
     const d=coletarForm('form-aud');
     if(!d.data){toast('Preencha a data.','erro');return false;}
-    if(!d.hora)delete d.hora;if(!d.processo_id)delete d.processo_id;
+    if(!d.hora)delete d.hora;if(!d.processo_id)delete d.processo_id;if(!d.modalidade)delete d.modalidade;
     const{error}=await supa.from('audiencias').insert([d]);
     if(error){toast('Erro: '+error.message,'erro');return false;}
     toast('Audiência cadastrada!','ok');filtrarAudiencias('proximas');
@@ -7585,21 +7634,31 @@ async function excluirAudiencia(id){
 // que o conteúdo é focado em preparar a audiência (o que levar, como se preparar), não em
 // pontos a favor/contra — ela escolheu esse foco quando perguntada. Cache em
 // audiencias.ia_preparacao/ia_preparacao_em, edge function audiencia-preparacao.
+let _audAberta=null;   // {id, checklist:{itens:[...]}, r} — guarda o estado do modal aberto,
+                        // pro toggle de checklist não precisar recarregar a IA.
 async function verAudiencia(id){
   const{data:a}=await supa.from('audiencias').select('*,processos(numero,assunto,advogado_responsavel,advogado_coatuacao_externa,clientes(nome))').eq('id',id).single();
   if(!a){toast('Audiência não encontrada.','erro');return;}
+  _audAberta={id:a.id,checklist:a.checklist_preparacao||null,r:null};
   const cli=a.processos?.clientes?.nome||'';
+  const status=_statusAudiencia(a.data);
+  const hora=_horaAudienciaTexto(a.hora);
   const bloco=`
-  <div style="font-size:12px;color:#94a3b8;margin-bottom:10px">
-    ${a.tipo||'Audiência'}${a.hora?' · '+a.hora.slice(0,5):''}
-    ${a.processos?.numero?' · Proc. '+escHtml(a.processos.numero):''}
-    ${cli?' · 🧑 '+escHtml(cli):''}
-    ${a.local?' · 📍 '+escHtml(a.local):''}
-    ${a.processos?.advogado_coatuacao_externa?' · <span style="color:#7c3aed">👥 '+escHtml(a.processos.advogado_coatuacao_externa)+'</span>':''}
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    <span style="font-size:11px;font-weight:700;color:${status.cor}">${status.label}</span>
+    <span style="font-size:12px;color:#94a3b8">
+      ${a.tipo||'Audiência'}${hora?' · '+hora:' · horário a confirmar'}
+      ${a.processos?.numero?' · Proc. '+escHtml(a.processos.numero):''}
+      ${cli?' · 🧑 '+escHtml(cli):''}
+      ${a.local?' · 📍 '+escHtml(a.local):''}
+      ${a.modalidade?' · '+(a.modalidade==='Videoconferência'?'💻':'📍')+' '+escHtml(a.modalidade):''}
+      ${a.processos?.advogado_coatuacao_externa?' · <span style="color:#7c3aed">👥 '+escHtml(a.processos.advogado_coatuacao_externa)+'</span>':''}
+    </span>
   </div>
   <div id="audiencia-briefing" style="margin-bottom:12px"></div>
   ${a.observacoes?`<div style="font-size:12px;color:#94a3b8;margin-bottom:6px">OBSERVAÇÕES</div><div style="white-space:pre-wrap;font-size:13px;background:rgba(7,18,32,.6);padding:10px 12px;border-radius:8px">${escHtml(a.observacoes)}</div>`:''}
-  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:13px;padding-top:11px;border-top:1px solid var(--border)">
+  <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:space-between;align-items:center;margin-top:13px;padding-top:11px;border-top:1px solid var(--border)">
+    ${a.advogado_responsavel?`<span style="font-size:12px;color:#64748b">👤 Responsável: <strong style="color:var(--texto)">${escHtml(_advCurto(a.advogado_responsavel))}</strong></span>`:'<span></span>'}
     ${a.processo_id?`<button class="btn btn-sm btn-secondary" onclick="fecharModal();abrirProcesso('${a.processo_id}')">⚖️ Abrir processo</button>`:''}
   </div>`;
   abrirModal('🏛️ '+(a.tipo||'Audiência')+' — '+_dataBR(a.data), bloco, null, 'Fechar', false, true);
@@ -7611,9 +7670,52 @@ async function carregarPreparoAudiencia(id,refazer){
   let r=null;
   try{ r=await chamarFuncao('audiencia-preparacao',{audiencia_id:id,refazer:refazer===true}); }
   catch(e){ r={erro:e.message||'falha'}; }
+  if(r?.ok&&r.preparacao)await _sincronizarChecklistAudiencia(id,r);
+  if(_audAberta&&_audAberta.id==id)_audAberta.r=r;
   el.innerHTML=htmlPreparoAudiencia(id,r);
 }
 function refazerPreparoAudiencia(id){ carregarPreparoAudiencia(id,true); }
+// Mescla o checklist marcável com a orientação mais recente da IA, "conforme os autos" — item
+// cujo texto se repete mantém o feito; item novo nasce desmarcado; item que a IA não repetiu
+// mais some. Se veio do cache E já existe checklist salvo, não mexe (preserva o progresso —
+// só remonta quando a orientação é gerada de novo, via "↻ refazer" ou na 1ª vez).
+async function _sincronizarChecklistAudiencia(id,r){
+  const o=r.preparacao||{};
+  const novos=[
+    ...(o.o_que_levar||[]).filter(x=>String(x||'').trim()).map(texto=>({texto,categoria:'levar'})),
+    ...(o.o_que_preparar||[]).filter(x=>String(x||'').trim()).map(texto=>({texto,categoria:'preparar'})),
+  ];
+  const atual=(_audAberta&&_audAberta.id==id&&_audAberta.checklist?.itens)||[];
+  if(r.cache===true&&atual.length)return;
+  const mesclado=novos.map(n=>{
+    const existia=atual.find(x=>x.texto===n.texto);
+    return{...n,feito:!!existia?.feito};
+  });
+  const igual=atual.length===mesclado.length&&atual.every((x,i)=>x.texto===mesclado[i]?.texto&&x.feito===mesclado[i]?.feito);
+  if(igual)return;
+  const novoChecklist={itens:mesclado,atualizado_em:new Date().toISOString()};
+  if(_audAberta&&_audAberta.id==id)_audAberta.checklist=novoChecklist;
+  await supa.from('audiencias').update({checklist_preparacao:novoChecklist}).eq('id',id);
+}
+async function toggleChecklistAudiencia(id,idx){
+  if(!_audAberta||_audAberta.id!=id||!_audAberta.checklist?.itens?.[idx])return;
+  const itens=_audAberta.checklist.itens.slice();
+  itens[idx]={...itens[idx],feito:!itens[idx].feito};
+  _audAberta.checklist={itens,atualizado_em:new Date().toISOString()};
+  const el=document.getElementById('audiencia-briefing');
+  if(el)el.innerHTML=htmlPreparoAudiencia(id,_audAberta.r);
+  // supa é um query-builder lazy (só dispara o fetch no .then()/await) — sem isso o PATCH
+  // nunca sai, mesmo a tela já tendo atualizado (achado testando com Playwright antes de subir).
+  const{error}=await supa.from('audiencias').update({checklist_preparacao:_audAberta.checklist}).eq('id',id);
+  if(error)toast('Erro ao salvar o checklist: '+error.message,'erro');
+}
+function _checklistPreparoHtml(id,itens){
+  if(!itens||!itens.length)return '<div style="color:#64748b;font-size:12px;padding:2px 0">nada a apontar</div>';
+  return itens.map((it,idx)=>`<div style="display:flex;gap:8px;padding:3px 0;align-items:flex-start;cursor:pointer" onclick="toggleChecklistAudiencia('${id}',${idx})">
+    <input type="checkbox" ${it.feito?'checked':''} style="margin-top:2px;pointer-events:none">
+    <span style="${it.feito?'text-decoration:line-through;color:#64748b':''}">${it.categoria==='levar'?'📄':'▸'} ${escHtml(it.texto)}</span>
+  </div>`).join('');
+}
 function _listaPreparo(itens,cor,sinal){
   const a=(itens||[]).filter(x=>String(x||'').trim());
   if(!a.length)return '<div style="color:#64748b;font-size:12px;padding:2px 0">nada a apontar</div>';
@@ -7633,24 +7735,25 @@ function htmlPreparoAudiencia(id,r){
       'rgba(245,158,11,.30)','rgba(245,158,11,.08)');
 
   const o=r.preparacao||{};
+  const itens=(_audAberta&&_audAberta.id==id&&_audAberta.checklist?.itens)||[];
+  const feitos=itens.filter(x=>x.feito).length;
   return cx(`
     <div style="font-weight:700;color:#3730a3;margin-bottom:6px">O QUE É ESSA AUDIÊNCIA</div>
     <div style="line-height:1.6">${escHtml(o.o_que_e||'—')}</div>
 
-    <div style="font-weight:700;color:#0f766e;margin:11px 0 5px">O QUE LEVAR</div>
-    ${_listaPreparo(o.o_que_levar,'#0f766e','▸')}
+    ${o.objetivo?`<div style="font-weight:700;color:#0369a1;margin:11px 0 5px">OBJETIVO</div><div style="line-height:1.6">${escHtml(o.objetivo)}</div>`:''}
 
-    <div style="font-weight:700;color:#b45309;margin:11px 0 5px">COMO SE PREPARAR</div>
-    ${_listaPreparo(o.o_que_preparar,'#b45309','▸')}
+    <div style="font-weight:700;color:#0f766e;margin:11px 0 5px">PREPARAÇÃO${itens.length?` — ${feitos}/${itens.length} itens`:''}</div>
+    ${_checklistPreparoHtml(id,itens)}
 
-    <div style="font-weight:700;color:#b91c1c;margin:11px 0 5px">PONTOS DE ATENÇÃO</div>
+    <div style="font-weight:700;color:#b91c1c;margin:11px 0 5px">PONTOS CRÍTICOS</div>
     ${_listaPreparo(o.pontos_atencao,'#b91c1c','⚠')}
 
     <div style="margin-top:11px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <span style="color:#64748b;font-size:11px">${r.cache?' · guardado'+(r.em?' em '+_dataBR(String(r.em).slice(0,10)):''):' · gerado agora'}</span>
       <button class="btn btn-sm btn-secondary" style="padding:2px 8px;font-size:11px" onclick="refazerPreparoAudiencia('${id}')">↻ refazer</button>
     </div>
-    <div style="color:#64748b;font-size:11px;margin-top:6px;font-style:italic">⚠️ ${escHtml(o.limite||'Preparação com base nos dados cadastrados. Confira nos autos antes da audiência.')}</div>`,
+    <div style="color:#94a3b8;font-size:10px;margin-top:6px">⚠️ ${escHtml(o.limite||'Sugestões geradas com base nos dados cadastrados. Confirme as informações nos autos antes da audiência.')}</div>`,
     'rgba(99,102,241,.25)','rgba(99,102,241,.06)');
 }
 
