@@ -26,10 +26,12 @@ const SVC  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GKEY = Deno.env.get("GEMINI_API_KEY") || "";
 const GMODEL = Deno.env.get("GEMINI_MODEL") || "gemini-flash-lite-latest";
 
-// Acima disto não manda o PDF: o limite do Gemini é 1.000 páginas, e autos gigantes atrasariam
-// toda pergunta. Quando bate a trava, a resposta DIZ que não leu — silêncio aqui viraria um
-// "não consta" mentiroso.
-const MAX_MB = 40;
+// Acima disto não manda o PDF: o limite real do Gemini é por página (1.000), não por MB — 40 era
+// um corte de custo/latência conservador demais (barrou autos de 41 MB só 1 MB acima). Custo
+// medido (linha 16 acima) escala ~linear com o tamanho: 41 MB ainda fica em ~R$0,32/pergunta,
+// bem abaixo do que já se paga hoje pelo Legal Mail (R$0,02/doc só pra baixar, sem contar a IA).
+// Quando bate a trava, a resposta DIZ que não leu — silêncio aqui viraria um "não consta" mentiroso.
+const MAX_MB = 80;
 
 const sbH = { apikey: SVC, Authorization: `Bearer ${SVC}`, "Content-Type": "application/json" };
 const cors = {
