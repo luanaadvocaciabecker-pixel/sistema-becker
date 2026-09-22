@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Padronizador Becker para petições DOCX com matriz/timbre preservado.">
+    <title>Padronizador Becker | DOCX</title>
+    <link rel="icon" href="data:,">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script defer src="script.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Padronizador Becker">
+          <span class="brand-mark">B</span>
+          <span>
+            <strong>Padronizador</strong>
+            <small>BECKER · DOCX</small>
+          </span>
+        </a>
+        <div class="topbar-note"><span class="live-dot"></span> processamento local no navegador</div>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div>
+            <p class="eyebrow">Documentos jurídicos · OOXML</p>
+            <h1>Do timbre ao documento<br><em>sem perder a estrutura.</em></h1>
+            <p class="hero-copy">Carregue a matriz Becker e a petição, confira a identificação dos blocos e baixe um DOCX padronizado com cabeçalho, rodapé e imagens preservados.</p>
+          </div>
+          <div class="hero-stamp">
+            <span class="stamp-number">01</span>
+            <span>selecione<br>o modelo</span>
+          </div>
+        </section>
+
+        <nav class="stepper" aria-label="Etapas do processo">
+          <div class="step is-current" data-step="1"><span>01</span><b>Configurar</b></div>
+          <div class="step-line"></div>
+          <div class="step" data-step="2"><span>02</span><b>Identificar</b></div>
+          <div class="step-line"></div>
+          <div class="step" data-step="3"><span>03</span><b>Conferir</b></div>
+          <div class="step-line"></div>
+          <div class="step" data-step="4"><span>04</span><b>Gerar</b></div>
+        </nav>
+
+        <section class="workspace">
+          <div class="main-column">
+            <section class="panel setup-panel" id="setup-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">01 / configuração</p>
+                  <h2>Escolha o modelo Becker</h2>
+                </div>
+                <span class="config-badge">configuração única</span>
+              </div>
+              <p class="muted">Os modelos já estão cadastrados. A seleção define as regras usadas na conferência e no DOCX final.</p>
+
+              <div class="model-grid" role="radiogroup" aria-label="Modelo Becker">
+                <label class="model-card selected" data-model-card="simples">
+                  <input type="radio" name="model" value="simples" checked>
+                  <span class="model-topline"><span class="radio-dot"></span><span class="model-code">BECKER / 01</span></span>
+                  <strong>Peça simples</strong>
+                  <span class="model-base">Base: REVISONAL PJ ENGECON</span>
+                  <span class="model-desc">Fluxo linear para uma peça com identificação, fundamentação, pedidos e fechamento.</span>
+                </label>
+                <label class="model-card" data-model-card="bipartida">
+                  <input type="radio" name="model" value="bipartida">
+                  <span class="model-topline"><span class="radio-dot"></span><span class="model-code">BECKER / 02</span></span>
+                  <strong>Peça bipartida</strong>
+                  <span class="model-base">Base: REVISONAL PJ ENGECON</span>
+                  <span class="model-desc">Aplica separações tipográficas e quebra obrigatória após a assinatura.</span>
+                </label>
+              </div>
+
+              <div class="rule-strip" id="rule-strip">
+                <span class="rule-icon">↳</span>
+                <span id="model-rule-summary">Citações em Calibri 10, com recuo de 6 cm em todo o bloco.</span>
+              </div>
+
+              <div class="upload-grid">
+                <label class="upload-card" for="matrix-file">
+                  <span class="upload-index">A</span>
+                  <span class="upload-icon">▤</span>
+                  <span class="upload-title">Matriz / timbre Becker</span>
+                  <span class="upload-help">DOCX que será preservado como base da saída</span>
+                  <span class="file-status" id="matrix-status">Nenhum arquivo selecionado</span>
+                  <input id="matrix-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                </label>
+                <label class="upload-card" for="petition-file">
+                  <span class="upload-index">B</span>
+                  <span class="upload-icon">¶</span>
+                  <span class="upload-title">Petição DOCX</span>
+                  <span class="upload-help">Conteúdo que será identificado e inserido</span>
+                  <span class="file-status" id="petition-status">Nenhum arquivo selecionado</span>
+                  <input id="petition-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                </label>
+              </div>
+              <div class="file-observations" id="file-observations" aria-live="polite"></div>
+
+              <div class="action-row">
+                <button class="button primary" id="analyze-btn" type="button" disabled>
+                  <span>Analisar estrutura</span><span class="button-arrow">→</span>
+                </button>
+                <span class="privacy-note"><span class="lock">▣</span> Os arquivos não saem deste navegador.</span>
+              </div>
+            </section>
+
+            <section class="panel review-panel is-hidden" id="review-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">02 / 03 · identificação e conferência</p>
+                  <h2>Revise os blocos encontrados</h2>
+                </div>
+                <div class="review-count" id="review-count">0 blocos</div>
+              </div>
+              <div class="review-toolbar">
+                <div>
+                  <p class="muted" id="review-description">A classificação usa padrões de redação, posição e contexto. Ajuste qualquer bloco antes de continuar.</p>
+                </div>
+                <div class="legend">
+                  <span><i class="legend-dot high"></i> alta confiança</span>
+                  <span><i class="legend-dot review"></i> conferir</span>
+                </div>
+              </div>
+              <div class="notice warning is-hidden" id="review-warning"></div>
+              <div class="blocks-list" id="blocks-list"></div>
+              <div class="review-footer">
+                <button class="button ghost" id="back-btn" type="button">← Trocar arquivos</button>
+                <label class="confirm-check">
+                  <input type="checkbox" id="confirm-review">
+                  <span>Conferi a estrutura e os textos acima.</span>
+                </label>
+              </div>
+            </section>
+
+            <section class="panel generate-panel is-hidden" id="generate-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">04 / geração</p>
+                  <h2>Gerar documento padronizado</h2>
+                </div>
+                <span class="output-format">.DOCX</span>
+              </div>
+              <div class="generation-summary">
+                <div class="summary-main">
+                  <span class="summary-check">✓</span>
+                  <div><strong id="generation-title">Pronto para gerar</strong><span id="generation-detail">A matriz será mantida como base do arquivo.</span></div>
+                </div>
+                <div class="summary-metrics">
+                  <span><b id="metric-blocks">0</b> blocos</span>
+                  <span><b id="metric-images">0</b> imagens na matriz</span>
+                </div>
+              </div>
+              <div class="output-name-row">
+                <label for="output-name">Nome do arquivo</label>
+                <div class="filename-input"><input id="output-name" type="text" value="Padronizado-Becker" maxlength="90"><span>.docx</span></div>
+              </div>
+              <div class="notice is-hidden" id="generation-result" aria-live="polite"></div>
+              <div class="action-row generation-actions">
+                <button class="button primary large" id="generate-btn" type="button" disabled>
+                  <span>Gerar e baixar DOCX</span><span class="button-arrow">↓</span>
+                </button>
+                <span class="generation-hint">A saída corresponde ao preview conferido.</span>
+              </div>
+            </section>
+          </div>
+
+          <aside class="side-column">
+            <section class="side-card status-card">
+              <div class="side-card-title"><span class="status-pulse"></span> status do fluxo</div>
+              <strong id="flow-status">Aguardando arquivos</strong>
+              <p id="flow-detail">Selecione uma matriz Becker e uma petição DOCX para começar.</p>
+              <div class="progress-track"><span id="progress-bar"></span></div>
+              <div class="progress-labels"><span>configurar</span><span>gerar</span></div>
+            </section>
+            <section class="side-card">
+              <div class="side-card-title">regras aplicadas</div>
+              <ul class="rule-list" id="rules-list">
+                <li><span>01</span><span>Citações preservam o bloco e recebem Calibri 10 + recuo de 6 cm.</span></li>
+                <li><span>02</span><span>Cabeçalho, rodapé, imagens e estilos vêm da matriz carregada.</span></li>
+                <li><span>03</span><span>Blocos ambíguos ficam visíveis para conferência manual.</span></li>
+              </ul>
+            </section>
+            <section class="side-card technical-card">
+              <div class="side-card-title">sobre a transformação</div>
+              <p>O DOCX é tratado como pacote OOXML. O corpo é substituído por transformação, sem reconstruir o arquivo a partir de texto simples.</p>
+              <div class="tech-tags"><span>OOXML</span><span>LOCAL</span><span>SEM BACKEND</span></div>
+            </section>
+          </aside>
+        </section>
+      </main>
+      <footer class="footer"><span>Padronizador Becker</span><span>feito para conferência antes da geração</span></footer>
+    </div>
+  </body>
+</html>
