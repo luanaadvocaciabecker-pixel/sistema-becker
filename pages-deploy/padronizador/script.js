@@ -70,7 +70,34 @@
     $("confirm-review").addEventListener("change", updateGenerateButton);
     $("generate-btn").addEventListener("click", generate);
     updateModelUI();
-    updateFlow("Aguardando arquivos", "Selecione uma matriz Becker e uma petição DOCX para começar.", 4);
+    loadFixedMatrix();
+    updateFlow("Aguardando a petição", "O timbre Becker já está embutido. Envie apenas a petição DOCX.", 4);
+  }
+
+  // Carrega o timbre/matriz Becker embutido no app (matriz.docx ao lado da página),
+  // para o usuário só precisar enviar a petição.
+  async function loadFixedMatrix() {
+    try {
+      const response = await fetch("matriz.docx", { cache: "force-cache" });
+      if (!response.ok) throw new Error("timbre não encontrado");
+      const file = new File([await response.blob()], "Timbre-Becker.docx", { type: DOCX_MIME });
+      const zip = await loadDocx(file);
+      state.matrixFile = file; state.matrixZip = zip;
+      updateFileObservations();
+      updateAnalyzeEnabled();
+    } catch (error) {
+      // Plano B: revela o upload manual da matriz.
+      const card = $("matrix-card"); if (card) card.classList.remove("is-hidden");
+      const note = $("matrix-fixed-note"); if (note) note.classList.add("is-hidden");
+      updateFlow("Envie a matriz e a petição", "Não consegui carregar o timbre embutido; envie a matriz Becker manualmente.", 4);
+    }
+  }
+
+  function updateAnalyzeEnabled() {
+    const ready = state.matrixFile && state.petitionFile;
+    $("analyze-btn").disabled = !ready || state.busy;
+    if (ready) updateFlow("Pronto para identificar", "Clique em Analisar estrutura para identificar os blocos da petição.", 30);
+    else if (state.matrixFile && !state.petitionFile) updateFlow("Aguardando a petição", "O timbre Becker já está embutido. Envie apenas a petição DOCX.", 8);
   }
 
   function bindUpload(kind) {
@@ -124,8 +151,7 @@
       $(inputId).closest(".upload-card").classList.add("has-file");
       setText(statusId, file.name);
       updateFileObservations();
-      updateFlow(state.matrixFile && state.petitionFile ? "Arquivos prontos" : "Aguardando segundo arquivo", state.matrixFile && state.petitionFile ? "Tudo pronto para identificar a estrutura da petição." : "Carregue também o outro arquivo DOCX.", state.matrixFile && state.petitionFile ? 13 : 8);
-      $("analyze-btn").disabled = !(state.matrixFile && state.petitionFile) || state.busy;
+      updateAnalyzeEnabled();
     } catch (error) {
       $(inputId).value = "";
       showFileError(error.message || "Não foi possível ler este DOCX.");
@@ -562,6 +588,13 @@
       if (config.rules.pageBreakAfterSignature && index === lastSignatureIndex) {
         matrixBody.insertBefore(createPageBreakParagraph(matrix), sectPr || null);
       }
+    }
+    // O timbre Becker é uma imagem de página inteira atrás do texto, com a faixa
+    // de endereço ocupando os ~3 cm inferiores. Garante margem inferior de 3,5 cm
+    // (2000 twips) para o texto não invadir a faixa do rodapé.
+    if (sectPr) {
+      const pgMar = descendants(sectPr, "pgMar")[0];
+      if (pgMar && Number(attr(pgMar, W_NS, "bottom") || 0) < 2000) setAttr(pgMar, W_NS, "bottom", 2000);
     }
     output.file("word/document.xml", new XMLSerializer().serializeToString(matrix));
     return output;
