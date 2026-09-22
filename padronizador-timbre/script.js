@@ -19,7 +19,7 @@
   // Cor por tipo (usada nos chips/bolinhas da conferência).
   const TYPE_COLORS = {
     enderecamento: "#6b7280", identificacao: "#0ea5e9", titulo: "#002060", capitulo: "#002060",
-    subcapitulo: "#1d4ed8", corpo: "#94a3b8", citacao: "#d97706", figura: "#7c3aed",
+    subcapitulo: "#1d4ed8", corpo: "#94a3b8", citacao: "#f59e0b", figura: "#7c3aed",
     legenda: "#a855f7", pedidos: "#16a34a", fechamento: "#0891b2", data: "#0891b2",
     assinatura: "#be185d", tabela: "#475569", espaco: "#cbd5e1", outro: "#ef4444"
   };

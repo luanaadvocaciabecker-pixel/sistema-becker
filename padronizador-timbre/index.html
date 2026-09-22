@@ -11,21 +11,43 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <style>
+      /* Fontes um pouco maiores em toda a página */
+      body { font-size: 15px; }
+      .hero-copy { font-size: 16px; }
+      h2 { font-size: 23px; }
+      .muted { font-size: 13px; }
+      .section-kicker { font-size: 12px; }
+      .model-card strong { font-size: 16px; }
+      .model-desc { font-size: 12.5px; }
+      .rule-strip { font-size: 12.5px; }
+      .upload-title { font-size: 13.5px; }
+      .upload-help { font-size: 11.5px; }
+      .file-status { font-size: 12px; }
+      .file-observation { font-size: 12.5px; }
+      .button { font-size: 13.5px; }
+      .notice { font-size: 13px; }
+      .status-card strong { font-size: 14px; }
+      .status-card p, .technical-card p { font-size: 12.5px; }
+      .rule-list li { font-size: 12px; }
+      .privacy-note, .generation-hint { font-size: 11.5px; }
+      .step { font-size: 12px; }
+      .review-count { font-size: 13px; }
+
       /* Conferência redesenhada — blocos grandes e legíveis + chips com "bolinha" */
       #blocks-list { display:block; max-height:none; gap:0; }
       .rev-block { background:#fff; border:1px solid rgba(15,23,42,.10); border-left:5px solid #94a3b8;
         border-radius:12px; padding:14px 16px; margin-bottom:12px; box-shadow:0 1px 2px rgba(15,23,42,.04); }
       .rev-block.needs-review { background:#fffbeb; border-color:#fcd34d; }
       .rev-head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-      .rev-num { color:#fff; font-weight:800; font-size:12px; letter-spacing:.03em; padding:3px 8px; border-radius:7px; }
-      .rev-current { font-weight:800; font-size:14px; text-transform:uppercase; letter-spacing:.02em; }
-      .rev-conf { margin-left:auto; font-size:12px; font-weight:700; color:#64748b; }
+      .rev-num { color:#fff; font-weight:800; font-size:13px; letter-spacing:.03em; padding:3px 9px; border-radius:7px; }
+      .rev-current { font-weight:800; font-size:15px; text-transform:uppercase; letter-spacing:.02em; }
+      .rev-conf { margin-left:auto; font-size:13px; font-weight:700; color:#64748b; }
       .rev-conf.is-review { color:#b45309; }
-      .rev-text { font-size:15.5px; line-height:1.65; color:#1f2937; background:#f8fafc;
-        border:1px solid transparent; border-radius:9px; padding:11px 13px; outline:none; }
+      .rev-text { font-size:16.5px; line-height:1.7; color:#1f2937; background:#f8fafc;
+        border:1px solid transparent; border-radius:9px; padding:12px 14px; outline:none; }
       .rev-text:focus { background:#fff; border-color:#93c5fd; box-shadow:0 0 0 3px rgba(59,130,246,.12); }
       .rev-chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:11px; }
-      .rev-chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700;
+      .rev-chip { display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:700;
         padding:6px 11px; border:1.5px solid rgba(15,23,42,.14); border-radius:999px; background:#fff;
         cursor:pointer; transition:transform .05s ease, box-shadow .1s ease; }
       .rev-chip:hover { transform:translateY(-1px); box-shadow:0 2px 6px rgba(15,23,42,.12); }
