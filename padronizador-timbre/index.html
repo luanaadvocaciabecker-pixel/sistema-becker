@@ -81,10 +81,6 @@
                 <span id="model-rule-summary">Citações em Calibri 10, com recuo de 6 cm em todo o bloco.</span>
               </div>
 
-              <div id="matrix-fixed-note" style="display:flex;align-items:center;gap:10px;margin:0 0 14px;padding:12px 16px;border:1px solid rgba(0,32,96,.18);border-radius:12px;background:rgba(0,32,96,.05);font-size:14px;color:#002060;font-weight:600;">
-                <span style="font-size:18px;">🔒</span>
-                <span>Timbre Becker embutido — você só precisa enviar a petição. O cabeçalho e o rodapé do escritório entram automaticamente.</span>
-              </div>
               <div class="upload-grid">
                 <label class="upload-card is-hidden" id="matrix-card" for="matrix-file">
                   <span class="upload-index">A</span>
@@ -125,12 +121,13 @@
                 <div>
                   <p class="muted" id="review-description">A classificação usa padrões de redação, posição e contexto. Ajuste qualquer bloco antes de continuar.</p>
                 </div>
-                <div class="legend">
-                  <span><i class="legend-dot high"></i> alta confiança</span>
-                  <span><i class="legend-dot review"></i> conferir</span>
-                </div>
+                <label class="confirm-check" style="cursor:pointer;">
+                  <input type="checkbox" id="detailed-review">
+                  <span>Conferência minuciosa <small style="opacity:.7;">(mostrar todos os parágrafos)</small></span>
+                </label>
               </div>
               <div class="notice warning is-hidden" id="review-warning"></div>
+              <div class="notice is-hidden" id="review-hidden-note" style="margin-bottom:12px;"></div>
               <div class="blocks-list" id="blocks-list"></div>
               <div class="review-footer">
                 <button class="button ghost" id="back-btn" type="button">← Trocar arquivos</button>
