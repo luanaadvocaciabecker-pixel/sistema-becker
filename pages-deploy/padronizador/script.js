@@ -72,6 +72,7 @@
       state.detailedReview = event.target.checked;
       renderPreview();
     });
+    if ($("use-text-btn")) $("use-text-btn").addEventListener("click", usePastedText);
     $("generate-btn").addEventListener("click", generate);
     updateModelUI();
     loadFixedMatrix();
@@ -169,6 +170,43 @@
     const contentTypes = zip.file("[Content_Types].xml");
     if (!contentTypes) throw new Error("O pacote DOCX está incompleto: [Content_Types].xml não foi encontrado.");
     return zip;
+  }
+
+  const escXml = (value) => String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // Monta uma petição DOCX mínima a partir de texto colado (um parágrafo por linha).
+  async function buildPetitionFromText(text) {
+    const zip = new JSZip();
+    zip.file("[Content_Types].xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+    zip.file("_rels/.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+    const paras = String(text || "").replace(/\r\n?/g, "\n").split("\n").map((line) =>
+      line.trim() ? `<w:p><w:r><w:t xml:space="preserve">${escXml(line)}</w:t></w:r></w:p>` : "<w:p/>"
+    ).join("");
+    zip.file("word/document.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:document xmlns:w="${W_NS}"><w:body>${paras}<w:sectPr/></w:body></w:document>`);
+    zip.file("word/_rels/document.xml.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`);
+    return zip;
+  }
+
+  async function usePastedText() {
+    const area = $("petition-text");
+    const raw = area ? area.value : "";
+    if (!raw.trim()) { showFileError("Cole o texto da petição antes de continuar."); return; }
+    try {
+      if (state.analyzed) resetAnalysis();
+      state.petitionZip = await buildPetitionFromText(raw);
+      state.petitionFile = { name: "Texto colado" };
+      setText("petition-status", "Texto colado ✓");
+      const input = $("petition-file");
+      if (input && input.closest(".upload-card")) input.closest(".upload-card").classList.add("has-file");
+      updateFileObservations();
+      updateAnalyzeEnabled();
+    } catch (error) {
+      showFileError("Não consegui usar o texto colado. Tente novamente.");
+    }
   }
 
   function updateFileObservations() {
