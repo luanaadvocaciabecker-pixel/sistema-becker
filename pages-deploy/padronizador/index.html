@@ -11,6 +11,13 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <style>
+      /* Dourado mais escuro (melhor contraste dos rótulos) */
+      :root { --gold: #9a6f28; }
+      /* Status "processamento local" como pill */
+      .topbar-note { padding: 6px 12px; border-radius: 999px; background: #eef2fb; border: 1px solid rgba(0,32,96,.10); color: #002060; font-weight: 600; }
+      .topbar-note .live-dot { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.16); }
+      .rule-icon svg, .upload-icon svg { display: block; }
+
       /* Fontes um pouco maiores em toda a página */
       body { font-size: 15px; }
       .hero-copy { font-size: 16px; }
@@ -125,14 +132,14 @@
               </div>
 
               <div class="rule-strip" id="rule-strip">
-                <span class="rule-icon">↳</span>
+                <span class="rule-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/></svg></span>
                 <span id="model-rule-summary">Citações em Calibri 10, com recuo de 6 cm em todo o bloco.</span>
               </div>
 
               <div class="upload-grid">
                 <label class="upload-card is-hidden" id="matrix-card" for="matrix-file">
                   <span class="upload-index">A</span>
-                  <span class="upload-icon">▤</span>
+                  <span class="upload-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
                   <span class="upload-title">Matriz / timbre Becker</span>
                   <span class="upload-help">DOCX que será preservado como base da saída</span>
                   <span class="file-status" id="matrix-status">Nenhum arquivo selecionado</span>
@@ -140,7 +147,7 @@
                 </label>
                 <label class="upload-card" for="petition-file">
                   <span class="upload-index">B</span>
-                  <span class="upload-icon">¶</span>
+                  <span class="upload-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg></span>
                   <span class="upload-title">Petição DOCX</span>
                   <span class="upload-help">Conteúdo que será identificado e inserido</span>
                   <span class="file-status" id="petition-status">Nenhum arquivo selecionado</span>
@@ -148,7 +155,7 @@
                 </label>
               </div>
               <details class="paste-block" style="margin-top:14px;border:1px dashed rgba(0,32,96,.25);border-radius:12px;padding:12px 16px;">
-                <summary style="cursor:pointer;font-weight:600;color:#002060;font-size:14px;list-style:none;">✍️ Ou cole o texto da petição (sem precisar de arquivo)</summary>
+                <summary style="cursor:pointer;font-weight:600;color:#002060;font-size:14px;list-style:none;display:flex;align-items:center;gap:8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Ou cole o texto da petição (sem precisar de arquivo)</summary>
                 <div style="margin-top:12px;">
                   <textarea id="petition-text" rows="8" placeholder="Cole aqui o texto da petição — um parágrafo por linha. O app identifica os blocos e aplica a matriz textual (timbre, fontes, recuos)." style="width:100%;box-sizing:border-box;padding:12px;border:1px solid rgba(0,32,96,.2);border-radius:10px;font-family:inherit;font-size:14px;line-height:1.5;resize:vertical;"></textarea>
                   <button class="button" id="use-text-btn" type="button" style="margin-top:10px;">Usar este texto →</button>
@@ -160,7 +167,7 @@
                 <button class="button primary" id="analyze-btn" type="button" disabled>
                   <span>Analisar estrutura</span><span class="button-arrow">→</span>
                 </button>
-                <span class="privacy-note"><span class="lock">▣</span> Os arquivos não saem deste navegador.</span>
+                <span class="privacy-note"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>Os arquivos não saem deste navegador.</span>
               </div>
             </section>
 
