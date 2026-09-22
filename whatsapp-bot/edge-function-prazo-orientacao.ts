@@ -17,6 +17,15 @@
 // recibo de 400 caracteres seria repetir, num lugar pior, o erro do resumo que saiu escrito do
 // lado do exequente quando o nosso cliente era o executado. Sem teor devolve sem_teor:true e NÃO
 // chama o Gemini — não se paga token por resposta garantidamente vazia.
+//
+// *** CAMADA 2 DO ALERTA DE PARTE ERRADA *** — a camada 1 é o regex de `prazos_verifica_partes`
+// (SQL, roda todo dia sozinho, de graça). Essa função é a camada 2: como aqui já se manda o teor
+// inteiro pro Gemini mesmo assim, pedimos também "a_favor_de_quem" e gravamos em
+// prazos.alerta_parte_* com fonte='ia' — pega os casos que o regex não capta (frase indireta,
+// ordem composta) porque a IA lê o ato de verdade, não só procura verbo+papel perto. Gravado só
+// quando a IA está confiante (a_favor_de_quem != "indeterminado"); e por ser a camada mais
+// confiável, essa gravação NUNCA é sobrescrita de volta pelo regex diário (ver WHERE da UPDATE em
+// prazos_verifica_partes).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const SB   = Deno.env.get("SUPABASE_URL")!;
@@ -73,7 +82,9 @@ const PROMPT = [
   '"pontos_fortes":["o que neste ato está A NOSSO FAVOR: pedido nosso acolhido, prazo concedido, ônus posto na parte adversa, fundamento que nos serve"],',
   '"pontos_fracos":["o que neste ato está CONTRA NÓS: pedido nosso rejeitado, ônus ou exigência sobre nós, risco de preclusão, custo, fundamento que nos prejudica"],',
   '"prazo_no_texto":"o prazo que ESTE ato fixa para nós, como escrito (ex.: 15 dias), ou null",',
-  '"evento":"número do evento a que este ato se refere, se o texto citar, ou null"',
+  '"evento":"número do evento a que este ato se refere, se o texto citar, ou null",',
+  '"a_favor_de_quem":"nosso_cliente | parte_contraria | ambas_as_partes | indeterminado — a PROVIDÊNCIA/PRAZO que este ato determina é dirigida a quem?",',
+  '"a_favor_de_quem_motivo":"1 frase curta explicando a resposta acima, citando o papel processual usado no texto (ex.: \\"despacho intima a parte exequente, e nosso cliente é o executado\\"), ou null se indeterminado"',
   '}',
   "REGRAS DURAS:",
   "1) Não invente. Se o ato não der base para um item, devolva a lista VAZIA — lista vazia é resposta legítima e melhor que palpite.",
@@ -81,6 +92,8 @@ const PROMPT = [
   "3) Ato meramente ordinatório (distribuição, juntada, remessa) costuma não ter forte nem fraco: devolva as duas listas vazias em vez de forçar.",
   "4) No máximo 4 itens por lista, cada um com no máximo 20 palavras.",
   "5) Português direto, sem juridiquês desnecessário e sem repetir o texto do despacho.",
+  "6) a_favor_de_quem: se o ato não tiver uma ordem dirigida a uma parte específica (ex.: mero despacho de expediente), responda \"indeterminado\" — não force um lado. Se o polo do nosso cliente não foi informado acima, responda sempre \"indeterminado\" para este campo.",
+  "7) Cuidado com sinônimos do MESMO lado em fases diferentes do processo (ex.: requerente e autora são a mesma parte; apelante e recorrente também podem ser a mesma parte que recorreu) — não confunda rótulo diferente com parte diferente.",
 ].join(" ");
 
 Deno.serve(async (req) => {
@@ -148,9 +161,25 @@ Deno.serve(async (req) => {
     obj.ato = { pub_id: ato.pub_id, tipo: ato.ato_tipo, data: ato.ato_data,
                 dias_do_aviso: ato.dias, origem: ato.origem, provavel: ato.origem === "vizinho" };
 
+    const patch: Record<string, unknown> = {
+      ia_orientacao: obj, ia_orientacao_em: new Date().toISOString(), ia_teor_pub_id: ato.pub_id,
+    };
+    // só grava o alerta de parte quando a IA respondeu com confiança — "indeterminado" não
+    // sobrescreve o que o regex diário (camada 1) já tinha concluído.
+    const afq = String(obj.a_favor_de_quem || "").trim();
+    const statusPorAfq: Record<string, string> = {
+      nosso_cliente: "ok", parte_contraria: "conferir_parte_contraria", ambas_as_partes: "ambas_partes",
+    };
+    if (statusPorAfq[afq]) {
+      patch.alerta_parte_status = statusPorAfq[afq];
+      patch.alerta_parte_motivo = obj.a_favor_de_quem_motivo || null;
+      patch.alerta_parte_fonte = "ia";
+      patch.alerta_parte_em = new Date().toISOString();
+    }
+
     await sb(`prazos?id=eq.${prazoId}`, {
       method: "PATCH", headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ ia_orientacao: obj, ia_orientacao_em: new Date().toISOString(), ia_teor_pub_id: ato.pub_id }),
+      body: JSON.stringify(patch),
     });
 
     return json({ ok: true, cache: false, teor_pub_id: ato.pub_id, orientacao: obj,
