@@ -37,7 +37,7 @@
   const state = {
     modelId: "simples", matrixFile: null, petitionFile: null,
     matrixZip: null, petitionZip: null, petitionXml: null,
-    items: [], analyzed: false, busy: false
+    items: [], analyzed: false, busy: false, detailedReview: false, matrixEmbedded: false
   };
   const $ = (id) => document.getElementById(id);
   const bodyChildren = (doc) => {
@@ -68,6 +68,10 @@
     $("analyze-btn").addEventListener("click", analyze);
     $("back-btn").addEventListener("click", resetAnalysis);
     $("confirm-review").addEventListener("change", updateGenerateButton);
+    if ($("detailed-review")) $("detailed-review").addEventListener("change", (event) => {
+      state.detailedReview = event.target.checked;
+      renderPreview();
+    });
     $("generate-btn").addEventListener("click", generate);
     updateModelUI();
     loadFixedMatrix();
@@ -82,7 +86,7 @@
       if (!response.ok) throw new Error("timbre não encontrado");
       const file = new File([await response.blob()], "Timbre-Becker.docx", { type: DOCX_MIME });
       const zip = await loadDocx(file);
-      state.matrixFile = file; state.matrixZip = zip;
+      state.matrixFile = file; state.matrixZip = zip; state.matrixEmbedded = true;
       updateFileObservations();
       updateAnalyzeEnabled();
     } catch (error) {
@@ -169,7 +173,8 @@
 
   function updateFileObservations() {
     const parts = [];
-    if (state.matrixZip) {
+    // Se o timbre é o embutido, não anuncia nada sobre a matriz na página.
+    if (state.matrixZip && !state.matrixEmbedded) {
       const names = Object.keys(state.matrixZip.files);
       const media = names.filter((name) => /^word\/media\//.test(name)).length;
       const headers = names.filter((name) => /^word\/header\d+\.xml$/.test(name)).length;
@@ -354,7 +359,9 @@
       if (uppercaseRatio > .6 && text.length < 160 && !PARTES.test(n) && !isCNJ && !isVocative && !isListItem && !/^[A-Z]\)/.test(text.trim()) && !citStrength) {
         score(isFirst ? "titulo" : "capitulo", isFirst ? .7 : .6, "hierarquia visual e caixa do título");
       }
-      if (!isCNJ && /^(PETICAO|PETIÇÃO|CONTESTACAO|CONTESTAÇÃO|CONTRARRAZOES|CONTRARRAZÕES|CONTRAMINUTA|IMPUGNACAO|IMPUGNAÇÃO|RECURSO\s+DE|APELACAO|APELAÇÃO|AGRAVO\s+DE|EMBARGOS\s+DE|MANIFESTACAO|MANIFESTAÇÃO|RAZOES|RAZÕES|ALEGACOES\s+FINAIS|EXCECAO|EXCEÇÃO|RECLAMACAO|RECLAMAÇÃO)\b/.test(n)) score("titulo", .74, "nome da peça");
+      // Título da peça: só linhas CURTAS (o nome da peça é curto). Uma ementa longa
+      // em caixa alta que começa com "AGRAVO DE INSTRUMENTO. AÇÃO DE…" é citação, não título.
+      if (!isCNJ && !citStrength && text.length < 100 && /^(PETICAO|PETIÇÃO|CONTESTACAO|CONTESTAÇÃO|CONTRARRAZOES|CONTRARRAZÕES|CONTRAMINUTA|IMPUGNACAO|IMPUGNAÇÃO|RECURSO\s+DE|APELACAO|APELAÇÃO|AGRAVO\s+DE|EMBARGOS\s+DE|MANIFESTACAO|MANIFESTAÇÃO|RAZOES|RAZÕES|ALEGACOES\s+FINAIS|EXCECAO|EXCEÇÃO|RECLAMACAO|RECLAMAÇÃO)\b/.test(n)) score("titulo", .74, "nome da peça");
       if (isVocative) score("corpo", .5, "saudação/vocativo ao juízo");
 
       // Citação: por CONTEÚDO (forte) ou por recuo (moderado)
@@ -450,13 +457,29 @@
   function renderPreview() {
     const list = $("blocks-list");
     const reviewCount = state.items.filter((item) => item.needsReview).length;
-    setText("review-count", `${state.items.length} blocos · ${reviewCount} conferir`);
     setText("metric-blocks", state.items.length);
     const matrixImages = state.matrixZip ? Object.keys(state.matrixZip.files).filter((name) => /^word\/media\//.test(name)).length : 0;
     setText("metric-images", matrixImages);
     $("review-warning").classList.toggle("is-hidden", reviewCount === 0);
     $("review-warning").innerHTML = reviewCount ? `Há <b>${reviewCount} bloco(s)</b> com confiança baixa ou sinais concorrentes. A saída só será liberada depois que você revisar a classificação e confirmar o conjunto.` : "";
-    list.innerHTML = state.items.map((item, index) => {
+
+    // Por padrão só mostra o que pede atenção (blocos estruturais/especiais + "conferir");
+    // o corpo comum fica oculto até ligar a conferência minuciosa.
+    const isVisible = (item) => state.detailedReview
+      ? item.kind !== "espaco"
+      : (item.needsReview || !["corpo", "espaco"].includes(item.kind));
+    const shown = state.items.filter(isVisible);
+    const hiddenBody = state.detailedReview ? 0 : state.items.filter((i) => i.kind === "corpo" && !i.needsReview).length;
+    setText("review-count", `${shown.length} de ${state.items.length} blocos · ${reviewCount} conferir`);
+    const note = $("review-hidden-note");
+    if (note) {
+      const show = !state.detailedReview && hiddenBody > 0;
+      note.classList.toggle("is-hidden", !show);
+      if (show) note.innerHTML = `<b>${hiddenBody}</b> parágrafo(s) de corpo ocultos. Ligue a <b>conferência minuciosa</b> acima para ver todos.`;
+    }
+
+    list.innerHTML = shown.map((item) => {
+      const index = item.index;
       const options = TYPES.map(([value, label]) => `<option value="${value}" ${item.kind === value ? "selected" : ""}>${label}</option>`).join("");
       const confidence = item.needsReview ? "conferir" : `${Math.round(item.confidence * 100)}% confiança`;
       return `<article class="block-row ${item.needsReview ? "needs-review" : ""} ${previewClasses(item, index)}" data-index="${index}">
