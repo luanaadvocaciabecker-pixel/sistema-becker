@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Microsoft_365__sharepoint_folder_search",
+      "mcp__Microsoft_365__read_resource",
+      "mcp__Microsoft_365__sharepoint_search"
+    ]
+  }
+}

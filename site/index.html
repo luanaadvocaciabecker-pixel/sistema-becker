@@ -6028,8 +6028,8 @@ async function carregarPrazos(){
   // hoje/em aberto pra fora da tela (já aconteceu de verdade, ver commit que limpou
   // 2.347 prazos "estimado" vencidos que estavam escondendo os prazos atuais).
   const[ativos,cumpridos]=await Promise.all([
-    supa.from('prazos').select('*,processos(numero,advogado_responsavel,clientes(nome))').eq('cumprido',false).order('data').limit(3000),
-    supa.from('prazos').select('*,processos(numero,advogado_responsavel,clientes(nome))').eq('cumprido',true).order('data',{ascending:false}).limit(200)
+    supa.from('prazos').select('*,processos(numero,advogado_responsavel,advogado_coatuacao_externa,clientes(nome))').eq('cumprido',false).order('data').limit(3000),
+    supa.from('prazos').select('*,processos(numero,advogado_responsavel,advogado_coatuacao_externa,clientes(nome))').eq('cumprido',true).order('data',{ascending:false}).limit(200)
   ]);
   prazosCache=[...(ativos.data||[]),...(cumpridos.data||[])];
   renderPrazos();
@@ -6078,10 +6078,17 @@ function renderPrazos(){
   // nasce assim, porque o diário trabalhista não publica a data-limite (ver
   // db/trt_gera_prazos.sql). Fica nesta fila E na lista normal, marcado, até alguém confirmar.
   const aConferir=base.filter(p=>!p.cumprido&&_naoConfirmado(p));
+  // Prazo cuja PARTE pode estar errada — o despacho, lido pelo regex diário (camada 1,
+  // prazos_verifica_partes) ou pela IA da orientação (camada 2), parece mandar agir a parte
+  // contrária, ou as duas partes. Nunca muda o prazo sozinho: só sinaliza pra revisão humana
+  // (ver db/prazos_verifica_partes.sql). Achado real que motivou isso: processo do DIEGO
+  // DELZIOVO, cliente EXECUTADO, despacho intimava só o EXEQUENTE.
+  const aConferirParte=base.filter(p=>!p.cumprido&&(p.alerta_parte_status==='conferir_parte_contraria'||p.alerta_parte_status==='ambas_partes'));
   if(stats)stats.innerHTML=[
     ['hoje','Vence HOJE',g.hoje.length,'#f87171'],
     ['aberto','Em aberto',g.aberto.length,'#60a5fa'],
     ['conferir','⚠ A conferir',aConferir.length,'#f59e0b'],
+    ['parte','⚠ Parte a conferir',aConferirParte.length,'#dc2626'],
     ['custas','💰 Custas',nCat('custas'),'#d97706'],
     ['documentos','📎 Documentos',nCat('documentos'),'#7c3aed']
   ].map(([k,lbl,n,cor])=>`<div class="stat-card" style="cursor:pointer;${prazoBucket===k?'outline:2px solid '+cor+';outline-offset:-1px':''}" onclick="prazoBucket='${k}';renderPrazos()">
@@ -6095,6 +6102,7 @@ function renderPrazos(){
   else if(prazoBucket==='documentos'){lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.categoria==='documentos');vazio='Nenhum prazo de documentos em aberto. 📎';}
   else if(prazoBucket==='excedido'){lista=g.excedido;vazio='Nenhum prazo perdido. 👍';}
   else if(prazoBucket==='conferir'){lista=aConferir;vazio='Nada a conferir — todas as datas foram confirmadas. 👍';}
+  else if(prazoBucket==='parte'){lista=aConferirParte;vazio='Nenhum prazo com suspeita de parte errada. 👍';}
   else if(prazoBucket==='audiencias')lista=[...g.hoje,...g.vencido,...g.aberto].filter(p=>p.tipo==='Audiência');
   else if(prazoBucket==='todos')lista=[...g.hoje,...g.vencido,...g.aberto,...g.excedido,...g.cumprido,...g.descartado,...g.encerrado];
   else lista=[...g.hoje,...g.aberto]; // 'ativos' (padrão): hoje + futuros. Vencidos saem daqui ("esquece o que já passou") e ficam só no card Vencidos.
@@ -6112,6 +6120,10 @@ function renderPrazos(){
     // acima), então essa contagem sempre daria zero.
     html += `<div onclick="prazoBucket='conferir';renderPrazos()" style="cursor:pointer;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.40);border-radius:10px;padding:12px 14px;margin-bottom:12px;color:#b45309;font-size:13px;font-weight:700">
       ⚠ ${aConferir.length} prazo(s) com data CALCULADA pelo sistema — clique para conferir e confirmar</div>`;
+  }
+  if(aConferirParte.length && prazoBucket!=='parte'){
+    html += `<div onclick="prazoBucket='parte';renderPrazos()" style="cursor:pointer;background:rgba(220,38,38,.10);border:1px solid rgba(220,38,38,.40);border-radius:10px;padding:12px 14px;margin-bottom:12px;color:#dc2626;font-size:13px;font-weight:700">
+      ⚠ ${aConferirParte.length} prazo(s) com suspeita de PARTE ERRADA (o despacho parece mandar agir a parte contrária) — clique para conferir</div>`;
   }
   html += lista.length?`<div class="card"><div class="card-body">${renderPrazosLista(lista,true)}</div></div>`
     :`<div class="empty-state"><div class="icon">✅</div><p>${vazio}</p></div>`;
@@ -6498,14 +6510,24 @@ function renderPrazosLista(lista,comAcoes=false){
     // Relator/Ministro) — sinaliza que o recurso subiu. 1º grau é o padrão, não precisa selo.
     const grauM=(p.descricao||'').match(/· (2º grau\/TST) — /);
     const seloGrau=grauM?` <span title="Recurso já subiu para julgamento no 2º grau/TST (detectado no texto do despacho)." style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#6366f122;color:#4338ca">⬆ 2º grau/TST</span>`:'';
+    // Suspeita de parte errada (prazos_verifica_partes/regex ou prazo-orientacao/IA) — ver
+    // db/prazos_verifica_partes.sql. Nunca decide nada sozinho, só sinaliza.
+    const seloParte=(p.alerta_parte_status==='conferir_parte_contraria'||p.alerta_parte_status==='ambas_partes')
+      ?` <span title="${escHtml(p.alerta_parte_motivo||'')}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:#dc262622;color:#dc2626">⚠ ${p.alerta_parte_status==='ambas_partes'?'AMBAS AS PARTES':'CONFERIR PARTE'}</span>`:'';
+    // Etiqueta de co-atuação externa — mesmo padrão do processo/audiências, com o Umberto
+    // Carlos Becker destacado (ela pediu pra ver sempre que aparecer).
+    const coat=p.processos?.advogado_coatuacao_externa;
+    const ehUmberto=coat&&/UMBERTO\s+CARLOS\s+BECKER/i.test(coat);
+    const tagCoat=coat?` <span class="tag" title="Advogado em co-atuação, fora do escritório" style="font-size:10px;background:${ehUmberto?'rgba(124,58,237,.18)':'rgba(124,58,237,.12)'};color:#7c3aed;font-weight:${ehUmberto?'700':'500'}">👥 ${escHtml(coat)}</span>`:'';
     return`<div class="prazo-item"${naoConfirmado?' style="background:rgba(245,158,11,.05)"':''}>
       <div class="prazo-data-box ${boxK}">
         <div class="dia">${isNaN(dt)?'--':dt.getDate().toString().padStart(2,'0')}</div>
         <div class="mes">${isNaN(dt)?'':dt.toLocaleDateString('pt-BR',{month:'short'})}</div>
       </div>
       <div class="prazo-info">
-        <h4>${_descPrazoDisplay(p.descricao)||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}${seloGrau}${seloPetic}</h4>
+        <h4>${_descPrazoDisplay(p.descricao)||'Prazo'} ${chip} <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${bc}22;color:${bc}">${bl}</span>${seloEst}${seloFonte}${seloGrau}${seloPetic}${seloParte}${tagCoat}</h4>
         <p>${p.processos?.numero?`Proc. ${p.processos.numero} · `:''}${mostrarCli?`🧑 ${cliNome} · `:''}${p.tipo||''}${p.processos?.advogado_responsavel?` · 👤 <b>${_advCurto(p.processos.advogado_responsavel)}</b>`:' · <span style="color:#dc2626">⚠️ sem responsável</span>'}${p.classe?` · <span style="color:#64748b">${p.classe}</span>`:''}${p.categoria==='custas'?' · <b style="color:#d97706">💰 Custas</b>':p.categoria==='documentos'?' · <b style="color:#7c3aed">📎 Documentos</b>':''}${cls==='vencido'?' · <span style="color:#fbbf24">passou da data</span>':''}${cls==='excedido'?' · <b style="color:#dc2626">PERDIDO — conferir se foi peticionado</b>':''}${naoConfirmado?' · <span style="color:#b45309">data a confirmar</span>':''}</p>
+        ${seloParte&&p.alerta_parte_motivo?`<p style="margin:4px 0 0;color:#dc2626;font-size:12px">⚠ ${escHtml(p.alerta_parte_motivo)}</p>`:''}
         ${sug?`<p style="margin:4px 0 0"><span style="display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:${sug==='custas'?'#d9770622':'#7c3aed22'};color:${sug==='custas'?'#b45309':'#6d28d9'}">🤖 IA sugere: ${sug==='custas'?'💰 Custas':'📎 Documentos'}${p.categoria_confianca?` · confiança ${p.categoria_confianca}`:''}</span>${p.categoria_motivo?` <span style="color:#94a3b8;font-size:11px">— ${p.categoria_motivo}</span>`:''}</p>`:''}
       </div>
       ${comAcoes?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
