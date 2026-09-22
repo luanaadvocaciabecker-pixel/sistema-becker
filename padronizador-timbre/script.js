@@ -16,6 +16,16 @@
     ["espaco", "Espaço"], ["outro", "Outro / conferir"]
   ];
   const TYPE_LABELS = Object.fromEntries(TYPES);
+  // Cor por tipo (usada nos chips/bolinhas da conferência).
+  const TYPE_COLORS = {
+    enderecamento: "#6b7280", identificacao: "#0ea5e9", titulo: "#002060", capitulo: "#002060",
+    subcapitulo: "#1d4ed8", corpo: "#94a3b8", citacao: "#d97706", figura: "#7c3aed",
+    legenda: "#a855f7", pedidos: "#16a34a", fechamento: "#0891b2", data: "#0891b2",
+    assinatura: "#be185d", tabela: "#475569", espaco: "#cbd5e1", outro: "#ef4444"
+  };
+  // Chips principais mostrados em cada bloco (na ordem do documento); o resto vai no "⋯ mais".
+  const CHIP_KINDS = ["enderecamento", "identificacao", "titulo", "capitulo", "subcapitulo", "corpo", "citacao", "pedidos", "fechamento", "data", "assinatura"];
+  const REST_KINDS = TYPES.map(([v]) => v).filter((v) => !CHIP_KINDS.includes(v));
 
   /* Fonte única dos modelos: a seleção aponta para esta configuração. */
   const MODEL_CONFIGS = Object.freeze({
@@ -518,29 +528,52 @@
 
     list.innerHTML = shown.map((item) => {
       const index = item.index;
-      const options = TYPES.map(([value, label]) => `<option value="${value}" ${item.kind === value ? "selected" : ""}>${label}</option>`).join("");
-      const confidence = item.needsReview ? "conferir" : `${Math.round(item.confidence * 100)}% confiança`;
-      return `<article class="block-row ${item.needsReview ? "needs-review" : ""} ${previewClasses(item, index)}" data-index="${index}">
-        <div class="block-number">${String(index + 1).padStart(2, "0")}</div>
-        <div class="block-meta"><select class="block-select" aria-label="Tipo do bloco ${index + 1}">${options}</select><span class="confidence">${confidence}</span></div>
-        <textarea class="block-editor" aria-label="Texto do bloco ${index + 1}">${esc(item.text)}</textarea>
-        <div class="block-reason">${esc(item.reason)}${item.quoteGroup ? ` · citação ${item.quoteGroup}` : ""}</div>
+      const color = TYPE_COLORS[item.kind] || "#94a3b8";
+      const chips = CHIP_KINDS.map((value) => {
+        const active = item.kind === value;
+        const c = TYPE_COLORS[value] || "#94a3b8";
+        const style = active ? `background:${c};border-color:${c};color:#fff;` : `color:${c};`;
+        const dot = active ? "#fff" : c;
+        return `<button type="button" class="rev-chip${active ? " is-active" : ""}" data-kind="${value}" style="${style}"><span class="rev-dot" style="background:${dot}"></span>${TYPE_LABELS[value]}</button>`;
+      }).join("");
+      const isRest = REST_KINDS.includes(item.kind);
+      const restOptions = REST_KINDS.map((value) => `<option value="${value}" ${item.kind === value ? "selected" : ""}>${TYPE_LABELS[value]}</option>`).join("");
+      const conf = item.needsReview ? "conferir" : `${Math.round(item.confidence * 100)}%`;
+      return `<article class="rev-block ${item.needsReview ? "needs-review" : ""}" data-index="${index}" style="border-left-color:${color}">
+        <div class="rev-head">
+          <span class="rev-num" style="background:${color}">${String(index + 1).padStart(2, "0")}</span>
+          <span class="rev-current" style="color:${color}">${TYPE_LABELS[item.kind]}</span>
+          <span class="rev-conf ${item.needsReview ? "is-review" : ""}">${conf}</span>
+        </div>
+        <div class="rev-text" contenteditable="true" spellcheck="false">${esc(item.text)}</div>
+        <div class="rev-chips">${chips}<select class="rev-more${isRest ? " is-active" : ""}" aria-label="Mais tipos"><option value="">⋯ mais</option>${restOptions}</select></div>
       </article>`;
     }).join("");
-    list.querySelectorAll(".block-select").forEach((select) => select.addEventListener("change", (event) => {
-      const index = Number(event.target.closest(".block-row").dataset.index);
-      state.items[index].kind = event.target.value;
-      state.items[index].needsReview = event.target.value === "outro";
-      state.items[index].confidence = state.items[index].needsReview ? .3 : 1;
-      state.items[index].reason = "classificação confirmada pelo usuário";
+    const setKind = (index, value) => {
+      const it = state.items[index];
+      it.kind = value;
+      it.needsReview = value === "outro";
+      it.confidence = it.needsReview ? .3 : 1;
+      it.reason = "classificação confirmada por você";
       renderPreview();
       updateGenerateButton();
+    };
+    list.querySelectorAll(".rev-chip").forEach((chip) => chip.addEventListener("click", (event) => {
+      const index = Number(event.currentTarget.closest(".rev-block").dataset.index);
+      setKind(index, event.currentTarget.dataset.kind);
     }));
-    list.querySelectorAll(".block-editor").forEach((editor) => editor.addEventListener("input", (event) => {
-      const index = Number(event.target.closest(".block-row").dataset.index);
-      state.items[index].text = event.target.value;
-      updateGenerateButton();
+    list.querySelectorAll(".rev-more").forEach((sel) => sel.addEventListener("change", (event) => {
+      if (!event.target.value) return;
+      const index = Number(event.target.closest(".rev-block").dataset.index);
+      setKind(index, event.target.value);
     }));
+    list.querySelectorAll(".rev-text").forEach((box) => {
+      box.addEventListener("input", (event) => {
+        const index = Number(event.target.closest(".rev-block").dataset.index);
+        state.items[index].text = event.target.innerText.replace(/\n+/g, " ").trim();
+        updateGenerateButton();
+      });
+    });
   }
 
   function previewClasses(item, index) {

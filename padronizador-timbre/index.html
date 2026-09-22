@@ -10,6 +10,32 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <style>
+      /* Conferência redesenhada — blocos grandes e legíveis + chips com "bolinha" */
+      #blocks-list { display:block; max-height:none; gap:0; }
+      .rev-block { background:#fff; border:1px solid rgba(15,23,42,.10); border-left:5px solid #94a3b8;
+        border-radius:12px; padding:14px 16px; margin-bottom:12px; box-shadow:0 1px 2px rgba(15,23,42,.04); }
+      .rev-block.needs-review { background:#fffbeb; border-color:#fcd34d; }
+      .rev-head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+      .rev-num { color:#fff; font-weight:800; font-size:12px; letter-spacing:.03em; padding:3px 8px; border-radius:7px; }
+      .rev-current { font-weight:800; font-size:14px; text-transform:uppercase; letter-spacing:.02em; }
+      .rev-conf { margin-left:auto; font-size:12px; font-weight:700; color:#64748b; }
+      .rev-conf.is-review { color:#b45309; }
+      .rev-text { font-size:15.5px; line-height:1.65; color:#1f2937; background:#f8fafc;
+        border:1px solid transparent; border-radius:9px; padding:11px 13px; outline:none; }
+      .rev-text:focus { background:#fff; border-color:#93c5fd; box-shadow:0 0 0 3px rgba(59,130,246,.12); }
+      .rev-chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:11px; }
+      .rev-chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700;
+        padding:6px 11px; border:1.5px solid rgba(15,23,42,.14); border-radius:999px; background:#fff;
+        cursor:pointer; transition:transform .05s ease, box-shadow .1s ease; }
+      .rev-chip:hover { transform:translateY(-1px); box-shadow:0 2px 6px rgba(15,23,42,.12); }
+      .rev-chip.is-active { box-shadow:0 2px 8px rgba(15,23,42,.18); }
+      .rev-dot { width:9px; height:9px; border-radius:50%; box-shadow:0 0 0 2px rgba(255,255,255,.6) inset; }
+      .rev-more { font-size:12px; font-weight:700; padding:6px 10px; border:1.5px solid rgba(15,23,42,.14);
+        border-radius:999px; background:#fff; color:#475569; cursor:pointer; }
+      .rev-more.is-active { border-color:#ef4444; color:#ef4444; }
+      @media (max-width:640px){ .rev-text{ font-size:16px; } .rev-chip{ font-size:12.5px; } }
+    </style>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script defer src="script.js"></script>
   </head>
