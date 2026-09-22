@@ -796,7 +796,7 @@
     identificacao: { font: "Calibri", size: 24, bold: false, jc: "both",   left: 0,   firstLine: 0,   before: 0,   after: 0   },
     titulo:        { font: "Calibri", size: 24, bold: true,  caps: true,  color: BRANCO, fill: AZUL, jc: "center", left: 0,   firstLine: 0, before: 240, after: 240 },
     capitulo:      { font: "Calibri", size: 24, bold: true,  caps: true,  color: BRANCO, fill: AZUL, jc: "both",   left: CM6, firstLine: 0, before: 240, after: 240 },
-    subcapitulo:   { font: "Calibri", size: 24, bold: true,  caps: true,  color: "auto", jc: "left",  left: CM6, firstLine: 0, before: 240, after: 240 },
+    subcapitulo:   { font: "Calibri", size: 24, bold: true,  caps: true,  color: "auto", jc: "both",  left: CM6, firstLine: 0, before: 240, after: 240 },
     corpo:         { font: "Calibri", size: 24, bold: false, jc: "both",   left: 0,   firstLine: CM6, before: 240, after: 240 },
     citacao:       { font: "Calibri", size: 20, bold: false, jc: "both",   left: CM6, firstLine: 0,   before: 240, after: 240 },
     legenda:       { font: "Calibri", size: 20, bold: false, jc: "center", left: 0,   firstLine: 0,   before: 120, after: 240 },
