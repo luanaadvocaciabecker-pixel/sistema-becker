@@ -311,7 +311,10 @@
 
       // Identificação / partes / qualificação
       if (PARTES.test(n)) score("identificacao", .82, "rótulo de parte (autor/réu/apelante…)");
-      if (!isListItem && /(?:JA\s+QUALIFICAD|JÁ\s+QUALIFICAD|POR\s+(?:SEU|SUA)\s+(?:ADVOGAD|PROCURADOR)|INSCRIT[OA]\s+NA\s+OAB|\bCPF\b|\bCNPJ\b|RESIDENTE\s+E\s+DOMICILIAD|VEM,?\s+RESPEITOSAMENTE|VEM\s+A\s+PRESENCA|INFRA-?ASSINAD)/.test(n)) score("identificacao", .85, "marcador de qualificação ou representação");
+      // Só as LINHAS CURTAS de qualificação (rótulos) contam como identificação;
+      // o preâmbulo ("Fulano, já qualificado, vem respeitosamente… apresentar") é
+      // um parágrafo longo e deve ser tratado como CORPO (com 1ª linha de 6 cm).
+      if (!isListItem && text.length < 120 && /(?:JA\s+QUALIFICAD|JÁ\s+QUALIFICAD|INSCRIT[OA]\s+NA\s+OAB|\bCPF\b|\bCNPJ\b|RESIDENTE\s+E\s+DOMICILIAD)/.test(n)) score("identificacao", .85, "marcador de qualificação ou representação");
       if (isCNJ && text.length < 90) score("identificacao", .75, "linha de número de processo (CNJ)");
       if (isFirst && text.length < 120 && /(?:AUTOR|REU|RÉU|REQUERENTE|REQUERIDO|APELANTE|APELADO|PARTE)/.test(n) && !PARTES.test(n)) score("identificacao", .5, "partes em posição inicial");
 
@@ -325,7 +328,7 @@
       if (uppercaseRatio > .6 && text.length < 160 && !PARTES.test(n) && !isCNJ && !isVocative && !isListItem && !/^[A-Z]\)/.test(text.trim()) && !citStrength) {
         score(isFirst ? "titulo" : "capitulo", isFirst ? .7 : .6, "hierarquia visual e caixa do título");
       }
-      if (/^(PETICAO|PETIÇÃO|CONTESTACAO|CONTESTAÇÃO|RECURSO\s+DE|MANIFESTACAO|MANIFESTAÇÃO|RAZOES|RAZÕES)\b/.test(n)) score("titulo", .72, "nome da peça");
+      if (!isCNJ && /^(PETICAO|PETIÇÃO|CONTESTACAO|CONTESTAÇÃO|CONTRARRAZOES|CONTRARRAZÕES|CONTRAMINUTA|IMPUGNACAO|IMPUGNAÇÃO|RECURSO\s+DE|APELACAO|APELAÇÃO|AGRAVO\s+DE|EMBARGOS\s+DE|MANIFESTACAO|MANIFESTAÇÃO|RAZOES|RAZÕES|ALEGACOES\s+FINAIS|EXCECAO|EXCEÇÃO|RECLAMACAO|RECLAMAÇÃO)\b/.test(n)) score("titulo", .74, "nome da peça");
       if (isVocative) score("corpo", .5, "saudação/vocativo ao juízo");
 
       // Citação: por CONTEÚDO (forte) ou por recuo (moderado)
@@ -547,6 +550,10 @@
     for (let index = 0; index < sourceNodes.length; index += 1) {
       const item = state.items[index];
       const clone = sourceNodes[index].cloneNode(true);
+      // Parágrafos vazios do original são descartados: o espaçamento passa a ser
+      // controlado pelas regras da matriz textual (evita linhas em branco soltas).
+      // Exceção: se o parágrafo vazio carrega uma quebra de seção (sectPr), é mantido.
+      if (item && item.kind === "espaco" && clone.localName === "p" && descendants(clone, "sectPr").length === 0) continue;
       remapSourceReferences(clone, sourceParts);
       if (item && item.text !== item.originalText) setElementText(clone, item.text);
       if (item && clone.localName === "p") applyParagraphRules(clone, item, config);
@@ -730,10 +737,10 @@
   const BRANCO = "FFFFFF";
   const STYLE_RULES = {
     enderecamento: { font: "Calibri", size: 24, bold: true,  caps: true,  jc: "both",   left: 0,   firstLine: 0,   before: 0,   after: 480 },
-    identificacao: { font: "Calibri", size: 24, bold: false, jc: "both",   left: 0,   firstLine: 0,   before: 0,   after: 240 },
-    titulo:        { font: "Calibri", size: 24, bold: true,  caps: true,  color: BRANCO, fill: AZUL, jc: "center", left: 0, firstLine: 0, before: 240, after: 240 },
-    capitulo:      { font: "Calibri", size: 24, bold: true,  caps: true,  color: BRANCO, fill: AZUL, jc: "both",   left: 0, firstLine: 0, before: 240, after: 240 },
-    subcapitulo:   { font: "Calibri", size: 24, bold: true,  caps: true,  color: "auto", jc: "left", left: 0, firstLine: 0, before: 240, after: 240 },
+    identificacao: { font: "Calibri", size: 24, bold: false, jc: "both",   left: 0,   firstLine: 0,   before: 0,   after: 0   },
+    titulo:        { font: "Calibri", size: 24, bold: true,  caps: true,  color: BRANCO, fill: AZUL, jc: "center", left: 0,   firstLine: 0, before: 240, after: 240 },
+    capitulo:      { font: "Calibri", size: 24, bold: true,  caps: true,  color: BRANCO, fill: AZUL, jc: "both",   left: CM6, firstLine: 0, before: 240, after: 240 },
+    subcapitulo:   { font: "Calibri", size: 24, bold: true,  caps: true,  color: "auto", jc: "left",  left: CM6, firstLine: 0, before: 240, after: 240 },
     corpo:         { font: "Calibri", size: 24, bold: false, jc: "both",   left: 0,   firstLine: CM6, before: 240, after: 240 },
     citacao:       { font: "Calibri", size: 20, bold: false, jc: "both",   left: CM6, firstLine: 0,   before: 240, after: 240 },
     legenda:       { font: "Calibri", size: 20, bold: false, jc: "center", left: 0,   firstLine: 0,   before: 120, after: 240 },
@@ -951,16 +958,11 @@
         return rFonts && attr(rFonts, W_NS, "ascii") === "Calibri" && size === halfPt;
       });
     };
-    let cursor = 0, quotesOK = 0, quotesTotal = 0, pageBreakOK = false;
-    state.items.forEach((item, index) => {
-      const node = outputBodyNodes[cursor++];
-      if (!node) return;
-      if (item.kind === "citacao" && node.localName === "p") { quotesTotal++; if (runsCalibri(node, 20)) quotesOK++; }
-      if (config.rules.pageBreakAfterSignature && index === lastSignatureIndex) {
-        const brk = outputBodyNodes[cursor++];
-        pageBreakOK = !!(brk && brk.localName === "p" && Array.from(brk.getElementsByTagNameNS(W_NS, "br")).some((b) => attr(b, W_NS, "type") === "page"));
-      }
-    });
+    // Validação sem depender de alinhamento posicional (parágrafos vazios são
+    // descartados na geração, então o índice item↔parágrafo não é 1:1).
+    const quotesTotal = state.items.filter((it) => it.kind === "citacao").length;
+    const quotesOK = outputBodyNodes.filter((n) => n.localName === "p" && runsCalibri(n, 20) && Number(attr(descendants(descendants(n, "pPr")[0], "ind")[0], W_NS, "left") || 0) === CM6).length;
+    const pageBreakOK = outputBodyNodes.some((n) => n.localName === "p" && Array.from(n.getElementsByTagNameNS(W_NS, "br")).some((b) => attr(b, W_NS, "type") === "page"));
     if (config.rules.pageBreakAfterSignature && lastSignatureIndex >= 0 && !pageBreakOK) {
       errors.push("A quebra de página não foi encontrada imediatamente após a assinatura.");
     }
