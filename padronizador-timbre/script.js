@@ -395,6 +395,7 @@
       // um parágrafo longo e deve ser tratado como CORPO (com 1ª linha de 6 cm).
       if (!isListItem && text.length < 120 && /(?:JA\s+QUALIFICAD|JÁ\s+QUALIFICAD|INSCRIT[OA]\s+NA\s+OAB|\bCPF\b|\bCNPJ\b|RESIDENTE\s+E\s+DOMICILIAD)/.test(n)) score("identificacao", .85, "marcador de qualificação ou representação");
       if (isCNJ && text.length < 90) score("identificacao", .75, "linha de número de processo (CNJ)");
+      if (!isCNJ && text.length < 90 && /^PROCESSO\s+N[º° O.]/.test(n)) score("identificacao", .8, "cabeçalho de número de processo");
       if (isFirst && text.length < 120 && /(?:AUTOR|REU|RÉU|REQUERENTE|REQUERIDO|APELANTE|APELADO|PARTE)/.test(n) && !PARTES.test(n)) score("identificacao", .5, "partes em posição inicial");
 
       // Item de lista (a/b/c…) → pedido/enumeração, nunca capítulo
@@ -423,8 +424,11 @@
       if (FECHO_RE.test(n)) score("fechamento", .96, "fórmula de fechamento");
       if (/(?:^|\s)(?:SUBSCREVO|ATENCIOSAMENTE|RESPEITOSAMENTE|CORDIALMENTE)\b/.test(n) && text.length < 60) score("fechamento", .5, "fórmula final");
 
-      // Data / local (guardando contra número CNJ)
-      if (!isCNJ && (DATE_RE.test(n) || (DATE_NUM.test(n) && text.length < 80))) score("data", .9, "data localizada por padrão de calendário");
+      // Data / local (guardando contra número CNJ). A linha de data/local do
+      // fecho é CURTA ("Balneário Camboriú, 24 de setembro de 2026."). Parágrafo
+      // longo que apenas cita um mês/ano ("admitida em 26 de janeiro de 2026…")
+      // é CORPO, não data — por isso o teto de tamanho vale para os dois padrões.
+      if (!isCNJ && text.length < 80 && (DATE_RE.test(n) || DATE_NUM.test(n))) score("data", .9, "data localizada por padrão de calendário");
 
       // Assinatura: OAB, ou nome curto ao final.
       if (OAB_RE.test(n)) score("assinatura", .92, "registro OAB");
