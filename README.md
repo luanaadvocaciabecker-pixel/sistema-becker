@@ -38,6 +38,10 @@ acesso por usuário e senha. O front-end conversa diretamente com o Supabase
 - **Documentos** — armazenados no Supabase Storage (`documentos-clientes`)
 - **Consulta DataJud** — consulta e atualização em lote via Cloudflare Functions
 - **Movimentações, notificações, busca global, perfil e troca de senha**
+- **Consulta ao Sistema (chat)** — botão "Consultar" em todas as telas (e Becker IA → Consulta ao
+  Sistema): pergunta em português sobre clientes, processos, prazos, audiências, tarefas, alvarás,
+  honorários e publicações. Edge Function `sistema-chat` (`whatsapp-bot/edge-function-sistema-chat.ts`),
+  Gemini com ferramentas **só leitura**; não chama API paga.
 
 ---
 
