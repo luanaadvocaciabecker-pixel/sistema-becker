@@ -321,7 +321,7 @@
   ]);
   // --- marcadores (em forma normalizada: MAIÚSCULAS, sem acento) ---
   const CNJ = /\d{7}[-\s]?\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}/;
-  const PARTES = /^(?:AUTOR(?:ES|A|AS)?|REU|RÉU|REQUERENTE(?:S)?|REQUERID[OA](?:S)?|EXEQUENTE(?:S)?|EXECUTAD[OA](?:S)?|APELANTE(?:S)?|APELAD[OA](?:S)?|EMBARGANTE(?:S)?|EMBARGAD[OA](?:S)?|AGRAVANTE(?:S)?|AGRAVAD[OA](?:S)?|RECORRENTE(?:S)?|RECORRID[OA](?:S)?)\s*:/;
+  const PARTES = /^(?:AUTOR(?:ES|A|AS)?|REU|RÉU|REQUERENTE(?:S)?|REQUERID[OA](?:S)?|EXEQUENTE(?:S)?|EXECUTAD[OA](?:S)?|APELANTE(?:S)?|APELAD[OA](?:S)?|EMBARGANTE(?:S)?|EMBARGAD[OA](?:S)?|AGRAVANTE(?:S)?|AGRAVAD[OA](?:S)?|RECORRENTE(?:S)?|RECORRID[OA](?:S)?|RECLAMANTE(?:S)?|RECLAMAD[OA](?:S)?|LITISCONSORTE(?:S)?)\s*:/;
   const DATE_RE = /(?:JANEIRO|FEVEREIRO|MARCO|MARÇO|ABRIL|MAIO|JUNHO|JULHO|AGOSTO|SETEMBRO|OUTUBRO|NOVEMBRO|DEZEMBRO)\s+DE\s+\d{4}/;
   const DATE_NUM = /\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/;
   const OAB_RE = /OAB(?:\/|\\|-)?[A-Z]{0,3}\s*[\d.]+/;
@@ -354,10 +354,10 @@
   function citationSignal(text, n, uppercaseRatio) {
     if (/^\(?\s*["“”«»]/.test(text.trim())) return .9;                       // começa com aspas
     if (/\bSUMULA\s+N?º?\.?\s*\d+/.test(n)) return .9;                        // "Súmula 539/STJ"
-    if (/\((?:STJ|STF|TJ[A-Z-]{0,4}|TRF\d?)\b/.test(n)) return .9;            // "(STJ - REsp:..."
-    if (/\b(?:STJ|STF|TJSC|TJ-SC|TRF\d?)\s*[-–,]\s*(?:RESP|ARESP|AGRG|AGINT|APCIV|APELACAO|EMBARGOS|RECURSO|AGRAVO)\b/.test(n)) return .9;
+    if (/\((?:STJ|STF|TST|TJ[A-Z-]{0,4}|TRF\d?|TRT[\s-]?\d{0,2})\b/.test(n)) return .9; // "(STJ - REsp:...", "(TST -", "(TRT 12"
+    if (/\b(?:STJ|STF|TST|TJSC|TJ-SC|TRF\d?|TRT[\s-]?\d{0,2})\s*[-–,:]\s*(?:RESP|ARESP|AGRG|AGINT|APCIV|APELACAO|EMBARGOS|RECURSO|AGRAVO|RR|ARR|AIRR|RO|ROT|ED)\b/.test(n)) return .9;
     if (/(?:TRANSCREVE-SE|TRANSCREVO|IN\s+VERBIS|\bVERBIS\b|EIS\s+O\s+TEOR|AD\s+LITTERAM|CONFORME\s+EMENTA)/.test(n)) return .85;
-    if (uppercaseRatio > .55 && text.length > 130 && /(?:RECURSO\s+ESPECIAL|APELACAO(?:\s+CIVEL)?|EMBARGOS|DIREITO\s+CIVIL|PROCESSUAL\s+CIVIL|AGRAVO|DECISAO\s+MONOCRATICA)/.test(n)) return .85;
+    if (uppercaseRatio > .55 && text.length > 130 && /(?:RECURSO\s+ESPECIAL|RECURSO\s+DE\s+REVISTA|RECURSO\s+ORDINARIO|APELACAO(?:\s+CIVEL)?|EMBARGOS|DIREITO\s+CIVIL|DIREITO\s+DO\s+TRABALHO|PROCESSUAL\s+CIVIL|PROCESSUAL\s+DO\s+TRABALHO|AGRAVO|DECISAO\s+MONOCRATICA)/.test(n)) return .85;
     return 0;
   }
 
@@ -401,7 +401,7 @@
       if (isListItem) score("pedidos", .7, "item de lista de pedidos/enumeração (a, b, c…)");
 
       // Capítulo / subcapítulo (títulos de seção)
-      if (!isListItem && looksLikeSectionTitle(n) && !isNumberedSub(n)) score("capitulo", .85, "marcador de capítulo ou seção");
+      if (!isListItem && looksLikeSectionTitle(n) && !isNumberedSub(n) && text.length < 140) score("capitulo", .85, "marcador de capítulo ou seção");
       if (isNumberedSub(n) && text.length < 160) score("subcapitulo", .9, "numeração de subseção (1.1, VI.I…)");
       const citStrength = citationSignal(text, n, uppercaseRatio);
       if (uppercaseRatio > .6 && text.length < 160 && !PARTES.test(n) && !isCNJ && !isVocative && !isListItem && !/^[A-Z]\)/.test(text.trim()) && !citStrength) {
@@ -409,7 +409,7 @@
       }
       // Título da peça: só linhas CURTAS (o nome da peça é curto). Uma ementa longa
       // em caixa alta que começa com "AGRAVO DE INSTRUMENTO. AÇÃO DE…" é citação, não título.
-      if (!isCNJ && !citStrength && text.length < 100 && /^(PETICAO|PETIÇÃO|CONTESTACAO|CONTESTAÇÃO|CONTRARRAZOES|CONTRARRAZÕES|CONTRAMINUTA|IMPUGNACAO|IMPUGNAÇÃO|RECURSO\s+DE|APELACAO|APELAÇÃO|AGRAVO\s+DE|EMBARGOS\s+DE|MANIFESTACAO|MANIFESTAÇÃO|RAZOES|RAZÕES|ALEGACOES\s+FINAIS|EXCECAO|EXCEÇÃO|RECLAMACAO|RECLAMAÇÃO)\b/.test(n)) score("titulo", .74, "nome da peça");
+      if (!isCNJ && !citStrength && text.length < 100 && /^(PETICAO|PETIÇÃO|CONTESTACAO|CONTESTAÇÃO|CONTRARRAZOES|CONTRARRAZÕES|CONTRAMINUTA|IMPUGNACAO|IMPUGNAÇÃO|RECURSO\s+DE|APELACAO|APELAÇÃO|AGRAVO\s+DE|EMBARGOS\s+DE|MANIFESTACAO|MANIFESTAÇÃO|RAZOES|RAZÕES|ALEGACOES\s+FINAIS|EXCECAO|EXCEÇÃO|RECLAMACAO|RECLAMAÇÃO|ACAO\s+(?:TRABALHISTA|ORDINARIA|DE|DECLARATORIA|COLETIVA|CIVIL\s+PUBLICA)|RECLAMATORIA)\b/.test(n)) score("titulo", .74, "nome da peça");
       if (isVocative) score("corpo", .5, "saudação/vocativo ao juízo");
 
       // Citação: por CONTEÚDO (forte) ou por recuo (moderado)
