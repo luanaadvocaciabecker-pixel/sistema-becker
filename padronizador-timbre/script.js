@@ -311,7 +311,7 @@
     return {
       index, node, originalText: text, text, kind: isTable ? "tabela" : "outro",
       confidence: 0, reason: "", needsReview: false, hasImage: !isTable && hasDrawing(node),
-      props: isTable ? {} : paragraphProps(node), quoteGroup: null
+      props: isTable ? {} : paragraphProps(node), quoteGroup: null, sourceUrl: ""
     };
   }
 
@@ -547,6 +547,7 @@
         </div>
         <div class="rev-text" contenteditable="true" spellcheck="false">${esc(item.text)}</div>
         <div class="rev-chips">${chips}<select class="rev-more${isRest ? " is-active" : ""}" aria-label="Mais tipos"><option value="">⋯ mais</option>${restOptions}</select></div>
+        ${item.kind === "citacao" ? `<div class="rev-linkrow"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><input class="rev-link" type="url" placeholder="Disponível em: cole o link da jurisprudência (vira nota de rodapé)" value="${esc(item.sourceUrl || "")}"></div>` : ""}
       </article>`;
     }).join("");
     const setKind = (index, value) => {
@@ -574,6 +575,10 @@
         updateGenerateButton();
       });
     });
+    list.querySelectorAll(".rev-link").forEach((inp) => inp.addEventListener("input", (event) => {
+      const index = Number(event.target.closest(".rev-block").dataset.index);
+      state.items[index].sourceUrl = event.target.value;
+    }));
   }
 
   function previewClasses(item, index) {
@@ -667,6 +672,7 @@
     const sectPr = Array.from(matrixBody.childNodes).find((node) => node.nodeType === 1 && node.localName === "sectPr");
     Array.from(matrixBody.childNodes).forEach((node) => { if (node !== sectPr) matrixBody.removeChild(node); });
     const lastSignatureIndex = state.items.reduce((last, item, index) => item.kind === "assinatura" ? index : last, -1);
+    const insertedByIndex = {};
     for (let index = 0; index < sourceNodes.length; index += 1) {
       const item = state.items[index];
       const clone = sourceNodes[index].cloneNode(true);
@@ -678,11 +684,15 @@
       if (item && item.text !== item.originalText) setElementText(clone, item.text);
       if (item && clone.localName === "p") applyParagraphRules(clone, item, config);
       await remapRelationships(clone, state.petitionZip, output);
-      matrixBody.insertBefore(matrix.importNode(clone, true), sectPr || null);
+      const imported = matrix.importNode(clone, true);
+      matrixBody.insertBefore(imported, sectPr || null);
+      if (item) insertedByIndex[index] = imported;
       if (config.rules.pageBreakAfterSignature && index === lastSignatureIndex) {
         matrixBody.insertBefore(createPageBreakParagraph(matrix), sectPr || null);
       }
     }
+    // Notas de rodapé "Disponível em: [link]" para as citações de jurisprudência.
+    await applyFootnotes(output, matrix, insertedByIndex);
     // O timbre Becker é uma imagem de página inteira atrás do texto, com a faixa
     // de endereço ocupando os ~3 cm inferiores. Garante margem inferior de 3,5 cm
     // (2000 twips) para o texto não invadir a faixa do rodapé.
@@ -692,6 +702,79 @@
     }
     output.file("word/document.xml", new XMLSerializer().serializeToString(matrix));
     return output;
+  }
+
+  // Cria notas de rodapé "Disponível em: [link]" para cada citação com link,
+  // reaproveitando os estilos da matriz (Textodenotaderodap, Refdenotaderodap, Hyperlink).
+  async function applyFootnotes(output, matrix, insertedByIndex) {
+    const XML_NS = "http://www.w3.org/XML/1998/namespace";
+    const HYPERLINK_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+    const fnFile = output.file("word/footnotes.xml");
+    const relFile = output.file("word/_rels/footnotes.xml.rels");
+    if (!fnFile || !relFile) return; // matriz sem infraestrutura de notas de rodapé
+    const fnDoc = parseXml(await fnFile.async("string"));
+    const relDoc = parseXml(await relFile.async("string"));
+
+    // Remove notas de conteúdo antigas (mantém apenas separadores, que têm w:type)
+    // e os links de hyperlink antigos — a saída só carrega as notas desta peça.
+    Array.from(fnDoc.getElementsByTagNameNS(W_NS, "footnote")).forEach((fn) => {
+      if (!fn.getAttributeNS(W_NS, "type")) fn.parentNode.removeChild(fn);
+    });
+    Array.from(relDoc.getElementsByTagNameNS(REL_NS, "Relationship")).forEach((rel) => {
+      if (/\/hyperlink$/.test(rel.getAttribute("Type") || "")) rel.parentNode.removeChild(rel);
+    });
+
+    const withLinks = state.items.filter((it) => it.kind === "citacao" && it.sourceUrl && String(it.sourceUrl).trim() && insertedByIndex[it.index]);
+    if (withLinks.length) {
+      const usedFnIds = Array.from(fnDoc.getElementsByTagNameNS(W_NS, "footnote")).map((f) => Number(f.getAttributeNS(W_NS, "id"))).filter(Number.isFinite);
+      let nextFnId = (usedFnIds.length ? Math.max(...usedFnIds) : 1) + 1;
+      const usedRelIds = new Set(Array.from(relDoc.getElementsByTagNameNS(REL_NS, "Relationship")).map((r) => r.getAttribute("Id")));
+      let relSerial = 1;
+      const wel = (name) => fnDoc.createElementNS(W_NS, "w:" + name);
+
+      withLinks.forEach((item) => {
+        let url = String(item.sourceUrl).trim();
+        if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+        const fnId = nextFnId++;
+        let relId = "rIdFn" + (relSerial++);
+        while (usedRelIds.has(relId)) relId = "rIdFn" + (relSerial++);
+        usedRelIds.add(relId);
+
+        // Relationship externo para o link
+        const rel = relDoc.createElementNS(REL_NS, "Relationship");
+        rel.setAttribute("Id", relId); rel.setAttribute("Type", HYPERLINK_TYPE);
+        rel.setAttribute("Target", url); rel.setAttribute("TargetMode", "External");
+        relDoc.documentElement.appendChild(rel);
+
+        // <w:footnote> com "Disponível em: <hyperlink>"
+        const fn = wel("footnote"); setAttr(fn, W_NS, "id", fnId);
+        const p = wel("p");
+        const pPr = wel("pPr");
+        const pStyle = wel("pStyle"); setAttr(pStyle, W_NS, "val", "Textodenotaderodap"); pPr.appendChild(pStyle);
+        const sp = wel("spacing"); setAttr(sp, W_NS, "after", 120); pPr.appendChild(sp);
+        p.appendChild(pPr);
+        const rRef = wel("r"); const rPr1 = wel("rPr"); const rStyle1 = wel("rStyle"); setAttr(rStyle1, W_NS, "val", "Refdenotaderodap"); rPr1.appendChild(rStyle1); rRef.appendChild(rPr1); rRef.appendChild(wel("footnoteRef")); p.appendChild(rRef);
+        const rTxt = wel("r"); const t1 = wel("t"); t1.setAttributeNS(XML_NS, "xml:space", "preserve"); t1.textContent = " Disponível em: "; rTxt.appendChild(t1); p.appendChild(rTxt);
+        const hl = wel("hyperlink"); hl.setAttributeNS(R_NS, "r:id", relId); setAttr(hl, W_NS, "history", 1);
+        const rLink = wel("r"); const rPr2 = wel("rPr"); const rStyle2 = wel("rStyle"); setAttr(rStyle2, W_NS, "val", "Hyperlink"); rPr2.appendChild(rStyle2); rLink.appendChild(rPr2);
+        const t2 = wel("t"); t2.textContent = url; rLink.appendChild(t2); hl.appendChild(rLink); p.appendChild(hl);
+        fn.appendChild(p);
+        fnDoc.documentElement.appendChild(fn);
+
+        // Referência (número sobrescrito) no fim do parágrafo da citação
+        const para = insertedByIndex[item.index];
+        if (para && para.localName === "p") {
+          const rBody = matrix.createElementNS(W_NS, "w:r");
+          const rPrB = matrix.createElementNS(W_NS, "w:rPr");
+          const rStyleB = matrix.createElementNS(W_NS, "w:rStyle"); rStyleB.setAttributeNS(W_NS, "w:val", "Refdenotaderodap"); rPrB.appendChild(rStyleB);
+          rBody.appendChild(rPrB);
+          const ref = matrix.createElementNS(W_NS, "w:footnoteReference"); ref.setAttributeNS(W_NS, "w:id", String(fnId)); rBody.appendChild(ref);
+          para.appendChild(rBody);
+        }
+      });
+    }
+    output.file("word/footnotes.xml", new XMLSerializer().serializeToString(fnDoc));
+    output.file("word/_rels/footnotes.xml.rels", new XMLSerializer().serializeToString(relDoc));
   }
 
   async function mergeSourceParts(sourceZip, outputZip) {
@@ -1076,7 +1159,8 @@
     // Mapeia item -> parágrafo de saída (na ordem), pulando a quebra de página inserida.
     const lastSignatureIndex = state.items.reduce((last, item, index) => item.kind === "assinatura" ? index : last, -1);
     const runsCalibri = (p, halfPt) => {
-      const runs = Array.from(p.getElementsByTagNameNS(W_NS, "r"));
+      // Só os runs de TEXTO contam (ignora runs de referência de nota de rodapé).
+      const runs = Array.from(p.getElementsByTagNameNS(W_NS, "r")).filter((r) => r.getElementsByTagNameNS(W_NS, "t").length > 0);
       if (!runs.length) return true;
       return runs.every((run) => {
         const rPr = descendants(run, "rPr")[0];
