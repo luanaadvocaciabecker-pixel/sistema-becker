@@ -9084,29 +9084,48 @@ async function carregarAlvaras(filtro){
 }
 // Ficha completa do alvará pro financeiro — pedido dela em 26/09/2026: os dados do cliente
 // (CPF/CNPJ, telefone, endereço) já existem no cadastro, não precisa digitar de novo, só
-// juntar tudo numa tela só pra montar o relatório.
+// juntar tudo numa tela só pra montar o relatório. Cabeçalho com avatar + seções em cards,
+// mesmo padrão visual do "dossiê" da Assessoria (_headerAssessoriaCliente) — pedido dela em
+// 26/09: a primeira versão em grade 2 colunas ficava "amontoada".
 function verFichaAlvara(id){
   const a=(alvarasCache||[]).find(x=>String(x.id)===String(id));
   if(!a){toast('Não encontrado.','erro');return;}
   const c=a.clientes||{};
   const endereco=[c.rua&&c.numero?`${c.rua}, ${c.numero}`:c.rua,c.bairro,c.cidade&&c.estado?`${c.cidade}/${c.estado}`:c.cidade,c.cep].filter(Boolean).join(' · ');
-  const campo=(lbl,val)=>val?`<div style="margin-bottom:10px"><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${lbl}</span><div style="margin-top:2px;font-size:14px">${escHtml(val)}</div></div>`:'';
+  const cor=COR_ETAPA[a.etapa]||'#94a3b8';
+  const campo=(lbl,val)=>val?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.02em">${lbl}</span><div style="margin-top:3px;font-size:14px">${escHtml(val)}</div></div>`:'';
+  const secao=(titulo,camposHtml)=>`
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-body">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin-bottom:12px">${titulo}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 20px">${camposHtml}</div>
+      </div>
+    </div>`;
   abrirModal('Ficha do Alvará',`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
-      ${campo('Cliente',c.nome)}
-      ${campo('CPF/CNPJ',c.cpf_cnpj)}
-      ${campo('Telefone',c.telefone)}
-      ${campo('WhatsApp',c.whatsapp)}
-      ${campo('E-mail',c.email)}
-      ${campo('Endereço',endereco)}
-      ${campo('Processo',a.processos?.numero)}
-      ${campo('Valor do alvará',fmtMoeda(a.valor))}
-      ${campo('Conta bancária (recebimento)',a.conta_bancaria)}
-      ${campo('Data prevista',a.data_prevista?new Date(a.data_prevista+'T12:00:00').toLocaleDateString('pt-BR'):'')}
-      ${campo('Data de recebimento',a.data_recebimento?new Date(a.data_recebimento+'T12:00:00').toLocaleDateString('pt-BR'):'')}
-      ${campo('Etapa',a.etapa)}
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+      <div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--gold2,var(--gold)),var(--gold));color:var(--card,#050D1E);display:grid;place-items:center;font-size:16px;font-weight:800;flex-shrink:0">${iniciaisPerfil(c.nome)}</div>
+      <div style="flex:1;min-width:180px">
+        <h2 style="font-size:17px;margin-bottom:4px">${escHtml(c.nome||'Cliente não identificado')}</h2>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+          <span class="tag" style="background:${cor}22;color:${cor};border:1px solid ${cor}44">${escHtml(a.etapa||'—')}</span>
+          ${a.processos?.numero?`<span style="font-size:13px;color:#64748b;font-family:monospace">${escHtml(a.processos.numero)}</span>`:''}
+          <span style="font-size:16px;font-weight:800;color:#16a34a">${fmtMoeda(a.valor)}</span>
+        </div>
+      </div>
     </div>
-    ${a.observacoes?`<div style="margin-top:4px"><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Observações</span><div style="margin-top:2px;font-size:13px;white-space:pre-wrap">${escHtml(a.observacoes)}</div></div>`:''}
+    ${secao('Contato do cliente',[
+      campo('CPF/CNPJ',c.cpf_cnpj),campo('Telefone',c.telefone),campo('WhatsApp',c.whatsapp),
+      campo('E-mail',c.email)
+    ].join('')+(endereco?`<div style="grid-column:1/-1">${campo('Endereço',endereco)}</div>`:''))}
+    ${secao('Dados do alvará',[
+      campo('Conta bancária (recebimento)',a.conta_bancaria),
+      campo('Data prevista',a.data_prevista?new Date(a.data_prevista+'T12:00:00').toLocaleDateString('pt-BR'):''),
+      campo('Data de recebimento',a.data_recebimento?new Date(a.data_recebimento+'T12:00:00').toLocaleDateString('pt-BR'):'')
+    ].join(''))}
+    ${a.observacoes?`<div class="card"><div class="card-body">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin-bottom:8px">Observações</div>
+      <div style="font-size:13px;white-space:pre-wrap;line-height:1.5">${escHtml(a.observacoes)}</div>
+    </div></div>`:''}
   `,null,'Fechar',false,true);
 }
 async function novoAlvara(){
