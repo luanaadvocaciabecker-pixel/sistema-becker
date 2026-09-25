@@ -41,6 +41,11 @@
         quoteIndent: 3402, quoteSize: 20, quoteFont: "Calibri",
         pageBreakAfterSignature: true
       }
+    }),
+    trabalhista: Object.freeze({
+      id: "trabalhista", label: "Inicial Trabalhista", base: "REVISONAL PJ ENGECON",
+      summary: "Peça trabalhista: endereçamento ao Juízo do Trabalho, partes Reclamante/Reclamada e ementas do TST/TRT como citação (Calibri 10, recuo 6 cm).",
+      rules: { quoteIndent: 3402, quoteSize: 20, quoteFont: "Calibri" }
     })
   });
 
