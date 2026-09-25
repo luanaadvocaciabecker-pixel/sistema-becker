@@ -2068,6 +2068,7 @@ const USUARIOS_BECKER={
   'juridico4@advocaciabecker.com':{nome:'Samaira Leite da Silva',funcao:'Advogada'},
   'juridico5@advocaciabecker.com':{nome:'Ana Beatriz Muller',   funcao:'Estagiária'},
   'cibele@advocaciabecker.com':   {nome:'Cibele Becker',        funcao:'Sócia'},
+  'financeiro@advocaciabecker.com':{nome:'Carlos',              funcao:'Financeiro'},
   // Apelido: não é conta da lista do Supabase, fica só para não perder o perfil se a Alana
   // entrar pelo endereço antigo. Não aparece na tabela de usuários.
   // `atendimento@advocaciabecker.com` foi REMOVIDO em 10/09/2026 — a Luana confirmou que a conta
@@ -7072,7 +7073,7 @@ function pUsuarios(){
           ${linhasUsuariosBecker()}
         </tbody>
       </table>
-      <div style="margin-top:20px;padding:14px;background:rgba(200,165,92,0.06);border:1px solid rgba(200,165,92,0.15);border-radius:8px;font-size:12px;color:#94a3b8;line-height:1.8">
+      <div style="display:none;margin-top:20px;padding:14px;background:rgba(200,165,92,0.06);border:1px solid rgba(200,165,92,0.15);border-radius:8px;font-size:12px;color:#94a3b8;line-height:1.8">
         🔐 Para <strong>adicionar</strong> um novo usuário: <a href="https://supabase.com/dashboard/project/fnuzhypsqvyolqqafrba/auth/users" target="_blank" style="color:var(--gold)">Supabase → Authentication → Users → Invite User</a><br>
         🗑️ Para <strong>remover</strong> acesso: desativar ou excluir o usuário no painel do Supabase.
       </div>
