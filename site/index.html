@@ -9027,7 +9027,7 @@ async function pAlvaras(){
   carregarAlvaras('');
 }
 async function carregarAlvaras(filtro){
-  let q=supa.from('alvaras').select('*,processos(numero),clientes(nome,cpf_cnpj,telefone,whatsapp,email,rua,numero,bairro,cidade,estado,cep)').order('created_at',{ascending:false});
+  let q=supa.from('alvaras').select('*,processos(numero,vara,comarca),clientes(nome,cpf_cnpj,telefone,whatsapp,email,rua,numero,bairro,cidade,estado,cep)').order('created_at',{ascending:false});
   if(filtro==='pendente')q=q.neq('etapa','Finalizado');
   else if(filtro)q=q.eq('etapa',filtro);
   const{data,error}=await q.limit(100);
@@ -9113,14 +9113,24 @@ function verFichaAlvara(id){
         </div>
       </div>
     </div>
+    ${secao('Identificação',[
+      campo('Processo',a.processos?.numero),campo('Vara',a.processos?.vara),campo('Comarca',a.processos?.comarca)
+    ].join(''))}
     ${secao('Contato do cliente',[
       campo('CPF/CNPJ',c.cpf_cnpj),campo('Telefone',c.telefone),campo('WhatsApp',c.whatsapp),
       campo('E-mail',c.email)
     ].join('')+(endereco?`<div style="grid-column:1/-1">${campo('Endereço',endereco)}</div>`:''))}
+    ${secao('Valores',[
+      campo('Valor depositado (bruto)',fmtMoeda(a.valor)),
+      campo('Taxas/impostos retidos',a.valor_taxas!=null?fmtMoeda(a.valor_taxas):''),
+      campo('Valor líquido levantado',a.valor_liquido!=null?fmtMoeda(a.valor_liquido):'')
+    ].join(''))}
     ${secao('Dados do alvará',[
       campo('Conta bancária (recebimento)',a.conta_bancaria),
       campo('Data prevista',a.data_prevista?new Date(a.data_prevista+'T12:00:00').toLocaleDateString('pt-BR'):''),
-      campo('Data de recebimento',a.data_recebimento?new Date(a.data_recebimento+'T12:00:00').toLocaleDateString('pt-BR'):'')
+      campo('Data de recebimento',a.data_recebimento?new Date(a.data_recebimento+'T12:00:00').toLocaleDateString('pt-BR'):''),
+      campo('Baixa contábil',a.baixa_contabil?`Feita${a.baixa_contabil_em?' em '+new Date(a.baixa_contabil_em+'T12:00:00').toLocaleDateString('pt-BR'):''}`:'Pendente'),
+      a.link_comprovante?`<div><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.02em">Comprovante</span><div style="margin-top:3px;font-size:14px"><a href="${escHtml(a.link_comprovante)}" target="_blank" style="color:var(--gold)">Abrir comprovante ↗</a></div></div>`:''
     ].join(''))}
     ${a.observacoes?`<div class="card"><div class="card-body">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin-bottom:8px">Observações</div>
@@ -9139,8 +9149,12 @@ async function novoAlvara(){
       <div class="form-field"><label>Cliente</label>${clienteSearchHtml()}</div>
     </div>
     <div class="form-row">
-      <div class="form-field"><label>Valor (R$) *</label><input type="number" step="0.01" name="valor"></div>
+      <div class="form-field"><label>Valor depositado/bruto (R$) *</label><input type="number" step="0.01" name="valor"></div>
       <div class="form-field"><label>Conta Bancária</label><input name="conta_bancaria" placeholder="Banco, ag., cc."></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Taxas/impostos retidos (R$)</label><input type="number" step="0.01" name="valor_taxas"></div>
+      <div class="form-field"><label>Valor líquido levantado (R$)</label><input type="number" step="0.01" name="valor_liquido"></div>
     </div>
     <div class="form-row">
       <div class="form-field"><label>Data Prevista</label><input type="date" name="data_prevista"></div>
@@ -9148,13 +9162,17 @@ async function novoAlvara(){
         <select name="etapa">${ETAPAS_ALVARA.map(e=>`<option>${e}</option>`).join('')}</select>
       </div>
     </div>
+    <div class="form-field"><label>Comprovante (link)</label><input name="link_comprovante" placeholder="Link do extrato/comprovante de recebimento"></div>
     <div class="form-field"><label>Observações</label><textarea name="observacoes"></textarea></div>
   </form>`,async()=>{
     const d=coletarForm('form-alvara');
     if(!d.processo_id||!d.valor){toast('Informe processo e valor.','erro');return false;}
     if(!d.cliente_id)delete d.cliente_id;
     if(!d.data_prevista)delete d.data_prevista;
+    if(!d.link_comprovante)delete d.link_comprovante;
     d.valor=parseFloat(d.valor);
+    if(d.valor_taxas)d.valor_taxas=parseFloat(d.valor_taxas);else delete d.valor_taxas;
+    if(d.valor_liquido)d.valor_liquido=parseFloat(d.valor_liquido);else delete d.valor_liquido;
     const{error}=await supa.from('alvaras').insert([d]);
     if(error){toast('Erro: '+error.message,'erro');return false;}
     toast('Alvará cadastrado!','ok');carregarAlvaras(document.getElementById('alv-filtro')?.value||'');
@@ -9181,8 +9199,12 @@ async function editarAlvara(id){
       <div class="form-field"><label>Cliente</label>${clienteSearchHtml(a.cliente_id)}</div>
     </div>
     <div class="form-row">
-      <div class="form-field"><label>Valor (R$)</label><input type="number" step="0.01" name="valor" value="${a.valor||''}"></div>
+      <div class="form-field"><label>Valor depositado/bruto (R$)</label><input type="number" step="0.01" name="valor" value="${a.valor||''}"></div>
       <div class="form-field"><label>Conta Bancária</label><input name="conta_bancaria" value="${escHtml(a.conta_bancaria||'')}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Taxas/impostos retidos (R$)</label><input type="number" step="0.01" name="valor_taxas" value="${a.valor_taxas??''}"></div>
+      <div class="form-field"><label>Valor líquido levantado (R$)</label><input type="number" step="0.01" name="valor_liquido" value="${a.valor_liquido??''}"></div>
     </div>
     <div class="form-row">
       <div class="form-field"><label>Data Prevista</label><input type="date" name="data_prevista" value="${a.data_prevista||''}"></div>
@@ -9191,6 +9213,11 @@ async function editarAlvara(id){
     <div class="form-field"><label>Etapa</label>
       <select name="etapa">${ETAPAS_ALVARA.map(e=>`<option ${a.etapa===e?'selected':''}>${e}</option>`).join('')}</select>
     </div>
+    <div class="form-field"><label>Comprovante (link)</label><input name="link_comprovante" value="${escHtml(a.link_comprovante||'')}" placeholder="Link do extrato/comprovante de recebimento"></div>
+    <div class="form-row" style="align-items:center">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" name="baixa_contabil" ${a.baixa_contabil?'checked':''}> Baixa contábil feita (conciliado no fluxo de caixa)</label>
+      <div class="form-field"><label>Data da baixa</label><input type="date" name="baixa_contabil_em" value="${a.baixa_contabil_em||''}"></div>
+    </div>
     <div class="form-field"><label>Observações</label><textarea name="observacoes">${escHtml(a.observacoes||'')}</textarea></div>
   </form>`,async()=>{
     const d=coletarForm('form-alvara');
@@ -9198,7 +9225,12 @@ async function editarAlvara(id){
     if(!d.cliente_id)delete d.cliente_id;
     if(!d.data_prevista)delete d.data_prevista;
     if(!d.data_recebimento)delete d.data_recebimento;
+    if(!d.link_comprovante)delete d.link_comprovante;
+    if(!d.baixa_contabil_em)delete d.baixa_contabil_em;
+    d.baixa_contabil=!!document.querySelector('#form-alvara [name="baixa_contabil"]')?.checked;
     if(d.valor)d.valor=parseFloat(d.valor);
+    if(d.valor_taxas)d.valor_taxas=parseFloat(d.valor_taxas);else delete d.valor_taxas;
+    if(d.valor_liquido)d.valor_liquido=parseFloat(d.valor_liquido);else delete d.valor_liquido;
     const{error}=await supa.from('alvaras').update(d).eq('id',id);
     if(error){toast('Erro: '+error.message,'erro');return false;}
     toast('Alvará atualizado!','ok');carregarAlvaras(document.getElementById('alv-filtro')?.value||'');
