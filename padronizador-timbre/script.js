@@ -11,7 +11,7 @@
     ["enderecamento", "Endereçamento"], ["identificacao", "Identificação"],
     ["titulo", "Título"], ["capitulo", "Capítulo"], ["subcapitulo", "Subcapítulo"],
     ["corpo", "Corpo"], ["citacao", "Citação"], ["figura", "Figura"],
-    ["legenda", "Legenda"], ["pedidos", "Pedidos"], ["fechamento", "Fechamento"],
+    ["legenda", "Legenda"], ["fechamento", "Fechamento"],
     ["data", "Data / local"], ["assinatura", "Assinatura"], ["tabela", "Tabela"],
     ["espaco", "Espaço"], ["outro", "Outro / conferir"]
   ];
@@ -20,11 +20,11 @@
   const TYPE_COLORS = {
     enderecamento: "#6b7280", identificacao: "#0ea5e9", titulo: "#002060", capitulo: "#002060",
     subcapitulo: "#1d4ed8", corpo: "#94a3b8", citacao: "#f59e0b", figura: "#7c3aed",
-    legenda: "#a855f7", pedidos: "#16a34a", fechamento: "#0891b2", data: "#0891b2",
+    legenda: "#a855f7", fechamento: "#0891b2", data: "#0891b2",
     assinatura: "#be185d", tabela: "#475569", espaco: "#cbd5e1", outro: "#ef4444"
   };
   // Chips principais mostrados em cada bloco (na ordem do documento); o resto vai no "⋯ mais".
-  const CHIP_KINDS = ["enderecamento", "identificacao", "titulo", "capitulo", "subcapitulo", "corpo", "citacao", "pedidos", "fechamento", "data", "assinatura"];
+  const CHIP_KINDS = ["enderecamento", "identificacao", "titulo", "capitulo", "subcapitulo", "corpo", "citacao", "fechamento", "data", "assinatura"];
   const REST_KINDS = TYPES.map(([v]) => v).filter((v) => !CHIP_KINDS.includes(v));
 
   /* Fonte única dos modelos: a seleção aponta para esta configuração. */
@@ -150,7 +150,7 @@
     setText("model-rule-summary", config.summary);
     const rules = $("rules-list");
     if (state.modelId === "bipartida") {
-      rules.innerHTML = "<li><span>01</span><span>Aplica toda a matriz textual Becker por tipo de bloco (corpo, capítulo, citação, pedidos…).</span></li><li><span>02</span><span>Cabeçalho, rodapé, imagens e estilos vêm da matriz carregada.</span></li><li><span>03</span><span>Quebra de página obrigatória logo após a assinatura.</span></li>";
+      rules.innerHTML = "<li><span>01</span><span>Aplica toda a matriz textual Becker por tipo de bloco (corpo, capítulo, citação…).</span></li><li><span>02</span><span>Cabeçalho, rodapé, imagens e estilos vêm da matriz carregada.</span></li><li><span>03</span><span>Quebra de página obrigatória logo após a assinatura.</span></li>";
     } else {
       rules.innerHTML = "<li><span>01</span><span>Corpo Calibri 12 (1ª linha 6 cm); citação Calibri 10; capítulos em faixa azul.</span></li><li><span>02</span><span>Cabeçalho, rodapé, imagens e estilos vêm da matriz carregada.</span></li><li><span>03</span><span>Blocos ambíguos ficam visíveis para conferência manual.</span></li>";
     }
@@ -322,7 +322,7 @@
 
   const STRUCTURAL_KINDS = new Set([
     "enderecamento", "identificacao", "titulo", "capitulo", "subcapitulo",
-    "pedidos", "fechamento", "data", "assinatura", "figura", "legenda", "tabela"
+    "fechamento", "data", "assinatura", "figura", "legenda", "tabela"
   ]);
   // --- marcadores (em forma normalizada: MAIÚSCULAS, sem acento) ---
   const CNJ = /\d{7}[-\s]?\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}/;
@@ -404,7 +404,7 @@
       if (isFirst && text.length < 120 && /(?:AUTOR|REU|RÉU|REQUERENTE|REQUERIDO|APELANTE|APELADO|PARTE)/.test(n) && !PARTES.test(n)) score("identificacao", .5, "partes em posição inicial");
 
       // Item de lista (a/b/c…) → pedido/enumeração, nunca capítulo
-      if (isListItem) score("pedidos", .7, "item de lista de pedidos/enumeração (a, b, c…)");
+      if (isListItem) score("corpo", .7, "item de lista/enumeração (a, b, c…)");
 
       // Capítulo / subcapítulo (títulos de seção)
       if (!isListItem && looksLikeSectionTitle(n) && !isNumberedSub(n) && text.length < 140) score("capitulo", .85, "marcador de capítulo ou seção");
@@ -423,7 +423,7 @@
       else if (indented && !looksLikeSectionTitle(n) && !FECHO_RE.test(n) && !isVocative) score("citacao", .55, "bloco recuado compatível com citação");
 
       // Pedidos
-      if (/^(?:DIANTE\s+DO\s+EXPOSTO|ANTE\s+O\s+EXPOSTO|POR\s+TODO\s+O\s+EXPOSTO|REQUER(?:EMOS|ENTE|IMENTOS)?|PEDE(?:-SE)?\b|PUGNA|REQUER-SE|DIGNEM-SE|ISTO\s+POSTO)/.test(n) || /(?:PEDIDOS|REQUERIMENTOS)\s*:?\s*$/.test(n)) score("pedidos", .8, "vocabulário de pedidos");
+      if (/^(?:DIANTE\s+DO\s+EXPOSTO|ANTE\s+O\s+EXPOSTO|POR\s+TODO\s+O\s+EXPOSTO|REQUER(?:EMOS|ENTE|IMENTOS)?|PEDE(?:-SE)?\b|PUGNA|REQUER-SE|DIGNEM-SE|ISTO\s+POSTO)/.test(n) || /(?:PEDIDOS|REQUERIMENTOS)\s*:?\s*$/.test(n)) score("corpo", .8, "vocabulário de pedidos");
 
       // Fechamento (inclui NESTES/NESSES termos)
       if (FECHO_RE.test(n)) score("fechamento", .96, "fórmula de fechamento");
@@ -489,7 +489,7 @@
       if (!item.text.trim()) { item.kind = "espaco"; return; }
       if (!CNJ.test(n) && (DATE_RE.test(n) || DATE_NUM.test(n)) && item.text.trim().length < 80) { item.kind = "data"; item.confidence = .95; item.needsReview = false; item.reason = "data do fecho da peça"; return; }
       if (OAB_RE.test(n) || looksLikeSignatureName(item.text)) { item.kind = "assinatura"; item.confidence = .92; item.needsReview = false; item.reason = "bloco de assinatura (após o fecho)"; return; }
-      if (looksLikeSectionTitle(n) || VOCATIVE.test(n) || /^(AO|AOS|A|À|AS)\s+(JUIZO|JUÍZO|TRIBUNAL|VARA|EXCELENT)/.test(n) || /RAZOES|EXCELENTISSIMO|MANIFESTA/.test(n) || item.kind === "pedidos" || item.text.trim().length > 160) { inSignature = false; return; }
+      if (looksLikeSectionTitle(n) || VOCATIVE.test(n) || /^(AO|AOS|A|À|AS)\s+(JUIZO|JUÍZO|TRIBUNAL|VARA|EXCELENT)/.test(n) || /RAZOES|EXCELENTISSIMO|MANIFESTA/.test(n) || item.kind === "corpo" || item.text.trim().length > 160) { inSignature = false; return; }
       item.kind = "assinatura"; item.confidence = .85; item.needsReview = false; item.reason = "bloco de assinatura (após o fecho)";
     });
 
@@ -963,7 +963,6 @@
     corpo:         { font: "Calibri", size: 24, bold: false, jc: "both",   left: 0,   firstLine: CM6, before: 240, after: 240 },
     citacao:       { font: "Calibri", size: 20, bold: false, jc: "both",   left: CM6, firstLine: 0,   before: 240, after: 240 },
     legenda:       { font: "Calibri", size: 20, bold: false, jc: "center", left: 0,   firstLine: 0,   before: 120, after: 240 },
-    pedidos:       { font: "Calibri", size: 24, bold: false, jc: "both",   left: 0,   firstLine: CM6, before: 0,   after: 120 },
     fechamento:    { font: "Calibri", size: 24, bold: false, jc: "both",   left: CM6, firstLine: 0,   before: 240, after: 0   },
     data:          { font: "Calibri", size: 24, bold: false, jc: "both",   left: CM6, firstLine: 0,   before: 240, after: 240 },
     assinatura:    { font: "Calibri", size: 24, bold: true,  jc: "both",   left: CM6, firstLine: 0,   before: 0,   after: 0   }
