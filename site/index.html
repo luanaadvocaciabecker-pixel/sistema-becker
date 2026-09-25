@@ -9004,6 +9004,7 @@ async function excluirTarefa(id){
 // ---- ALVARÁS ----
 const ETAPAS_ALVARA=['Valor Depositado','Solicitado','Emitido','A Receber','Financeiro Notificado','Recebido','Finalizado'];
 const COR_ETAPA={'Valor Depositado':'#94a3b8','Solicitado':'#f59e0b','Emitido':'#3b82f6','A Receber':'#8b5cf6','Financeiro Notificado':'#f97316','Recebido':'#22c55e','Finalizado':'#16a34a'};
+let alvarasCache=[];
 async function pAlvaras(){
   const c=document.getElementById('conteudo');
   c.innerHTML=`
@@ -9026,10 +9027,11 @@ async function pAlvaras(){
   carregarAlvaras('');
 }
 async function carregarAlvaras(filtro){
-  let q=supa.from('alvaras').select('*,processos(numero),clientes(nome)').order('created_at',{ascending:false});
+  let q=supa.from('alvaras').select('*,processos(numero),clientes(nome,cpf_cnpj,telefone,whatsapp,email,rua,numero,bairro,cidade,estado,cep)').order('created_at',{ascending:false});
   if(filtro==='pendente')q=q.neq('etapa','Finalizado');
   else if(filtro)q=q.eq('etapa',filtro);
   const{data,error}=await q.limit(100);
+  alvarasCache=data||[];
   const tb=document.getElementById('alv-tbody');
   const res=document.getElementById('alv-resumo');
   if(error){
@@ -9061,7 +9063,7 @@ async function carregarAlvaras(filtro){
     const proxEtapa=idx>=0&&idx<ETAPAS_ALVARA.length-1?ETAPAS_ALVARA[idx+1]:null;
     return`<tr>
       <td style="font-family:monospace;font-size:12px;color:var(--blue,#3d8ef0)">${a.processos?.numero||'—'}</td>
-      <td>${a.clientes?.nome||'—'}</td>
+      <td>${a.clientes?.nome||'—'}${a.clientes?.cpf_cnpj||a.clientes?.telefone?`<div style="font-size:11px;color:#94a3b8;margin-top:2px">${[a.clientes?.cpf_cnpj,a.clientes?.telefone].filter(Boolean).join(' · ')}</div>`:''}</td>
       <td><strong>${fmtMoeda(a.valor)}</strong></td>
       <td style="font-size:12px">${a.conta_bancaria||'—'}</td>
       <td style="font-size:12px">${a.data_prevista?new Date(a.data_prevista+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
@@ -9073,11 +9075,39 @@ async function carregarAlvaras(filtro){
       </td>
       <td style="display:flex;gap:4px;align-items:center">
         ${proxEtapa?`<button class="btn btn-sm" style="background:${cor}22;color:${cor};border:1px solid ${cor}44;white-space:nowrap" onclick="avancarAlvara('${a.id}','${proxEtapa}')">→ ${proxEtapa}</button>`:'<span style="font-size:11px;color:#22c55e">✅ Finalizado</span>'}
+        <button class="btn-icon" title="Ficha completa (dados do cliente pro financeiro)" onclick="verFichaAlvara('${a.id}')">📋</button>
         <button class="btn-icon" onclick="editarAlvara('${a.id}')">✏️</button>
         <button class="btn-icon" onclick="excluirAlvara('${a.id}')">🗑️</button>
       </td>
     </tr>`;
   }).join('');
+}
+// Ficha completa do alvará pro financeiro — pedido dela em 26/09/2026: os dados do cliente
+// (CPF/CNPJ, telefone, endereço) já existem no cadastro, não precisa digitar de novo, só
+// juntar tudo numa tela só pra montar o relatório.
+function verFichaAlvara(id){
+  const a=(alvarasCache||[]).find(x=>String(x.id)===String(id));
+  if(!a){toast('Não encontrado.','erro');return;}
+  const c=a.clientes||{};
+  const endereco=[c.rua&&c.numero?`${c.rua}, ${c.numero}`:c.rua,c.bairro,c.cidade&&c.estado?`${c.cidade}/${c.estado}`:c.cidade,c.cep].filter(Boolean).join(' · ');
+  const campo=(lbl,val)=>val?`<div style="margin-bottom:10px"><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">${lbl}</span><div style="margin-top:2px;font-size:14px">${escHtml(val)}</div></div>`:'';
+  abrirModal('Ficha do Alvará',`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      ${campo('Cliente',c.nome)}
+      ${campo('CPF/CNPJ',c.cpf_cnpj)}
+      ${campo('Telefone',c.telefone)}
+      ${campo('WhatsApp',c.whatsapp)}
+      ${campo('E-mail',c.email)}
+      ${campo('Endereço',endereco)}
+      ${campo('Processo',a.processos?.numero)}
+      ${campo('Valor do alvará',fmtMoeda(a.valor))}
+      ${campo('Conta bancária (recebimento)',a.conta_bancaria)}
+      ${campo('Data prevista',a.data_prevista?new Date(a.data_prevista+'T12:00:00').toLocaleDateString('pt-BR'):'')}
+      ${campo('Data de recebimento',a.data_recebimento?new Date(a.data_recebimento+'T12:00:00').toLocaleDateString('pt-BR'):'')}
+      ${campo('Etapa',a.etapa)}
+    </div>
+    ${a.observacoes?`<div style="margin-top:4px"><span style="color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase">Observações</span><div style="margin-top:2px;font-size:13px;white-space:pre-wrap">${escHtml(a.observacoes)}</div></div>`:''}
+  `,null,'Fechar',false,true);
 }
 async function novoAlvara(){
   await carregarTodosClientes();
